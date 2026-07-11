@@ -1,0 +1,25 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {"text": "Hello from Gemini."}
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0,
+      "tokenCount": 5
+    }
+  ],
+  "modelVersion": "gemini-test-version",
+  "responseId": "resp_gemini_text_01",
+  "usageMetadata": {
+    "promptTokenCount": 10,
+    "toolUsePromptTokenCount": 2,
+    "candidatesTokenCount": 5,
+    "thoughtsTokenCount": 3,
+    "cachedContentTokenCount": 4,
+    "totalTokenCount": 20
+  }
+}

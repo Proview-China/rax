@@ -1,0 +1,23 @@
+{
+  "id": "msg_tool_01",
+  "type": "message",
+  "role": "assistant",
+  "model": "claude-sonnet-4-6",
+  "content": [
+    {"type": "thinking", "thinking": "I should check the weather.", "signature": "sig_tool_01"},
+    {"type": "tool_use", "id": "toolu_weather_01", "name": "get_weather", "input": {"city": "Paris"}, "caller": {"type": "direct"}}
+  ],
+  "stop_reason": "tool_use",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 12,
+    "output_tokens": 9,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0,
+    "cache_creation": {"ephemeral_5m_input_tokens": 0, "ephemeral_1h_input_tokens": 0},
+    "output_tokens_details": {"thinking_tokens": 4},
+    "server_tool_use": {"web_fetch_requests": 0, "web_search_requests": 0},
+    "service_tier": "standard",
+    "inference_geo": "global"
+  }
+}

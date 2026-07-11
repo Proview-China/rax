@@ -1,0 +1,31 @@
+{
+  "id": "chat_public",
+  "object": "chat.completion",
+  "created": 1,
+  "model": "test-model",
+  "choices": [
+    {
+      "index": 0,
+      "finish_reason": "stop",
+      "message": {
+        "role": "assistant",
+        "content": "hello chat",
+        "refusal": null,
+        "tool_calls": [
+          {
+            "id": "call_out",
+            "type": "function",
+            "function": {"name": "lookup", "arguments": "{\"city\":\"Rome\"}"}
+          }
+        ]
+      }
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "prompt_tokens_details": {"cached_tokens": 3},
+    "completion_tokens": 7,
+    "completion_tokens_details": {"reasoning_tokens": 2},
+    "total_tokens": 17
+  }
+}

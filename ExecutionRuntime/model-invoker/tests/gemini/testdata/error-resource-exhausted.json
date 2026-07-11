@@ -1,0 +1,13 @@
+{
+  "error": {
+    "code": 429,
+    "message": "quota temporarily exhausted",
+    "status": "RESOURCE_EXHAUSTED",
+    "details": [
+      {
+        "@type": "type.googleapis.com/google.rpc.RetryInfo",
+        "retryDelay": "750ms"
+      }
+    ]
+  }
+}

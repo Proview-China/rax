@@ -1,0 +1,1026 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://praxis.dev/schemas/upstream-catalog/v1",
+  "title": "Praxis upstream catalog v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "praxis.upstream-catalog/v1"
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "route",
+        "maturity",
+        "model_discovery",
+        "official_sources",
+        "evidence",
+        "sdks",
+        "capabilities",
+        "ignored_fields",
+        "extension_fields",
+        "stream_events",
+        "error_dialect",
+        "boundaries",
+        "implementation"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "route": {
+          "$ref": "#/$defs/route"
+        },
+        "maturity": {
+          "enum": [
+            "ga",
+            "preview",
+            "experimental",
+            "unknown"
+          ]
+        },
+        "model_discovery": {
+          "$ref": "#/$defs/catalog_model_discovery"
+        },
+        "official_sources": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/official_source"
+          }
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "sdks": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/sdk"
+          }
+        },
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/capability"
+          }
+        },
+        "ignored_fields": {
+          "$ref": "#/$defs/non_blank_lines"
+        },
+        "extension_fields": {
+          "$ref": "#/$defs/non_blank_lines"
+        },
+        "stream_events": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/non_blank_lines"
+            },
+            {
+              "minItems": 1
+            }
+          ]
+        },
+        "error_dialect": {
+          "$ref": "#/$defs/error_dialect"
+        },
+        "boundaries": {
+          "$ref": "#/$defs/operational_boundaries"
+        },
+        "implementation": {
+          "$ref": "#/$defs/implementation"
+        }
+      }
+    },
+    "route": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "deployment": {
+                "required": [
+                  "region"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "credential": {
+                "required": [
+                  "allowed_regions"
+                ],
+                "properties": {
+                  "allowed_regions": {
+                    "minItems": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      ],
+      "required": [
+        "id",
+        "model",
+        "provider",
+        "offering",
+        "deployment",
+        "protocol",
+        "endpoint",
+        "credential"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "model": {
+          "$ref": "#/$defs/model_identity"
+        },
+        "provider": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "offering": {
+          "$ref": "#/$defs/offering"
+        },
+        "deployment": {
+          "$ref": "#/$defs/deployment"
+        },
+        "protocol": {
+          "$ref": "#/$defs/protocol"
+        },
+        "endpoint": {
+          "$ref": "#/$defs/endpoint"
+        },
+        "credential": {
+          "$ref": "#/$defs/credential"
+        }
+      }
+    },
+    "model_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_family",
+        "provider_model_ref"
+      ],
+      "properties": {
+        "canonical_family": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "provider_model_ref": {
+          "$ref": "#/$defs/non_blank_line"
+        }
+      }
+    },
+    "offering": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "entitlement"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "kind": {
+          "enum": [
+            "pay_as_you_go",
+            "token_plan",
+            "coding_plan",
+            "provisioned",
+            "dedicated",
+            "self_hosted"
+          ]
+        },
+        "entitlement": {
+          "$ref": "#/$defs/entitlement"
+        },
+        "billing_plan": {
+          "$ref": "#/$defs/billing_plan"
+        }
+      }
+    },
+    "billing_plan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "billing_owner",
+        "applies_to_offering_id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "kind": {
+          "const": "savings_plan"
+        },
+        "billing_owner": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "applies_to_offering_id": {
+          "$ref": "#/$defs/stable_id"
+        }
+      }
+    },
+    "entitlement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_usage"
+      ],
+      "properties": {
+        "allowed_usage": {
+          "enum": [
+            "general_api",
+            "interactive_coding_only",
+            "official_client_only"
+          ]
+        },
+        "requires_explicit_context": {
+          "type": "boolean"
+        },
+        "allows_automatic_payg_switch": {
+          "const": false
+        },
+        "client_restrictions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/non_blank_line"
+          }
+        },
+        "subject_policy": {
+          "enum": [
+            "any",
+            "personal_only",
+            "service_only"
+          ]
+        },
+        "tenancy_policy": {
+          "enum": [
+            "any",
+            "single_tenant_only"
+          ]
+        },
+        "execution_policy": {
+          "enum": [
+            "any",
+            "foreground_only"
+          ]
+        },
+        "production_policy": {
+          "enum": [
+            "allowed",
+            "forbidden"
+          ]
+        },
+        "requires_client_identity": {
+          "type": "boolean"
+        },
+        "allowed_client_names": {
+          "$ref": "#/$defs/non_blank_lines"
+        }
+      }
+    },
+    "deployment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "kind": {
+          "enum": [
+            "direct",
+            "cloud_serverless",
+            "cloud_provisioned",
+            "third_party",
+            "self_hosted"
+          ]
+        },
+        "region": {
+          "$ref": "#/$defs/config_ref"
+        },
+        "project_ref": {
+          "$ref": "#/$defs/config_ref"
+        },
+        "workspace_ref": {
+          "$ref": "#/$defs/config_ref"
+        },
+        "resource_ref": {
+          "$ref": "#/$defs/config_ref"
+        },
+        "deployment_name": {
+          "$ref": "#/$defs/config_ref"
+        }
+      }
+    },
+    "protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_./-]{0,127}$"
+        },
+        "api_version": {
+          "type": "string",
+          "pattern": "^[^\\r\\n]*$"
+        }
+      }
+    },
+    "endpoint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "scheme",
+        "host_template",
+        "credential_audience"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "scheme": {
+          "enum": [
+            "https",
+            "http"
+          ]
+        },
+        "host_template": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9*._:{}-]+$"
+        },
+        "base_path": {
+          "type": "string",
+          "pattern": "^$|^/[^\\r\\n?#]*$"
+        },
+        "credential_audience": {
+          "$ref": "#/$defs/non_blank_line"
+        }
+      }
+    },
+    "credential": {
+      "type": "object",
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "not": {
+                  "const": "anonymous"
+                }
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "references",
+              "auth_placement",
+              "allowed_provider_ids",
+              "allowed_offering_ids",
+              "allowed_deployment_ids",
+              "lifecycle"
+            ],
+            "properties": {
+              "references": {
+                "minItems": 1
+              },
+              "auth_placement": {
+                "not": {
+                  "const": "none"
+                }
+              },
+              "allowed_provider_ids": {
+                "minItems": 1
+              },
+              "allowed_offering_ids": {
+                "minItems": 1
+              },
+              "allowed_deployment_ids": {
+                "minItems": 1
+              },
+              "lifecycle": {
+                "not": {
+                  "const": "anonymous"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "anonymous"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "properties": {
+              "references": {
+                "maxItems": 0
+              },
+              "auth_placement": {
+                "const": "none"
+              },
+              "lifecycle": {
+                "const": "anonymous"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "auth_placement": {
+                "const": "header"
+              }
+            },
+            "required": [
+              "auth_placement"
+            ]
+          },
+          "then": {
+            "required": [
+              "auth_header"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "auth_placement": {
+                "const": "query"
+              }
+            },
+            "required": [
+              "auth_placement"
+            ]
+          },
+          "then": {
+            "required": [
+              "auth_parameter"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "const": "sigv4"
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "sigv4_service"
+            ],
+            "properties": {
+              "auth_placement": {
+                "const": "request_signing"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "type": {
+                "enum": [
+                  "oauth",
+                  "entra_id"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ]
+          },
+          "then": {
+            "required": [
+              "scopes"
+            ],
+            "properties": {
+              "scopes": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ],
+      "required": [
+        "id",
+        "type",
+        "audience",
+        "allowed_endpoint_ids"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "type": {
+          "enum": [
+            "api_key",
+            "oauth",
+            "adc",
+            "entra_id",
+            "sigv4",
+            "bearer",
+            "anonymous"
+          ]
+        },
+        "references": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/credential_reference"
+          }
+        },
+        "audience": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "auth_placement": {
+          "enum": [
+            "header",
+            "query",
+            "sdk",
+            "request_signing",
+            "none"
+          ]
+        },
+        "auth_header": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "auth_parameter": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "auth_scheme": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "scopes": {
+          "$ref": "#/$defs/non_blank_lines"
+        },
+        "key_prefixes": {
+          "$ref": "#/$defs/non_blank_lines"
+        },
+        "denied_key_prefixes": {
+          "$ref": "#/$defs/non_blank_lines"
+        },
+        "allowed_provider_ids": {
+          "$ref": "#/$defs/stable_ids"
+        },
+        "allowed_offering_ids": {
+          "$ref": "#/$defs/stable_ids"
+        },
+        "allowed_deployment_ids": {
+          "$ref": "#/$defs/stable_ids"
+        },
+        "allowed_regions": {
+          "$ref": "#/$defs/non_blank_lines"
+        },
+        "allowed_endpoint_ids": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/stable_id"
+          }
+        },
+        "lifecycle": {
+          "enum": [
+            "static",
+            "renewable",
+            "short_lived",
+            "workload_identity",
+            "anonymous"
+          ]
+        },
+        "sigv4_service": {
+          "$ref": "#/$defs/config_ref"
+        }
+      }
+    },
+    "credential_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "store",
+        "name"
+      ],
+      "properties": {
+        "purpose": {
+          "enum": [
+            "api_key",
+            "bearer_token",
+            "client_id",
+            "client_secret",
+            "tenant_id",
+            "access_key_id",
+            "secret_access_key",
+            "session_token",
+            "profile",
+            "workload_identity",
+            "certificate"
+          ]
+        },
+        "store": {
+          "enum": [
+            "env",
+            "vault",
+            "keyring",
+            "aws_secrets_manager",
+            "gcp_secret_manager",
+            "azure_key_vault",
+            "workload_identity"
+          ]
+        },
+        "name": {
+          "$ref": "#/$defs/config_ref"
+        }
+      }
+    },
+    "official_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "publisher",
+        "kind",
+        "url"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "publisher": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "kind": {
+          "enum": [
+            "api_reference",
+            "sdk",
+            "terms",
+            "product_docs",
+            "model_catalog"
+          ]
+        },
+        "url": {
+          "type": "string",
+          "format": "uri",
+          "pattern": "^https://"
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "ttl_class",
+        "checked_at",
+        "valid_until",
+        "digest"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "fresh",
+            "stale",
+            "invalidated",
+            "unverified",
+            "terms_blocked",
+            "deprecated"
+          ]
+        },
+        "ttl_class": {
+          "enum": [
+            "7d",
+            "14d",
+            "30d",
+            "90d"
+          ]
+        },
+        "checked_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "valid_until": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "invalidated_by_source_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256_digest"
+        }
+      }
+    },
+    "sdk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "language",
+        "package",
+        "owner",
+        "ownership",
+        "transport",
+        "version",
+        "license",
+        "official"
+      ],
+      "properties": {
+        "language": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "package": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "owner": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "ownership": {
+          "enum": [
+            "provider_native",
+            "model_vendor",
+            "protocol_upstream",
+            "cloud_native",
+            "community"
+          ]
+        },
+        "transport": {
+          "enum": [
+            "sdk",
+            "http",
+            "sse",
+            "websocket",
+            "grpc",
+            "sidecar"
+          ]
+        },
+        "version": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "license": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "official": {
+          "type": "boolean"
+        }
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "support"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "support": {
+          "enum": [
+            "native",
+            "compatible",
+            "partial",
+            "unsupported",
+            "unknown"
+          ]
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/non_blank_line"
+          }
+        }
+      }
+    },
+    "implementation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "callable"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "research_only",
+            "designed",
+            "planned",
+            "implemented_offline",
+            "live_verified",
+            "production_approved"
+          ]
+        },
+        "callable": {
+          "type": "boolean"
+        },
+        "adapter_id": {
+          "$ref": "#/$defs/stable_id"
+        },
+        "code_paths": {
+          "$ref": "#/$defs/non_blank_lines"
+        },
+        "test_evidence": {
+          "$ref": "#/$defs/non_blank_lines"
+        },
+        "live_evidence": {
+          "$ref": "#/$defs/non_blank_lines"
+        }
+      }
+    },
+    "catalog_model_discovery": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method",
+        "alias_policy"
+      ],
+      "properties": {
+        "method": {
+          "enum": [
+            "runtime_selected",
+            "static_catalog",
+            "provider_api"
+          ]
+        },
+        "alias_policy": {
+          "enum": [
+            "exact_provider_id",
+            "stable_alias",
+            "provider_managed_alias"
+          ]
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/model_alias"
+          }
+        }
+      }
+    },
+    "model_alias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "alias",
+        "provider_model_ref",
+        "stable"
+      ],
+      "properties": {
+        "alias": {
+          "$ref": "#/$defs/config_ref"
+        },
+        "provider_model_ref": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "stable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "error_dialect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "envelope",
+        "code_field",
+        "request_id_headers"
+      ],
+      "properties": {
+        "envelope": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "code_field": {
+          "$ref": "#/$defs/non_blank_line"
+        },
+        "request_id_headers": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/non_blank_lines"
+            },
+            {
+              "minItems": 1
+            }
+          ]
+        },
+        "retry_headers": {
+          "$ref": "#/$defs/non_blank_lines"
+        }
+      }
+    },
+    "operational_boundaries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "production",
+        "quota",
+        "expiry"
+      ],
+      "properties": {
+        "production": {
+          "enum": [
+            "requires_review",
+            "allowed",
+            "prohibited",
+            "unknown"
+          ]
+        },
+        "quota": {
+          "enum": [
+            "provider_account",
+            "subscription_window",
+            "provisioned_capacity",
+            "self_hosted",
+            "unknown"
+          ]
+        },
+        "expiry": {
+          "enum": [
+            "credential_or_account",
+            "subscription_period",
+            "none",
+            "unknown"
+          ]
+        }
+      }
+    },
+    "stable_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._/-]{0,127}$"
+    },
+    "config_ref": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:/-]{0,255}$"
+    },
+    "stable_ids": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/stable_id"
+      }
+    },
+    "sha256_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "non_blank_line": {
+      "type": "string",
+      "pattern": "^(?=.*\\S)[^\\r\\n]+$"
+    },
+    "non_blank_lines": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/non_blank_line"
+      }
+    }
+  }
+}

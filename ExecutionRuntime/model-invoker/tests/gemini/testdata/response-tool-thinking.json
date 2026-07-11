@@ -1,0 +1,34 @@
+{
+  "candidates": [
+    {
+      "content": {
+        "role": "model",
+        "parts": [
+          {
+            "text": "I should use the weather tool.",
+            "thought": true,
+            "thoughtSignature": "c2lnX3Rob3VnaHRfMDE="
+          },
+          {
+            "functionCall": {
+              "id": "call_weather_01",
+              "name": "get_weather",
+              "args": {"city": "Paris"}
+            },
+            "thoughtSignature": "c2lnX2NhbGxfMDE="
+          }
+        ]
+      },
+      "finishReason": "STOP",
+      "index": 0
+    }
+  ],
+  "modelVersion": "gemini-test-version",
+  "responseId": "resp_gemini_tool_01",
+  "usageMetadata": {
+    "promptTokenCount": 8,
+    "candidatesTokenCount": 2,
+    "thoughtsTokenCount": 4,
+    "totalTokenCount": 14
+  }
+}

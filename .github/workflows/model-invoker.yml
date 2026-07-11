@@ -1,0 +1,45 @@
+name: model-invoker offline verification
+
+on:
+  pull_request:
+    paths:
+      - "ExecutionRuntime/model-invoker/**"
+      - ".properties.rax/design/model-invoker/provider-matrix.md"
+      - ".github/workflows/model-invoker.yml"
+  push:
+    paths:
+      - "ExecutionRuntime/model-invoker/**"
+      - ".properties.rax/design/model-invoker/provider-matrix.md"
+      - ".github/workflows/model-invoker.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline:
+    name: Go, catalog assets, and integration compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ExecutionRuntime/model-invoker/go.mod
+          cache-dependency-path: ExecutionRuntime/model-invoker/go.sum
+
+      - name: Run offline verification
+        env:
+          OPENAI_API_KEY: ""
+          ANTHROPIC_API_KEY: ""
+          GEMINI_API_KEY: ""
+          XAI_API_KEY: ""
+          PRAXIS_OPENAI_SMOKE: ""
+          PRAXIS_ANTHROPIC_SMOKE: ""
+          PRAXIS_GEMINI_SMOKE: ""
+          PRAXIS_XAI_LIVE_TESTS: ""
+          XAI_SMOKE_MODEL: ""
+        run: bash ExecutionRuntime/model-invoker/scripts/verify-offline.sh

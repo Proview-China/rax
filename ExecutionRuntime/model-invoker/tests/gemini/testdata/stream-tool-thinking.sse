@@ -1,0 +1,8 @@
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello "}]},"index":0}],"modelVersion":"gemini-stream-version","responseId":"resp_gemini_stream_01","usageMetadata":{"promptTokenCount":9,"totalTokenCount":9}}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"text":"checking weather","thought":true,"thoughtSignature":"c2lnX3N0cmVhbV90aG91Z2h0"}]},"index":0}],"modelVersion":"gemini-stream-version","responseId":"resp_gemini_stream_01"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_stream_01","name":"get_weather","args":{"city":"Rome"}},"thoughtSignature":"c2lnX3N0cmVhbV9jYWxs"}]},"index":0}],"modelVersion":"gemini-stream-version","responseId":"resp_gemini_stream_01"}
+
+data: {"candidates":[{"content":{"role":"model","parts":[{"functionCall":{"id":"call_stream_01","name":"get_weather","args":{"city":"Rome"}},"thoughtSignature":"c2lnX3N0cmVhbV9jYWxs"}]},"finishReason":"STOP","index":0}],"modelVersion":"gemini-stream-version","responseId":"resp_gemini_stream_01","usageMetadata":{"promptTokenCount":9,"toolUsePromptTokenCount":2,"candidatesTokenCount":3,"thoughtsTokenCount":4,"cachedContentTokenCount":5,"totalTokenCount":18}}
+
