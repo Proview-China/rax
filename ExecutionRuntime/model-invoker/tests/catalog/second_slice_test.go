@@ -25,6 +25,7 @@ import (
 	mimoadapter "github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/mimo"
 	minimaxadapter "github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/minimax"
 	openaiadapter "github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/openai"
+	planadapter "github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/plancompat"
 	qwenadapter "github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/qwen"
 	vertexadapter "github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/vertex"
 	xaiadapter "github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/xai"
@@ -54,14 +55,25 @@ func TestDefaultCatalogRuntimeBindingsDependenciesAndArtifactsMatchLiveModule(t 
 	moduleVersions := dependencyVersions(t, root)
 	for _, entry := range document.Entries {
 		if entry.Implementation.Callable {
-			if got, want := entry.Implementation.AdapterID, wantAdapters[entry.Route.Provider]; got != want {
+			want := wantAdapters[entry.Route.Provider]
+			switch entry.Route.Offering.ID {
+			case "kimi.code-membership":
+				want = string(planadapter.KimiCodeProvider)
+			case "minimax.token-plan":
+				want = string(planadapter.MiniMaxTokenProvider)
+			case "mimo.token-plan":
+				want = string(planadapter.MiMoTokenProvider)
+			case "alibaba.coding-plan", "alibaba.token-plan-team":
+				want = string(planadapter.AlibabaPlanProvider)
+			}
+			if got := entry.Implementation.AdapterID; got != want {
 				t.Errorf("route %q adapter ID = %q, want live registry ID %q", entry.ID, got, want)
 			}
 			if _, ok := wantAdapters[entry.Route.Provider]; !ok {
 				t.Errorf("route %q has unexpected callable commercial provider %q", entry.ID, entry.Route.Provider)
 			}
-		} else if entry.Implementation.AdapterID != "" {
-			t.Errorf("non-callable route %q unexpectedly has adapter ID %q", entry.ID, entry.Implementation.AdapterID)
+		} else if entry.Implementation.AdapterID != "" && entry.Implementation.HostActivationRequirement != catalog.HostActivationTrustedSubscriptionAuthorizationResolver {
+			t.Errorf("non-callable route %q unexpectedly has adapter ID %q without a host activation requirement", entry.ID, entry.Implementation.AdapterID)
 		}
 		for _, sdk := range entry.SDKs {
 			if sdk.Transport != catalog.TransportSDK {
@@ -74,6 +86,70 @@ func TestDefaultCatalogRuntimeBindingsDependenciesAndArtifactsMatchLiveModule(t 
 	}
 	if err := catalog.ValidateArtifacts(os.DirFS(root), document); err != nil {
 		t.Fatalf("ValidateArtifacts(live module) error = %v", err)
+	}
+}
+
+func TestDeepSeekCredentialProfilesMatchProtocolWireAuthentication(t *testing.T) {
+	want := map[upstream.RouteID]struct {
+		profile upstream.CredentialProfileID
+		header  string
+		scheme  string
+	}{
+		"deepseek.direct.payg.chat_completions": {profile: "deepseek.default.openai", header: "Authorization", scheme: "Bearer"},
+		"deepseek.direct.payg.messages":         {profile: "deepseek.default.anthropic", header: "x-api-key"},
+	}
+	for _, entry := range catalog.DefaultDocument().Entries {
+		expected, ok := want[entry.ID]
+		if !ok {
+			continue
+		}
+		credential := entry.Route.Credential
+		if credential.ID != expected.profile || credential.AuthHeader != expected.header || credential.AuthScheme != expected.scheme || len(credential.AllowedEndpointIDs) != 1 || credential.AllowedEndpointIDs[0] != entry.Route.Endpoint.ID {
+			t.Errorf("route %q credential = %#v, want profile=%q auth=%q %q endpoint=%q", entry.ID, credential, expected.profile, expected.header, expected.scheme, entry.Route.Endpoint.ID)
+		}
+		delete(want, entry.ID)
+	}
+	if len(want) != 0 {
+		t.Fatalf("DeepSeek credential routes missing: %v", want)
+	}
+}
+
+func TestTenDirectProviderFamiliesUseOfficialExactStaticModelSets(t *testing.T) {
+	want := map[upstream.ProviderID][]string{
+		"openai":                  {"gpt-5.5"},
+		"anthropic":               {"claude-fable-5"},
+		"google.gemini-developer": {"gemini-3.5-flash"},
+		"xai.api":                 {"grok-4.5"},
+		"zai":                     {"glm-5.2"},
+		"deepseek":                {"deepseek-v4-flash", "deepseek-v4-pro"},
+		"kimi":                    {"kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"},
+		"minimax":                 {"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2"},
+		"xiaomi.mimo":             {"mimo-v2.5-pro", "mimo-v2.5"},
+		"alibaba.model-studio":    {"qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"},
+	}
+	seen := make(map[upstream.ProviderID]int, len(want))
+	for _, entry := range catalog.DefaultDocument().Entries {
+		expected, inScope := want[entry.Route.Provider]
+		if !inScope || !entry.Implementation.Callable || entry.Route.Deployment.Kind != upstream.DeploymentDirect || entry.Route.Offering.Kind != upstream.OfferingPayAsYouGo {
+			continue
+		}
+		seen[entry.Route.Provider]++
+		if entry.ModelDiscovery.Method != catalog.ModelDiscoveryStaticCatalog || entry.ModelDiscovery.AliasPolicy != catalog.ModelAliasExactProviderID || entry.Route.Model.ProviderModelRef != expected[0] {
+			t.Errorf("route %q model gate = %#v / %q", entry.ID, entry.ModelDiscovery, entry.Route.Model.ProviderModelRef)
+			continue
+		}
+		actual := make([]string, 0, len(entry.ModelDiscovery.Aliases))
+		for _, alias := range entry.ModelDiscovery.Aliases {
+			actual = append(actual, alias.ProviderModelRef)
+		}
+		if !reflect.DeepEqual(actual, expected) {
+			t.Errorf("route %q exact models = %v, want %v", entry.ID, actual, expected)
+		}
+	}
+	for provider := range want {
+		if seen[provider] == 0 {
+			t.Errorf("provider %q has no callable direct PAYG exact-model route", provider)
+		}
 	}
 }
 
@@ -210,6 +286,11 @@ func TestEvidenceTTLBoundariesInvalidationAndDigest(t *testing.T) {
 	}
 	document := catalog.DefaultDocument()
 	validUntil := document.Entries[0].Evidence.ValidUntil
+	for _, entry := range document.Entries[1:] {
+		if entry.Evidence.ValidUntil.Before(validUntil) {
+			validUntil = entry.Evidence.ValidUntil
+		}
+	}
 	if err := catalog.Validate(document, validUntil.Add(-time.Nanosecond)); err != nil {
 		t.Fatalf("Validate(just before expiry) error = %v", err)
 	}

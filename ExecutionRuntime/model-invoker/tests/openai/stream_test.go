@@ -138,14 +138,18 @@ func TestPublicResponsesStreamFailureModes(t *testing.T) {
 		{
 			name: "invalid completed arguments",
 			events: []string{
-				`{"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"id":"item_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}`,
-				`{"type":"response.function_call_arguments.done","sequence_number":2,"item_id":"item_1","output_index":0,"name":"lookup","arguments":"not-json"}`,
+				`{"type":"response.created","sequence_number":1,"response":{"id":"resp_invalid","model":"test-model","status":"in_progress","output":[]}}`,
+				`{"type":"response.output_item.added","sequence_number":2,"output_index":0,"item":{"id":"item_1","type":"function_call","call_id":"call_1","name":"lookup","arguments":""}}`,
+				`{"type":"response.function_call_arguments.done","sequence_number":3,"item_id":"item_1","output_index":0,"name":"lookup","arguments":"not-json"}`,
 			},
 			wantKind: modelinvoker.ErrorMapping,
 		},
 		{
-			name:     "missing terminal event",
-			events:   []string{`{"type":"response.output_text.delta","sequence_number":1,"delta":"partial"}`},
+			name: "missing terminal event",
+			events: []string{
+				`{"type":"response.created","sequence_number":1,"response":{"id":"resp_partial","model":"test-model","status":"in_progress","output":[]}}`,
+				`{"type":"response.output_text.delta","sequence_number":2,"delta":"partial"}`,
+			},
 			wantKind: modelinvoker.ErrorStreamInterrupted,
 		},
 	}

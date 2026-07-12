@@ -39,8 +39,10 @@ func New(c Config) (*Adapter, error) {
 	if err := c.validate(); err != nil {
 		return nil, red.Error(providerError(modelinvoker.ErrorInvalidRequest, "configure", err.Error()))
 	}
+	root, _ := c.trustedRootEndpoint()
+	c.ResourceEndpoint = root
 	chatClient, responsesClient := newV1Clients(c)
-	root := strings.TrimRight(c.root(), "/")
+	root = strings.TrimRight(root, "/")
 	v1Endpoint := root + "/openai/v1"
 	chatBinding, err := protocol.NewBinding(ProviderID, modelinvoker.ProtocolChatCompletions, v1Endpoint, "x-request-id", "apim-request-id")
 	if err != nil {
@@ -83,6 +85,29 @@ func (a *Adapter) add(key string, b protocol.Binding) {
 }
 func (a *Adapter) ID() modelinvoker.ProviderID            { return ProviderID }
 func (a *Adapter) DefaultProtocol() modelinvoker.Protocol { return modelinvoker.ProtocolResponses }
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, requested string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	canonical := adaptercore.NormalizeEndpoint(requested)
+	if protocolID == modelinvoker.ProtocolResponses {
+		endpoint, ok := a.endpoints[v1ResponsesKey]
+		return endpoint, ok && canonical == endpoint
+	}
+	if protocolID != modelinvoker.ProtocolChatCompletions {
+		return "", false
+	}
+	if endpoint := a.endpoints[v1ChatKey]; endpoint != "" && canonical == endpoint {
+		return endpoint, true
+	}
+	if endpoint := a.endpoints[legacyChatKey]; endpoint != "" {
+		legacyBase := strings.TrimSuffix(endpoint, "/"+urlPathSegment(a.deployment))
+		if canonical == legacyBase {
+			return endpoint, true
+		}
+	}
+	return "", false
+}
 func (a *Adapter) selectDriver(r modelinvoker.Request) (protocol.Driver, protocol.Binding, bool) {
 	if a == nil {
 		return nil, protocol.Binding{}, false
@@ -129,7 +154,7 @@ func (a *Adapter) Capabilities(ctx context.Context, q modelinvoker.CapabilityQue
 	contract := adaptercore.UnsupportedContract("capability must be verified for the configured Azure deployment, region, and GA/Preview state")
 	adaptercore.SetSupport(contract, q, modelinvoker.SupportCompatible, "mapped through Azure OpenAI", modelinvoker.CapabilityTextGeneration, modelinvoker.CapabilityStreaming, modelinvoker.CapabilityToolCalling, modelinvoker.CapabilityUsageReporting)
 	if key == v1ResponsesKey {
-		contract[modelinvoker.CapabilityServerState] = adaptercore.QuerySupport(q, modelinvoker.SupportCompatible, "Azure OpenAI v1 Responses state is deployment-dependent")
+		contract[modelinvoker.CapabilityServerState] = adaptercore.QuerySupport(q, modelinvoker.SupportPartial, "Azure OpenAI v1 Responses state is deployment-dependent and requires explicit degradation acceptance")
 	}
 	return contract, nil
 }
@@ -154,7 +179,11 @@ func (a *Adapter) Invoke(ctx context.Context, r modelinvoker.Request) (out model
 		return out, providerError(modelinvoker.ErrorInvalidRequest, "invoke", "unsupported protocol")
 	}
 	r.Stream = false
-	return d.Invoke(ctx, r)
+	out, err = d.Invoke(ctx, r)
+	if err == nil {
+		out.Model = r.Model
+	}
+	return out, err
 }
 func (a *Adapter) Stream(ctx context.Context, r modelinvoker.Request) (out modelinvoker.Stream, err error) {
 	d, b, ok := a.selectDriver(r)
@@ -177,10 +206,57 @@ func (a *Adapter) Stream(ctx context.Context, r modelinvoker.Request) (out model
 		return nil, providerError(modelinvoker.ErrorInvalidRequest, "stream", "unsupported protocol")
 	}
 	r.Stream = true
-	return d.Stream(ctx, r)
+	out, err = d.Stream(ctx, r)
+	if err == nil {
+		out = &deploymentModelStream{inner: out, deployment: r.Model}
+	}
+	return out, err
 }
+
+// deploymentModelStream projects Azure's selected deployment identity onto
+// portable responses. The compatibility protocol's native model remains only
+// in raw audit data and is deliberately not treated as an exact verification.
+type deploymentModelStream struct {
+	inner      modelinvoker.Stream
+	deployment string
+	current    modelinvoker.StreamEvent
+}
+
+func (stream *deploymentModelStream) Next() bool {
+	if stream == nil || stream.inner == nil || !stream.inner.Next() {
+		return false
+	}
+	stream.current = stream.inner.Event()
+	if stream.current.Response != nil {
+		response := *stream.current.Response
+		response.Model = stream.deployment
+		stream.current.Response = &response
+	}
+	return true
+}
+func (stream *deploymentModelStream) Event() modelinvoker.StreamEvent {
+	if stream == nil {
+		return modelinvoker.StreamEvent{}
+	}
+	return stream.current
+}
+func (stream *deploymentModelStream) Err() error {
+	if stream == nil || stream.inner == nil {
+		return nil
+	}
+	return stream.inner.Err()
+}
+func (stream *deploymentModelStream) Close() error {
+	if stream == nil || stream.inner == nil {
+		return nil
+	}
+	return stream.inner.Close()
+}
+
 func providerError(k modelinvoker.ErrorKind, op, msg string) *modelinvoker.Error {
 	return &modelinvoker.Error{Kind: k, Provider: ProviderID, Operation: op, Message: msg}
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ modelinvoker.Stream = (*deploymentModelStream)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

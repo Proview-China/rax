@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	directCheckedAt  = time.Date(2026, 7, 10, 18, 0, 0, 0, time.UTC)
+	directCheckedAt  = time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
 	directValidUntil = directCheckedAt.Add(7 * 24 * time.Hour)
 )
 
@@ -47,6 +47,7 @@ func xAIAPIEntry() Entry {
 		Sources: []OfficialSource{
 			{ID: "xai.responses.2026-07-11", Publisher: "xAI", Kind: SourceAPIReference, URL: "https://docs.x.ai/developers/rest-api-reference/inference/chat"},
 			{ID: "xai.grok-4.5.2026-07-11", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/grok-4-5"},
+			{ID: "xai.function-calling.2026-07-11", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/tools/function-calling"},
 			{ID: "xai.reasoning.2026-07-11", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/model-capabilities/text/reasoning"},
 			{ID: "xai.errors.2026-07-11", Publisher: "xAI", Kind: SourceAPIReference, URL: "https://docs.x.ai/developers/debugging"},
 			{ID: "xai.prompt-cache.2026-07-11", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits"},
@@ -77,6 +78,7 @@ func xAIAPIEntry() Entry {
 
 func qwenPlatformEntries() []Entry {
 	const providerID upstream.ProviderID = "alibaba.model-studio"
+	models := []string{"qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"}
 	offering := cloudPAYGOffering("alibaba.model-studio.payg")
 	sources := []OfficialSource{
 		{ID: "alibaba.qwen.reference.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://www.alibabacloud.com/help/en/model-studio/qwen-api-reference"},
@@ -149,8 +151,8 @@ func qwenPlatformEntries() []Entry {
 			}
 			entry := Entry{
 				ID:       routeID,
-				Route:    upstream.UpstreamRoute{ID: routeID, Model: upstream.ModelIdentity{CanonicalFamily: "qwen", ProviderModelRef: "runtime_selected_approved_text_alias"}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: protocolID, APIVersion: "model-studio-2026-07-11"}, Endpoint: endpoint, Credential: credential},
-				Maturity: MaturityUnknown, ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
+				Route:    upstream.UpstreamRoute{ID: routeID, Model: upstream.ModelIdentity{CanonicalFamily: "qwen", ProviderModelRef: models[0]}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: protocolID, APIVersion: "model-studio-2026-07-11"}, Endpoint: endpoint, Credential: credential},
+				Maturity: MaturityUnknown, ModelDiscovery: exactProviderModels(models),
 				Sources: sources, Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: directCheckedAt, ValidUntil: directValidUntil},
 				SDKs: []SDKMetadata{openAISDK()}, Capabilities: capabilities, IgnoredFields: ignored, ExtensionFields: extensions,
 				StreamEvents: streamEvents, ErrorDialect: ErrorDialect{Envelope: "openai.error", CodeField: "error.code", RequestIDHeaders: []string{"x-request-id", "request-id", "x-dashscope-request-id"}, RetryHeaders: []string{"retry-after"}},
@@ -165,6 +167,7 @@ func qwenPlatformEntries() []Entry {
 
 func mimoPlatformEntries() []Entry {
 	const providerID upstream.ProviderID = "xiaomi.mimo"
+	models := []string{"mimo-v2.5-pro", "mimo-v2.5"}
 	offering := cloudPAYGOffering("xiaomi.mimo.payg")
 	deployment := upstream.Deployment{ID: "xiaomi.mimo.global", Kind: upstream.DeploymentDirect, Region: "global"}
 	sources := []OfficialSource{
@@ -239,8 +242,8 @@ func mimoPlatformEntries() []Entry {
 		}
 		entry := Entry{
 			ID:       item.id,
-			Route:    upstream.UpstreamRoute{ID: item.id, Model: upstream.ModelIdentity{CanonicalFamily: "mimo", ProviderModelRef: "runtime_selected_current_v2_5"}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: item.protocol, APIVersion: "mimo-2026-07-11"}, Endpoint: endpoint, Credential: credential},
-			Maturity: MaturityUnknown, ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
+			Route:    upstream.UpstreamRoute{ID: item.id, Model: upstream.ModelIdentity{CanonicalFamily: "mimo", ProviderModelRef: models[0]}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: item.protocol, APIVersion: "mimo-2026-07-11"}, Endpoint: endpoint, Credential: credential},
+			Maturity: MaturityUnknown, ModelDiscovery: exactProviderModels(models),
 			Sources: sources, Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: directCheckedAt, ValidUntil: directValidUntil},
 			SDKs: []SDKMetadata{item.sdk}, Capabilities: capabilities, IgnoredFields: ignored, ExtensionFields: extensions,
 			StreamEvents: streamEvents, ErrorDialect: errorDialect,
@@ -254,6 +257,7 @@ func mimoPlatformEntries() []Entry {
 
 func minimaxPlatformEntries() []Entry {
 	const providerID upstream.ProviderID = "minimax"
+	models := []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed", "MiniMax-M2.5", "MiniMax-M2.5-highspeed", "MiniMax-M2.1", "MiniMax-M2.1-highspeed", "MiniMax-M2"}
 	offering := cloudPAYGOffering("minimax.platform.payg")
 	deployment := upstream.Deployment{ID: "minimax.platform.global", Kind: upstream.DeploymentDirect, Region: "global"}
 	sources := []OfficialSource{
@@ -325,8 +329,8 @@ func minimaxPlatformEntries() []Entry {
 		}
 		entry := Entry{
 			ID:       item.id,
-			Route:    upstream.UpstreamRoute{ID: item.id, Model: upstream.ModelIdentity{CanonicalFamily: "minimax-m", ProviderModelRef: "runtime_selected_current_m3_m2"}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: item.protocol, APIVersion: "minimax-2026-07-11"}, Endpoint: endpoint, Credential: credential},
-			Maturity: MaturityUnknown, ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
+			Route:    upstream.UpstreamRoute{ID: item.id, Model: upstream.ModelIdentity{CanonicalFamily: "minimax-m", ProviderModelRef: models[0]}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: item.protocol, APIVersion: "minimax-2026-07-11"}, Endpoint: endpoint, Credential: credential},
+			Maturity: MaturityUnknown, ModelDiscovery: exactProviderModels(models),
 			Sources: sources, Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: directCheckedAt, ValidUntil: directValidUntil},
 			SDKs: []SDKMetadata{item.sdk}, Capabilities: capabilities, IgnoredFields: ignored, ExtensionFields: extensions,
 			StreamEvents: streamEvents, ErrorDialect: errorDialect,
@@ -339,6 +343,7 @@ func minimaxPlatformEntries() []Entry {
 }
 
 func zaiPlatformEntry() Entry {
+	models := []string{"glm-5.2"}
 	routeID := upstream.RouteID("zai.platform.global.payg.chat_completions")
 	providerID := upstream.ProviderID("zai")
 	offering := cloudPAYGOffering("zai.platform.payg")
@@ -352,12 +357,14 @@ func zaiPlatformEntry() Entry {
 	}
 	entry := Entry{
 		ID:       routeID,
-		Route:    upstream.UpstreamRoute{ID: routeID, Model: upstream.ModelIdentity{CanonicalFamily: "glm", ProviderModelRef: "runtime_selected_current_text"}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: upstream.ProtocolChatCompletions, APIVersion: "paas-v4"}, Endpoint: endpoint, Credential: credential},
-		Maturity: MaturityUnknown, ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
+		Route:    upstream.UpstreamRoute{ID: routeID, Model: upstream.ModelIdentity{CanonicalFamily: "glm", ProviderModelRef: models[0]}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: upstream.ProtocolChatCompletions, APIVersion: "paas-v4"}, Endpoint: endpoint, Credential: credential},
+		Maturity: MaturityUnknown, ModelDiscovery: exactProviderModels(models),
 		Sources: []OfficialSource{
 			{ID: "zai.introduction.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/api-reference/introduction"},
 			{ID: "zai.chat.2026-07-11", Publisher: "Z.AI", Kind: SourceAPIReference, URL: "https://docs.z.ai/api-reference/llm/chat-completion"},
 			{ID: "zai.thinking.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/guides/capabilities/thinking-mode"},
+			{ID: "zai.function-calling.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/guides/capabilities/function-calling"},
+			{ID: "zai.streaming.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/guides/capabilities/streaming"},
 			{ID: "zai.errors.2026-07-11", Publisher: "Z.AI", Kind: SourceAPIReference, URL: "https://docs.z.ai/api-reference/api-code"},
 		},
 		Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: directCheckedAt, ValidUntil: directValidUntil},
@@ -379,6 +386,7 @@ func zaiPlatformEntry() Entry {
 }
 
 func kimiPlatformEntry() Entry {
+	models := []string{"kimi-k2.7-code", "kimi-k2.7-code-highspeed", "kimi-k2.6", "kimi-k2.5", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k"}
 	routeID := upstream.RouteID("kimi.platform.cn.payg.chat_completions")
 	providerID := upstream.ProviderID("kimi")
 	offering := cloudPAYGOffering("kimi.platform.payg")
@@ -392,8 +400,8 @@ func kimiPlatformEntry() Entry {
 	}
 	entry := Entry{
 		ID:       routeID,
-		Route:    upstream.UpstreamRoute{ID: routeID, Model: upstream.ModelIdentity{CanonicalFamily: "kimi", ProviderModelRef: "runtime_selected_current_text"}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: upstream.ProtocolChatCompletions, APIVersion: "kimi-2026-07-11"}, Endpoint: endpoint, Credential: credential},
-		Maturity: MaturityUnknown, ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
+		Route:    upstream.UpstreamRoute{ID: routeID, Model: upstream.ModelIdentity{CanonicalFamily: "kimi", ProviderModelRef: models[0]}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: upstream.ProtocolChatCompletions, APIVersion: "kimi-2026-07-11"}, Endpoint: endpoint, Credential: credential},
+		Maturity: MaturityUnknown, ModelDiscovery: exactProviderModels(models),
 		Sources: []OfficialSource{
 			{ID: "kimi.platform.overview.2026-07-11", Publisher: "Moonshot AI", Kind: SourceProductDocs, URL: "https://platform.kimi.com/docs/api/overview"},
 			{ID: "kimi.platform.models.2026-07-11", Publisher: "Moonshot AI", Kind: SourceProductDocs, URL: "https://platform.kimi.com/docs/models"},
@@ -423,19 +431,30 @@ func kimiPlatformEntry() Entry {
 
 func deepSeekEntries() []Entry {
 	const providerID upstream.ProviderID = "deepseek"
+	models := []string{"deepseek-v4-flash", "deepseek-v4-pro"}
 	offering := cloudPAYGOffering("deepseek.api.payg")
 	deployment := upstream.Deployment{ID: "deepseek.direct.global", Kind: upstream.DeploymentDirect, Region: "global"}
 	endpoints := map[upstream.ProtocolID]upstream.Endpoint{
 		upstream.ProtocolChatCompletions: {ID: "deepseek.openai", Scheme: "https", HostTemplate: "api.deepseek.com", CredentialAudience: "api.deepseek.com"},
 		upstream.ProtocolMessages:        {ID: "deepseek.anthropic", Scheme: "https", HostTemplate: "api.deepseek.com", BasePath: "/anthropic", CredentialAudience: "api.deepseek.com"},
 	}
-	credential := upstream.CredentialProfile{
-		ID: "deepseek.default", Type: upstream.CredentialAPIKey,
-		References: []upstream.CredentialReference{{Purpose: upstream.CredentialPurposeAPIKey, Store: "env", Name: "DEEPSEEK_API_KEY"}},
-		Audience:   "api.deepseek.com", AuthPlacement: upstream.AuthPlacementHeader, AuthHeader: "Authorization", AuthScheme: "Bearer",
-		Lifecycle: upstream.CredentialLifecycleStatic, AllowedProviderIDs: []upstream.ProviderID{providerID},
-		AllowedOfferingIDs: []upstream.OfferingID{offering.ID}, AllowedDeploymentIDs: []upstream.DeploymentID{deployment.ID},
-		AllowedRegions: []string{"global"}, AllowedEndpointIDs: []upstream.EndpointID{"deepseek.openai", "deepseek.anthropic"},
+	credentials := map[upstream.ProtocolID]upstream.CredentialProfile{
+		upstream.ProtocolChatCompletions: {
+			ID: "deepseek.default.openai", Type: upstream.CredentialAPIKey,
+			References: []upstream.CredentialReference{{Purpose: upstream.CredentialPurposeAPIKey, Store: "env", Name: "DEEPSEEK_API_KEY"}},
+			Audience:   "api.deepseek.com", AuthPlacement: upstream.AuthPlacementHeader, AuthHeader: "Authorization", AuthScheme: "Bearer",
+			Lifecycle: upstream.CredentialLifecycleStatic, AllowedProviderIDs: []upstream.ProviderID{providerID},
+			AllowedOfferingIDs: []upstream.OfferingID{offering.ID}, AllowedDeploymentIDs: []upstream.DeploymentID{deployment.ID},
+			AllowedRegions: []string{"global"}, AllowedEndpointIDs: []upstream.EndpointID{"deepseek.openai"},
+		},
+		upstream.ProtocolMessages: {
+			ID: "deepseek.default.anthropic", Type: upstream.CredentialAPIKey,
+			References: []upstream.CredentialReference{{Purpose: upstream.CredentialPurposeAPIKey, Store: "env", Name: "DEEPSEEK_API_KEY"}},
+			Audience:   "api.deepseek.com", AuthPlacement: upstream.AuthPlacementHeader, AuthHeader: "x-api-key",
+			Lifecycle: upstream.CredentialLifecycleStatic, AllowedProviderIDs: []upstream.ProviderID{providerID},
+			AllowedOfferingIDs: []upstream.OfferingID{offering.ID}, AllowedDeploymentIDs: []upstream.DeploymentID{deployment.ID},
+			AllowedRegions: []string{"global"}, AllowedEndpointIDs: []upstream.EndpointID{"deepseek.anthropic"},
+		},
 	}
 	sources := []OfficialSource{
 		{ID: "deepseek.quickstart.2026-07-11", Publisher: "DeepSeek", Kind: SourceProductDocs, URL: "https://api-docs.deepseek.com/"},
@@ -458,6 +477,7 @@ func deepSeekEntries() []Entry {
 			"streaming":             {Support: CapabilityCompatible},
 			"tool_calling":          {Support: CapabilityCompatible},
 			"parallel_tool_calling": {Support: CapabilityCompatible},
+			"structured_output":     {Support: CapabilityPartial, Limitations: []string{"Chat Completions supports JSON Object; strict JSON Schema is not declared"}},
 			"reasoning":             {Support: CapabilityCompatible},
 			"usage_reporting":       {Support: CapabilityCompatible},
 		})
@@ -482,8 +502,8 @@ func deepSeekEntries() []Entry {
 		}
 		entry := Entry{
 			ID:       definition.id,
-			Route:    upstream.UpstreamRoute{ID: definition.id, Model: upstream.ModelIdentity{CanonicalFamily: "deepseek", ProviderModelRef: "runtime_selected_current_v4"}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: definition.protocol, APIVersion: definition.version}, Endpoint: endpoints[definition.protocol], Credential: credential},
-			Maturity: MaturityUnknown, ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
+			Route:    upstream.UpstreamRoute{ID: definition.id, Model: upstream.ModelIdentity{CanonicalFamily: "deepseek", ProviderModelRef: models[0]}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: definition.protocol, APIVersion: definition.version}, Endpoint: endpoints[definition.protocol], Credential: credentials[definition.protocol]},
+			Maturity: MaturityUnknown, ModelDiscovery: exactProviderModels(models),
 			Sources: sources, Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: directCheckedAt, ValidUntil: directValidUntil},
 			SDKs: []SDKMetadata{definition.sdk}, Capabilities: capabilities, IgnoredFields: ignored, ExtensionFields: extensions,
 			StreamEvents: streamEvents, ErrorDialect: errorDialect,

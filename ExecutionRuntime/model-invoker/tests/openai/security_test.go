@@ -23,7 +23,7 @@ func TestPublicChatBindingRestoresIdentityAfterRedaction(t *testing.T) {
 	secret := string(openaiadapter.ProviderID)
 
 	t.Run("validation error", func(t *testing.T) {
-		adapter, err := openaiadapter.New(openaiadapter.Config{APIKey: secret, BaseURL: "https://api.example.test/v1"})
+		adapter, err := openaiadapter.New(openaiadapter.Config{APIKey: secret, BaseURL: "https://api.openai.com/v1"})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -292,7 +292,9 @@ func TestPublicOpenAIMaliciousStreamEventsAreRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stream, err := adapter.Stream(context.Background(), basePublicRequest(modelinvoker.ProtocolResponses))
+	request := basePublicRequest(modelinvoker.ProtocolResponses)
+	request.Model = secret
+	stream, err := adapter.Stream(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -426,8 +428,7 @@ func TestPublicOpenAIResponseBodyLimitIsNonRetryableForInvokeAndStream(t *testin
 func TestPublicOpenAIAdapterFormattingDoesNotExposeSecrets(t *testing.T) {
 	secret := `sk-format/a b`
 	adapter, err := openaiadapter.New(openaiadapter.Config{
-		APIKey:  secret,
-		BaseURL: "https://example.test/v1/" + url.PathEscape(secret),
+		APIKey: secret,
 	})
 	if err != nil {
 		t.Fatal(err)

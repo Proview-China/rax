@@ -42,7 +42,7 @@ func FuzzZAISelectionNeverLeaksOrCallsUnknownModel(f *testing.F) {
 		if strings.Contains(fmt.Sprintf("%v %#v", invokeErr, response), credential) {
 			t.Fatal("public result leaked credential")
 		}
-		supported := model == "glm-5.2" || model == "glm-5.1" || model == "glm-5-turbo" || model == "glm-5" || model == "glm-4.7" || model == "glm-4.7-flash" || model == "glm-4.7-flashx" || model == "glm-4.6" || model == "glm-4.5" || model == "glm-4.5-air" || model == "glm-4.5-x" || model == "glm-4.5-airx" || model == "glm-4.5-flash" || model == "glm-4-32b-0414-128k"
+		supported := model == "glm-5.2"
 		if !supported && calls.Load() != before {
 			t.Fatalf("unknown model %q reached HTTP", model)
 		}

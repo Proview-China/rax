@@ -35,11 +35,13 @@ func New(config Config) (*Adapter, error) {
 	if err := config.validate(); err != nil {
 		return nil, redactor.Error(providerError(modelinvoker.ErrorInvalidRequest, "configure", err.Error()))
 	}
+	root, _ := config.trustedRootEndpoint()
+	config.BaseURL = root
 	chatClient, responsesClient, messagesClient, err := newSDKClients(config)
 	if err != nil {
 		return nil, redactor.Error(providerError(modelinvoker.ErrorProviderUnavailable, "configure", "failed to initialize Bedrock Mantle SDK clients"))
 	}
-	root := strings.TrimRight(config.rootEndpoint(), "/")
+	root = strings.TrimRight(root, "/")
 	chatBinding, err := protocol.NewBinding(ProviderID, modelinvoker.ProtocolChatCompletions, root+"/openai/v1", "x-amzn-requestid")
 	if err != nil {
 		return nil, err
@@ -77,6 +79,13 @@ func New(config Config) (*Adapter, error) {
 
 func (a *Adapter) ID() modelinvoker.ProviderID            { return ProviderID }
 func (a *Adapter) DefaultProtocol() modelinvoker.Protocol { return modelinvoker.ProtocolResponses }
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, _ string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	endpoint, ok := a.endpoints[protocolID]
+	return endpoint, ok && endpoint != ""
+}
 func (a *Adapter) Capabilities(ctx context.Context, query modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error) {
 	if a == nil {
 		return nil, providerError(modelinvoker.ErrorProviderUnavailable, "capabilities", "adapter is not initialized")
@@ -169,3 +178,4 @@ func providerError(kind modelinvoker.ErrorKind, operation, message string) *mode
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

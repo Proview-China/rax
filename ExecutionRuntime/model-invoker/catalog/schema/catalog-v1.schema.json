@@ -865,6 +865,11 @@
         "adapter_id": {
           "$ref": "#/$defs/stable_id"
         },
+        "host_activation_requirement": {
+          "enum": [
+            "trusted_subscription_authorization_resolver"
+          ]
+        },
         "code_paths": {
           "$ref": "#/$defs/non_blank_lines"
         },

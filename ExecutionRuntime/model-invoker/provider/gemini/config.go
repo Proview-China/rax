@@ -37,28 +37,8 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.APIKey) == "" {
 		return fmt.Errorf("gemini: API key is required")
 	}
-	baseURL := c.BaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
-	u, err := url.Parse(baseURL)
-	if err != nil {
-		return fmt.Errorf("gemini: invalid base URL: %w", err)
-	}
-	if u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
-		return fmt.Errorf("gemini: base URL must be an absolute HTTP(S) URL")
-	}
-	if u.User != nil {
-		return fmt.Errorf("gemini: base URL must not contain credentials")
-	}
-	if u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("gemini: base URL must not contain a query or fragment")
-	}
-	if isVertexEndpoint(u) {
-		return fmt.Errorf("gemini: Vertex AI/aiplatform endpoints are not supported")
-	}
-	if u.Scheme == "http" && !adaptercore.IsLoopbackHost(u.Hostname()) {
-		return fmt.Errorf("gemini: insecure HTTP is allowed only for loopback test servers")
+	if _, err := c.trustedBaseURL(); err != nil {
+		return err
 	}
 	version := c.APIVersion
 	if version == "" {
@@ -70,21 +50,18 @@ func (c Config) validate() error {
 	return nil
 }
 
-func isVertexEndpoint(u *url.URL) bool {
-	if u == nil {
-		return false
+func (c Config) trustedBaseURL() (string, error) {
+	baseURL := c.BaseURL
+	if baseURL == "" {
+		baseURL = defaultBaseURL
 	}
-	host := strings.ToLower(strings.TrimSuffix(u.Hostname(), "."))
-	if host == "aiplatform.googleapis.com" ||
-		strings.HasSuffix(host, "-aiplatform.googleapis.com") ||
-		host == "vertexai.googleapis.com" ||
-		strings.HasSuffix(host, ".vertexai.googleapis.com") {
-		return true
+	trusted, err := adaptercore.ValidateEndpoint(baseURL, adaptercore.EndpointPolicy{
+		OfficialHosts: []string{"generativelanguage.googleapis.com"}, AllowLoopback: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("gemini: invalid base URL: %w", err)
 	}
-	path := strings.ToLower("/" + strings.Trim(u.Path, "/"))
-	return strings.Contains(path, "/projects/") &&
-		strings.Contains(path, "/locations/") &&
-		(strings.Contains(path, "/publishers/") || strings.Contains(path, "/models/"))
+	return trusted, nil
 }
 
 func (c Config) effectiveBaseURL() string {

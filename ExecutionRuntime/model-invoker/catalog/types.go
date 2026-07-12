@@ -30,6 +30,12 @@ const (
 	ImplementationProductionApproved ImplementationStatus = "production_approved"
 )
 
+type HostActivationRequirement string
+
+const (
+	HostActivationTrustedSubscriptionAuthorizationResolver HostActivationRequirement = "trusted_subscription_authorization_resolver"
+)
+
 type SourceKind string
 
 const (
@@ -133,12 +139,13 @@ type CapabilityMetadata struct {
 }
 
 type Implementation struct {
-	Status       ImplementationStatus `json:"status"`
-	Callable     bool                 `json:"callable"`
-	AdapterID    string               `json:"adapter_id,omitempty"`
-	CodePaths    []string             `json:"code_paths,omitempty"`
-	TestEvidence []string             `json:"test_evidence,omitempty"`
-	LiveEvidence []string             `json:"live_evidence,omitempty"`
+	Status                    ImplementationStatus      `json:"status"`
+	Callable                  bool                      `json:"callable"`
+	AdapterID                 string                    `json:"adapter_id,omitempty"`
+	HostActivationRequirement HostActivationRequirement `json:"host_activation_requirement,omitempty"`
+	CodePaths                 []string                  `json:"code_paths,omitempty"`
+	TestEvidence              []string                  `json:"test_evidence,omitempty"`
+	LiveEvidence              []string                  `json:"live_evidence,omitempty"`
 }
 
 type Maturity string

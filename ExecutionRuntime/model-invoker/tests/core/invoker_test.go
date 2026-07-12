@@ -103,7 +103,7 @@ func TestInvokerInvokeResolvesDefaultProtocolAndCompletesResponse(t *testing.T) 
 			}
 			provider.invokeFunc = func(_ context.Context, request Request) (Response, error) {
 				providerRequest = request
-				return Response{ID: "response", Status: ResponseStatusCompleted}, nil
+				return Response{ID: "response", Model: request.Model, Status: ResponseStatusCompleted}, nil
 			}
 
 			invoker := newTestInvoker(t, provider)
@@ -365,9 +365,10 @@ func TestInvokerBudgetTimeoutIncludesCapabilityQuery(t *testing.T) {
 }
 
 func TestInvokerStreamUsesDefaultProtocolCompletesEventsAndCancelsAtEOF(t *testing.T) {
+	request := validRequest()
 	inner := &fakeStream{events: []StreamEvent{
 		{Type: StreamEventTextDelta, TextDelta: "hello"},
-		{Type: StreamEventResponseCompleted, Response: &Response{ID: "response", Status: ResponseStatusCompleted}},
+		{Type: StreamEventResponseCompleted, Response: &Response{ID: "response", Model: request.Model, Status: ResponseStatusCompleted}},
 	}}
 	provider := newFakeProvider("test")
 	provider.defaultProtocol = ProtocolChatCompletions
@@ -383,7 +384,6 @@ func TestInvokerStreamUsesDefaultProtocolCompletesEventsAndCancelsAtEOF(t *testi
 	}
 
 	invoker := newTestInvoker(t, provider)
-	request := validRequest()
 	stream, err := invoker.Stream(context.Background(), request)
 	if err != nil {
 		t.Fatalf("Stream() error = %v", err)

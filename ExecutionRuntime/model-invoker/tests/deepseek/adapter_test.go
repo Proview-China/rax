@@ -163,6 +163,9 @@ func TestConfigErrorAndFormattingNeverLeakKey(t *testing.T) {
 	if _, err := provider.New(provider.Config{APIKey: "secret", BaseURL: "http://example.com"}); err == nil {
 		t.Fatal("insecure remote endpoint accepted")
 	}
+	if _, err := provider.New(provider.Config{APIKey: "secret", BaseURL: "https://example.com"}); err == nil {
+		t.Fatal("arbitrary HTTPS endpoint accepted")
+	}
 	adapter, err := provider.New(provider.Config{APIKey: "secret"})
 	if err != nil {
 		t.Fatal(err)
@@ -171,5 +174,20 @@ func TestConfigErrorAndFormattingNeverLeakKey(t *testing.T) {
 		if strings.Contains(value, "secret") {
 			t.Fatalf("format leaked key: %q", value)
 		}
+	}
+}
+
+func TestResponseModelMismatchIsRejected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"id":"mapped","model":"deepseek-v4-flash","choices":[{"index":0,"finish_reason":"stop","message":{"content":"mapped"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+	adapter, err := provider.New(provider.Config{APIKey: "secret", BaseURL: server.URL, HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Invoke(context.Background(), chatRequest(server.URL)); modelinvoker.ErrorKindOf(err) != modelinvoker.ErrorMapping {
+		t.Fatalf("response model mismatch kind=%q err=%v", modelinvoker.ErrorKindOf(err), err)
 	}
 }

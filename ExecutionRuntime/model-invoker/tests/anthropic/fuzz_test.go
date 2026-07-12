@@ -18,9 +18,9 @@ import (
 )
 
 func FuzzAnthropicSuccessPayload(f *testing.F) {
-	f.Add([]byte(`{"id":"msg_fuzz","type":"message","role":"assistant","model":"claude-test-model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	f.Add([]byte(`{"id":"msg_fuzz","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
 	f.Add([]byte(`{"id":`))
-	f.Add([]byte(`{"id":"msg_unknown","type":"message","role":"assistant","model":"claude-test-model","content":[{"type":"future_block","value":1}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
+	f.Add([]byte(`{"id":"msg_unknown","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"future_block","value":1}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`))
 	f.Add([]byte{0xff, 0x00, '\n'})
 
 	f.Fuzz(func(t *testing.T, payload []byte) {
@@ -39,7 +39,7 @@ func FuzzAnthropicSuccessPayload(f *testing.F) {
 				Request:    request,
 			}, nil
 		})}
-		adapter, err := provider.New(provider.Config{APIKey: apiKey, BaseURL: "https://api.anthropic.test", HTTPClient: client})
+		adapter, err := provider.New(provider.Config{APIKey: apiKey, BaseURL: "https://api.anthropic.com", HTTPClient: client})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -65,7 +65,7 @@ func FuzzAnthropicSuccessPayload(f *testing.F) {
 
 func FuzzAnthropicSSEPayload(f *testing.F) {
 	f.Add([]byte("event: message_start\n" +
-		`data: {"type":"message_start","message":{"id":"msg_fuzz_stream","type":"message","role":"assistant","model":"claude-test-model","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}` + "\n\n" +
+		`data: {"type":"message_start","message":{"id":"msg_fuzz_stream","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[],"stop_reason":null,"usage":{"input_tokens":1,"output_tokens":0}}}` + "\n\n" +
 		"event: message_delta\n" +
 		`data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}` + "\n\n" +
 		"event: message_stop\n" + `data: {"type":"message_stop"}` + "\n\n"))
@@ -87,7 +87,7 @@ func FuzzAnthropicSSEPayload(f *testing.F) {
 				Request:    request,
 			}, nil
 		})}
-		adapter, err := provider.New(provider.Config{APIKey: "fuzz-key", BaseURL: "https://api.anthropic.test", HTTPClient: client})
+		adapter, err := provider.New(provider.Config{APIKey: "fuzz-key", BaseURL: "https://api.anthropic.com", HTTPClient: client})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -127,7 +127,7 @@ func FuzzAnthropicFunctionArguments(f *testing.F) {
 	f.Add([]byte(`{"city":`))
 	f.Add([]byte{0xff})
 
-	responsePayload := []byte(`{"id":"msg_fuzz_args","type":"message","role":"assistant","model":"claude-test-model","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+	responsePayload := []byte(`{"id":"msg_fuzz_args","type":"message","role":"assistant","model":"claude-sonnet-4-6","content":[{"type":"text","text":"ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
 	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
 		return &http.Response{
 			StatusCode: http.StatusOK,
@@ -137,7 +137,7 @@ func FuzzAnthropicFunctionArguments(f *testing.F) {
 			Request:    request,
 		}, nil
 	})}
-	adapter, err := provider.New(provider.Config{APIKey: "fuzz-key", BaseURL: "https://api.anthropic.test", HTTPClient: client})
+	adapter, err := provider.New(provider.Config{APIKey: "fuzz-key", BaseURL: "https://api.anthropic.com", HTTPClient: client})
 	if err != nil {
 		f.Fatal(err)
 	}

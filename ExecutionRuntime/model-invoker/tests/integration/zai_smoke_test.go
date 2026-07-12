@@ -17,7 +17,7 @@ func TestZAILiveSmoke(t *testing.T) {
 	}
 	key, model := os.Getenv("ZAI_API_KEY"), os.Getenv("ZAI_SMOKE_MODEL")
 	if key == "" || model == "" {
-		t.Skip("ZAI_API_KEY and ZAI_SMOKE_MODEL are required")
+		t.Fatal("enabled Z.AI live smoke requires ZAI_API_KEY and ZAI_SMOKE_MODEL")
 	}
 	adapter, err := zai.New(zai.Config{APIKey: key})
 	if err != nil {
@@ -28,7 +28,7 @@ func TestZAILiveSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Text() == "" {
-		t.Fatal("Z.AI returned empty text")
+	if !hasExactProviderSmokeMarker(response.Text(), "praxis-zai-ok") {
+		t.Fatal("Z.AI response did not match the exact marker")
 	}
 }

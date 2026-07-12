@@ -16,7 +16,8 @@ import (
 func FuzzQwenSelectionNeverLeaksOrCallsUnknownModel(f *testing.F) {
 	for _, seed := range []struct{ model, key string }{
 		{"qwen3.7-max", "sk-ws-secret-one"},
-		{"qwen3.6-plus", "sk-old-secret-two"},
+		{"qwen3.7-plus", "sk-ws-secret-plus"},
+		{"qwen3.6-flash", "sk-current-secret-two"},
 		{"qwen-vl-max", "sk-ws-secret-three"},
 		{"unknown", "sk-sp-subscription"},
 	} {
@@ -45,7 +46,7 @@ func FuzzQwenSelectionNeverLeaksOrCallsUnknownModel(f *testing.F) {
 		if err != nil && len(key) >= 8 && strings.Contains(fmt.Sprint(err), key) {
 			t.Fatalf("invoke error leaked key")
 		}
-		approved := model == "qwen3.7-max" || model == "qwen3-max" || model == "qwen3.6-plus" || model == "qwen3.6-flash" || model == "qwen-plus" || model == "qwen-flash" || model == "qwen3-coder-plus" || model == "qwen3-coder-flash"
+		approved := model == "qwen3.7-max" || model == "qwen3.7-plus" || model == "qwen3.6-flash"
 		if !approved && calls != 0 {
 			t.Fatalf("unknown model %q made %d calls", model, calls)
 		}

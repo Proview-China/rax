@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -41,18 +40,14 @@ type Config struct {
 func (Config) Format(s fmt.State, _ rune) { _, _ = io.WriteString(s, "azureopenai.Config([REDACTED])") }
 func (Config) GoString() string           { return "azureopenai.Config([REDACTED])" }
 func (c Config) validate() error {
-	if strings.TrimSpace(c.Region) == "" || strings.ContainsAny(c.Region, "\r\n/ ") {
-		return fmt.Errorf("azure openai: region is required")
+	if !adaptercore.IsCloudRegion(c.Region) {
+		return fmt.Errorf("azure openai: region must be a canonical cloud region label")
 	}
-	if strings.TrimSpace(c.DeploymentName) == "" || strings.ContainsAny(c.DeploymentName, "\r\n/?#") {
-		return fmt.Errorf("azure openai: deployment name is required")
+	if !adaptercore.IsPathSegment(c.DeploymentName) {
+		return fmt.Errorf("azure openai: deployment name must be one canonical identifier segment")
 	}
-	u, err := url.Parse(c.ResourceEndpoint)
-	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("azure openai: resource endpoint must be absolute, credential-free, and query-free")
-	}
-	if u.Scheme != "https" && !(u.Scheme == "http" && adaptercore.IsLoopbackHost(u.Hostname())) {
-		return fmt.Errorf("azure openai: plain HTTP is allowed only for loopback tests")
+	if _, err := c.trustedRootEndpoint(); err != nil {
+		return err
 	}
 	switch c.CredentialMode {
 	case CredentialAPIKey:
@@ -81,4 +76,16 @@ func (c Config) validate() error {
 	}
 	return nil
 }
-func (c Config) root() string { return adaptercore.NormalizeEndpoint(c.ResourceEndpoint) }
+func (c Config) root() string {
+	endpoint, _ := c.trustedRootEndpoint()
+	return endpoint
+}
+func (c Config) trustedRootEndpoint() (string, error) {
+	endpoint, err := adaptercore.ValidateEndpoint(c.ResourceEndpoint, adaptercore.EndpointPolicy{
+		OfficialHostSuffix: "openai.azure.com", AllowLoopback: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("azure openai: resource endpoint does not match the single-resource credential audience: %w", err)
+	}
+	return endpoint, nil
+}

@@ -23,6 +23,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/mimo"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/minimax"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/openai"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/plancompat"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/qwen"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/vertex"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/xai"
@@ -30,7 +31,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/upstream"
 )
 
-var assetRenderTime = time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+var assetRenderTime = time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
 
 func TestEmbeddedSchemaIsStrictVersionedAndMatchesCheckedInAsset(t *testing.T) {
 	if err := catalog.ValidateEmbeddedSchema(); err != nil {
@@ -100,14 +101,28 @@ func TestDefaultBindingMetadataMatchesRuntimeAndEvidencePathsExist(t *testing.T)
 	root := moduleRoot(t)
 	for _, entry := range catalog.DefaultDocument().Entries {
 		if !entry.Implementation.Callable {
-			if entry.Implementation.AdapterID != "" {
+			if entry.Implementation.AdapterID != "" && entry.Implementation.HostActivationRequirement != catalog.HostActivationTrustedSubscriptionAuthorizationResolver {
 				t.Errorf("non-callable route %q has runtime adapter %q", entry.ID, entry.Implementation.AdapterID)
+			}
+			if entry.Implementation.HostActivationRequirement == catalog.HostActivationTrustedSubscriptionAuthorizationResolver &&
+				(entry.Implementation.Status != catalog.ImplementationImplementedOffline || entry.Implementation.AdapterID == "") {
+				t.Errorf("host-blocked route %q lost implemented adapter evidence", entry.ID)
 			}
 			continue
 		}
 		want, ok := wantAdapter[entry.Route.Provider]
 		if !ok {
 			t.Fatalf("default catalog contains unexpected current binding %q", entry.ID)
+		}
+		switch entry.Route.Offering.ID {
+		case "kimi.code-membership":
+			want = string(plancompat.KimiCodeProvider)
+		case "minimax.token-plan":
+			want = string(plancompat.MiniMaxTokenProvider)
+		case "mimo.token-plan":
+			want = string(plancompat.MiMoTokenProvider)
+		case "alibaba.coding-plan", "alibaba.token-plan-team":
+			want = string(plancompat.AlibabaPlanProvider)
 		}
 		if got := entry.Implementation.AdapterID; got != want {
 			t.Errorf("route %q runtime adapter = %q, want %q", entry.ID, got, want)

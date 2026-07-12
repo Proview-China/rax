@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	builtinCheckedAt  = time.Date(2026, 7, 10, 0, 0, 0, 0, time.UTC)
+	builtinCheckedAt  = time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
 	builtinValidUntil = builtinCheckedAt.Add(7 * 24 * time.Hour)
 )
 
@@ -84,6 +84,7 @@ func NewDefault(now time.Time) (*Catalog, error) {
 
 func openAIEntry(protocol upstream.ProtocolID) Entry {
 	routeID := upstream.RouteID("openai.direct.payg." + string(protocol))
+	models := []string{"gpt-5.5"}
 	overrides := map[string]CapabilityMetadata{
 		"text_generation":       {Support: CapabilityNative},
 		"streaming":             {Support: CapabilityNative},
@@ -109,7 +110,7 @@ func openAIEntry(protocol upstream.ProtocolID) Entry {
 		ID: routeID,
 		Route: upstream.UpstreamRoute{
 			ID:       routeID,
-			Model:    upstream.ModelIdentity{CanonicalFamily: "openai", ProviderModelRef: "runtime_selected"},
+			Model:    upstream.ModelIdentity{CanonicalFamily: "openai", ProviderModelRef: models[0]},
 			Provider: "openai",
 			Offering: upstream.Offering{
 				ID:          "openai.api.payg",
@@ -136,9 +137,14 @@ func openAIEntry(protocol upstream.ProtocolID) Entry {
 			},
 		},
 		Maturity:       MaturityUnknown,
-		ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
+		ModelDiscovery: exactProviderModels(models),
 		Sources: []OfficialSource{
 			{ID: "openai.api.protocols", Publisher: "OpenAI", Kind: SourceAPIReference, URL: "https://developers.openai.com/api/docs/guides/migrate-to-responses"},
+			{ID: "openai.responses.create.2026-07-11", Publisher: "OpenAI", Kind: SourceAPIReference, URL: "https://developers.openai.com/api/reference/resources/responses/methods/create"},
+			{ID: "openai.models.2026-07-11", Publisher: "OpenAI", Kind: SourceModelCatalog, URL: "https://developers.openai.com/api/docs/models"},
+			{ID: "openai.responses.streaming.2026-07-11", Publisher: "OpenAI", Kind: SourceAPIReference, URL: "https://developers.openai.com/api/docs/guides/streaming-responses"},
+			{ID: "openai.function-calling.2026-07-11", Publisher: "OpenAI", Kind: SourceAPIReference, URL: "https://developers.openai.com/api/docs/guides/function-calling"},
+			{ID: "openai.errors.2026-07-11", Publisher: "OpenAI", Kind: SourceAPIReference, URL: "https://developers.openai.com/api/docs/guides/error-codes"},
 			{ID: "openai.sdk.go", Publisher: "OpenAI", Kind: SourceSDK, URL: "https://github.com/openai/openai-go"},
 		},
 		Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: builtinCheckedAt, ValidUntil: builtinValidUntil},
@@ -169,11 +175,12 @@ func openAIEntry(protocol upstream.ProtocolID) Entry {
 
 func anthropicEntry() Entry {
 	routeID := upstream.RouteID("anthropic.direct.payg.messages")
+	models := []string{"claude-fable-5"}
 	entry := Entry{
 		ID: routeID,
 		Route: upstream.UpstreamRoute{
 			ID:       routeID,
-			Model:    upstream.ModelIdentity{CanonicalFamily: "claude", ProviderModelRef: "runtime_selected"},
+			Model:    upstream.ModelIdentity{CanonicalFamily: "claude", ProviderModelRef: models[0]},
 			Provider: "anthropic",
 			Offering: upstream.Offering{
 				ID:          "anthropic.api.payg",
@@ -200,9 +207,13 @@ func anthropicEntry() Entry {
 			},
 		},
 		Maturity:       MaturityUnknown,
-		ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
+		ModelDiscovery: exactProviderModels(models),
 		Sources: []OfficialSource{
 			{ID: "anthropic.api.messages", Publisher: "Anthropic", Kind: SourceAPIReference, URL: "https://platform.claude.com/docs/en/api/overview"},
+			{ID: "anthropic.models.list.2026-07-11", Publisher: "Anthropic", Kind: SourceModelCatalog, URL: "https://platform.claude.com/docs/en/api/models/list"},
+			{ID: "anthropic.models.overview.2026-07-11", Publisher: "Anthropic", Kind: SourceModelCatalog, URL: "https://platform.claude.com/docs/en/about-claude/models/overview"},
+			{ID: "anthropic.streaming.2026-07-11", Publisher: "Anthropic", Kind: SourceAPIReference, URL: "https://platform.claude.com/docs/en/build-with-claude/streaming"},
+			{ID: "anthropic.errors.2026-07-11", Publisher: "Anthropic", Kind: SourceAPIReference, URL: "https://platform.claude.com/docs/en/api/errors"},
 			{ID: "anthropic.sdk.go", Publisher: "Anthropic", Kind: SourceSDK, URL: "https://platform.claude.com/docs/en/cli-sdks-libraries/sdks/go"},
 		},
 		Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: builtinCheckedAt, ValidUntil: builtinValidUntil},
@@ -247,11 +258,12 @@ func anthropicEntry() Entry {
 
 func geminiEntry() Entry {
 	routeID := upstream.RouteID("google.gemini-developer.payg.generate_content")
+	models := []string{"gemini-3.5-flash"}
 	entry := Entry{
 		ID: routeID,
 		Route: upstream.UpstreamRoute{
 			ID:       routeID,
-			Model:    upstream.ModelIdentity{CanonicalFamily: "gemini", ProviderModelRef: "runtime_selected"},
+			Model:    upstream.ModelIdentity{CanonicalFamily: "gemini", ProviderModelRef: models[0]},
 			Provider: "google.gemini-developer",
 			Offering: upstream.Offering{
 				ID:          "google.gemini-developer.api.payg",
@@ -278,9 +290,13 @@ func geminiEntry() Entry {
 			},
 		},
 		Maturity:       MaturityUnknown,
-		ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
+		ModelDiscovery: exactProviderModels(models),
 		Sources: []OfficialSource{
-			{ID: "google.gemini-developer.api", Publisher: "Google", Kind: SourceAPIReference, URL: "https://ai.google.dev/api"},
+			{ID: "google.gemini-developer.api", Publisher: "Google", Kind: SourceAPIReference, URL: "https://ai.google.dev/api/generate-content"},
+			{ID: "google.gemini.models.2026-07-11", Publisher: "Google", Kind: SourceModelCatalog, URL: "https://ai.google.dev/gemini-api/docs/models"},
+			{ID: "google.gemini.models-list.2026-07-11", Publisher: "Google", Kind: SourceAPIReference, URL: "https://ai.google.dev/api/models"},
+			{ID: "google.gemini.interactions.2026-07-11", Publisher: "Google", Kind: SourceProductDocs, URL: "https://ai.google.dev/gemini-api/docs/interactions-overview"},
+			{ID: "google.gemini.errors.2026-07-11", Publisher: "Google", Kind: SourceAPIReference, URL: "https://ai.google.dev/gemini-api/docs/troubleshooting"},
 			{ID: "google.genai.sdk", Publisher: "Google", Kind: SourceSDK, URL: "https://ai.google.dev/gemini-api/docs/libraries"},
 		},
 		Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: builtinCheckedAt, ValidUntil: builtinValidUntil},

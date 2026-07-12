@@ -17,7 +17,7 @@ func TestKimiLiveSmoke(t *testing.T) {
 	}
 	key, model := os.Getenv("MOONSHOT_API_KEY"), os.Getenv("KIMI_SMOKE_MODEL")
 	if key == "" || model == "" {
-		t.Skip("MOONSHOT_API_KEY and KIMI_SMOKE_MODEL are required")
+		t.Fatal("enabled Kimi live smoke requires MOONSHOT_API_KEY and KIMI_SMOKE_MODEL")
 	}
 	adapter, err := kimi.New(kimi.Config{APIKey: key})
 	if err != nil {
@@ -28,7 +28,7 @@ func TestKimiLiveSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Text() == "" {
-		t.Fatal("Kimi returned empty text")
+	if !hasExactProviderSmokeMarker(response.Text(), "praxis-kimi-ok") {
+		t.Fatal("Kimi response did not match the exact marker")
 	}
 }

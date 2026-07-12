@@ -5,6 +5,7 @@ import (
 	"errors"
 
 	modelinvoker "github.com/Proview-China/rax/ExecutionRuntime/model-invoker"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 )
 
 // StampMappingReport makes the Binding the authority for every runtime
@@ -67,6 +68,7 @@ func (b Binding) stampError(ctx context.Context, request modelinvoker.Request, e
 	var invocationError *modelinvoker.Error
 	if errors.As(err, &invocationError) && invocationError != nil {
 		result := *invocationError
+		safeCloseCause := adaptercore.SafeCloseCauseOf(err)
 		result.Provider = b.Provider
 		if result.Operation == "" {
 			result.Operation = operation
@@ -80,6 +82,9 @@ func (b Binding) stampError(ctx context.Context, request modelinvoker.Request, e
 			contextFailure = ContextFailureOf(nil, invocationError.Err)
 		}
 		applySafeContextFailure(&result, contextFailure)
+		if safeCloseCause != nil {
+			result.Err = errors.Join(result.Err, safeCloseCause)
+		}
 		return &result
 	}
 	result := &modelinvoker.Error{

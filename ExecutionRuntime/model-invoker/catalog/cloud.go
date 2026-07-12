@@ -176,11 +176,19 @@ func cloudControlEntries() []Entry {
 		controlSpec("google.vertex-ai.model-garden.self-deployed.generate_content", "google.vertex-ai", "google.vertex-ai.model-garden", "multi-model", "self-deployed-endpoint", upstream.Deployment{ID: "google.vertex-ai.model-garden.self-deployed", Kind: upstream.DeploymentCloudProvisioned, Region: "us-central1", ProjectRef: "runtime-project", ResourceRef: "model-garden-endpoint"}, upstream.ProtocolGenerateContent, upstream.Endpoint{ID: "google.vertex-ai.model-garden.generate", Scheme: "https", HostTemplate: "{region}-aiplatform.googleapis.com", BasePath: "/v1", CredentialAudience: "{region}-aiplatform.googleapis.com"}, EvidenceFresh, ImplementationPlanned, "self-deployed Model Garden endpoints do not inherit serverless capability"),
 		controlSpec("azure.ai-foundry.other-models.unverified.chat_completions", "azure.ai-foundry", "azure.ai-foundry.other-models", "multi-model", "runtime_selected", upstream.Deployment{ID: "azure.ai-foundry.other-models", Kind: upstream.DeploymentCloudServerless, Region: "unknown", ResourceRef: "runtime-resource", DeploymentName: "runtime-deployment"}, upstream.ProtocolChatCompletions, upstream.Endpoint{ID: "azure.ai-foundry.other-models", Scheme: "https", HostTemplate: "{resource}.services.ai.azure.com", BasePath: "/models", CredentialAudience: "{resource}.services.ai.azure.com"}, EvidenceUnverified, ImplementationResearchOnly, "Foundry models require per-model protocol and deployment evidence"),
 		controlSpec("anthropic.platform-on-aws.unverified.messages", "anthropic.platform-on-aws", "anthropic.platform-on-aws.marketplace", "claude", "runtime_selected", upstream.Deployment{ID: "anthropic.platform-on-aws", Kind: upstream.DeploymentCloudServerless, Region: "unknown", ResourceRef: "anthropic-operated"}, upstream.ProtocolMessages, upstream.Endpoint{ID: "anthropic.platform-on-aws", Scheme: "https", HostTemplate: "platform.claude.com", CredentialAudience: "platform.claude.com"}, EvidenceUnverified, ImplementationResearchOnly, "Anthropic-operated AWS Marketplace product is not Amazon Bedrock"),
-		controlSpec("anthropic.consumer-plans.product-login.messages", "anthropic.consumer", "anthropic.consumer-plans", "claude", "claude-product", upstream.Deployment{ID: "anthropic.consumer-plans", Kind: upstream.DeploymentDirect, Region: "global", ResourceRef: "claude-product"}, upstream.ProtocolMessages, upstream.Endpoint{ID: "anthropic.consumer-product", Scheme: "https", HostTemplate: "claude.ai", CredentialAudience: "claude.ai"}, EvidenceFresh, ImplementationResearchOnly, "Claude Pro and Max do not provide API, Bedrock, or Vertex credits"),
+		controlSpec("anthropic.consumer-plans.product-login.messages", "anthropic.consumer", "anthropic.consumer-plans", "claude", "claude-product", upstream.Deployment{ID: "anthropic.consumer-plans", Kind: upstream.DeploymentDirect, Region: "global", ResourceRef: "claude-product"}, upstream.ProtocolMessages, upstream.Endpoint{ID: "anthropic.consumer-product", Scheme: "https", HostTemplate: "claude.ai", CredentialAudience: "claude.ai"}, EvidenceFresh, ImplementationResearchOnly, "Claude Pro and Max do not fund the Messages API; Agent SDK subscription use is a separate unimplemented host-wiring contract"),
 	}
 	entries := make([]Entry, 0, len(controls))
 	for _, spec := range controls {
-		entries = append(entries, makeCloudEntry(spec))
+		entry := makeCloudEntry(spec)
+		if entry.ID == "anthropic.consumer-plans.product-login.messages" {
+			entry.Sources = append(entry.Sources,
+				OfficialSource{ID: "anthropic.consumer.pro-no-api.2026-07-11", Publisher: "Anthropic", Kind: SourceTerms, URL: "https://support.claude.com/en/articles/8325606-what-is-the-pro-plan"},
+				OfficialSource{ID: "anthropic.consumer.agent-sdk-plan.2026-07-11", Publisher: "Anthropic", Kind: SourceTerms, URL: "https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan"},
+			)
+			entry = finalizeDefaultEntry(entry)
+		}
+		entries = append(entries, entry)
 	}
 	return entries
 }
@@ -234,7 +242,8 @@ func cloudProtocolCapabilities(protocol upstream.ProtocolID) []CapabilityMetadat
 	case upstream.ProtocolBedrockInvoke:
 		overrides["text_generation"] = CapabilityMetadata{Support: CapabilityPartial, Limitations: []string{"provider-native JSON remains in RawPayload"}}
 		overrides["streaming"] = CapabilityMetadata{Support: CapabilityPartial, Limitations: []string{"provider-native chunks remain native events"}}
-		overrides["usage_reporting"] = CapabilityMetadata{Support: CapabilityUnknown, Limitations: []string{"response shape is model-specific"}}
+		overrides["tool_calling"] = CapabilityMetadata{Support: CapabilityUnsupported, Limitations: []string{"InvokeModel raw mode does not infer portable tool semantics"}}
+		overrides["usage_reporting"] = CapabilityMetadata{Support: CapabilityUnsupported, Limitations: []string{"response shape is model-specific and is not normalized in raw mode"}}
 	}
 	return completeCapabilities(overrides)
 }

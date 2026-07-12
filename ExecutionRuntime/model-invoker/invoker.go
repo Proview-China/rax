@@ -201,9 +201,6 @@ func completeResponse(response Response, request Request, report MappingReport) 
 	if response.Protocol == ProtocolAuto {
 		response.Protocol = request.Protocol
 	}
-	if response.Model == "" {
-		response.Model = request.Model
-	}
 	response.MappingReport = mergeMappingReports(report, response.MappingReport)
 	return response
 }

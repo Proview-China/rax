@@ -26,9 +26,9 @@ func TestOpenAIProviderContract(t *testing.T) {
 		if body["stream"] == true {
 			writer.Header().Set("Content-Type", "text/event-stream")
 			events := []string{
-				`{"type":"response.created","sequence_number":1,"response":{"id":"resp_contract_stream","model":"contract-model","status":"in_progress","output":[]}}`,
+				`{"type":"response.created","sequence_number":1,"response":{"id":"resp_contract_stream","model":"test-model","status":"in_progress","output":[]}}`,
 				`{"type":"response.output_text.delta","sequence_number":2,"item_id":"msg_1","output_index":0,"content_index":0,"delta":"hello contract"}`,
-				`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_contract_stream","model":"contract-model","status":"completed","output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello contract","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}}`,
+				`{"type":"response.completed","sequence_number":3,"response":{"id":"resp_contract_stream","model":"test-model","status":"completed","output":[{"id":"msg_1","type":"message","role":"assistant","status":"completed","content":[{"type":"output_text","text":"hello contract","annotations":[]}]}],"usage":{"input_tokens":2,"output_tokens":2,"total_tokens":4}}}`,
 			}
 			for _, event := range events {
 				_, _ = fmt.Fprintf(writer, "data: %s\n\n", event)
@@ -47,7 +47,7 @@ func TestOpenAIProviderContract(t *testing.T) {
 		Provider: provider.ProviderID,
 		Protocol: modelinvoker.ProtocolResponses,
 		Endpoint: server.URL,
-		Model:    "contract-model",
+		Model:    "test-model",
 		Input:    []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "hello")},
 		Budget:   modelinvoker.Budget{MaxOutputTokens: 64},
 	}

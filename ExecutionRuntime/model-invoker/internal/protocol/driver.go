@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	modelinvoker "github.com/Proview-China/rax/ExecutionRuntime/model-invoker"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 )
 
 // Driver is the SDK-neutral invocation surface owned by a wire protocol.
@@ -27,6 +28,13 @@ type Dialect interface {
 	ProviderMetadata(http.Header) modelinvoker.ProviderMetadata
 }
 
+// ResponseModelVerifier is an internal opt-out/translation point for routes
+// whose request identity is a deployment rather than the model name echoed by
+// a compatibility protocol. The default is strict authoritative exact match.
+type ResponseModelVerifier interface {
+	VerifyResponseModel(modelinvoker.Request, string) error
+}
+
 // Base centralizes binding validation and identity enforcement for concrete
 // protocol drivers. It is immutable after construction.
 type Base struct {
@@ -42,6 +50,19 @@ func NewBase(binding Binding, dialect Dialect) (*Base, error) {
 		return nil, fmt.Errorf("create protocol base: dialect is nil")
 	}
 	return &Base{binding: binding.Clone(), dialect: dialect}, nil
+}
+
+// VerifyResponseModel runs before fallback identity stamping or semantic
+// stream delivery. A dialect override must document why exact comparison is
+// not applicable; otherwise omission and drift both fail closed.
+func (b *Base) VerifyResponseModel(request modelinvoker.Request, actual, operation string) error {
+	if b == nil {
+		return &modelinvoker.Error{Kind: modelinvoker.ErrorProviderUnavailable, Operation: operation, Message: "protocol base is not initialized"}
+	}
+	if verifier, ok := b.dialect.(ResponseModelVerifier); ok {
+		return verifier.VerifyResponseModel(request, actual)
+	}
+	return adaptercore.ResponseModelError(b.binding.Provider, operation, request.Model, actual)
 }
 
 func (b *Base) Binding() Binding {

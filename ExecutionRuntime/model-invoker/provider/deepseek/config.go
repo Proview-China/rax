@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 )
 
 const defaultBaseURL = "https://api.deepseek.com"
@@ -20,9 +21,16 @@ func (Config) Format(state fmt.State, _ rune) {
 }
 func (Config) GoString() string { return "deepseek.Config([REDACTED])" }
 
-func (c Config) root() string {
-	if strings.TrimSpace(c.BaseURL) == "" {
-		return defaultBaseURL
+func (c Config) root() (string, error) {
+	raw := c.BaseURL
+	if raw == "" {
+		raw = defaultBaseURL
 	}
-	return strings.TrimRight(c.BaseURL, "/")
+	endpoint, err := adaptercore.ValidateEndpoint(raw, adaptercore.EndpointPolicy{
+		OfficialHosts: []string{"api.deepseek.com"}, AllowLoopback: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("deepseek: invalid base URL: %w", err)
+	}
+	return endpoint, nil
 }

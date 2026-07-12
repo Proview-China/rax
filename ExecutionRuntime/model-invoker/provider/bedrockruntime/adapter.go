@@ -32,11 +32,13 @@ func New(config Config) (*Adapter, error) {
 	if err := config.validate(); err != nil {
 		return nil, redactor.Error(providerError(modelinvoker.ErrorInvalidRequest, "configure", err.Error()))
 	}
+	endpoint, _ := config.trustedEndpoint()
+	config.BaseURL = endpoint
 	client, err := newSDKClient(config)
 	if err != nil {
 		return nil, redactor.Error(providerError(modelinvoker.ErrorProviderUnavailable, "configure", "failed to initialize AWS Bedrock Runtime client"))
 	}
-	return newWithClient(client, config.endpoint(), redactor)
+	return newWithClient(client, endpoint, redactor)
 }
 
 func newWithClient(client bedrockprotocol.Client, endpoint string, redactor adaptercore.Redactor) (*Adapter, error) {
@@ -64,6 +66,12 @@ func newWithClient(client bedrockprotocol.Client, endpoint string, redactor adap
 func (a *Adapter) ID() modelinvoker.ProviderID { return ProviderID }
 func (a *Adapter) DefaultProtocol() modelinvoker.Protocol {
 	return modelinvoker.ProtocolBedrockConverse
+}
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, _ string) (string, bool) {
+	if a == nil || a.endpoint == "" || (protocolID != modelinvoker.ProtocolBedrockConverse && protocolID != modelinvoker.ProtocolBedrockInvoke) {
+		return "", false
+	}
+	return a.endpoint, true
 }
 
 func (a *Adapter) Capabilities(ctx context.Context, query modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error) {
@@ -163,3 +171,4 @@ func providerError(kind modelinvoker.ErrorKind, operation, message string) *mode
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

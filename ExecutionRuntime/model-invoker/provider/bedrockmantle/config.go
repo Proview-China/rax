@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -45,20 +44,14 @@ func (Config) Format(state fmt.State, _ rune) {
 func (Config) GoString() string { return "bedrockmantle.Config([REDACTED])" }
 
 func (c Config) validate() error {
-	if strings.TrimSpace(c.Region) == "" || strings.ContainsAny(c.Region, "\r\n/ ") {
-		return fmt.Errorf("bedrock mantle: region is required")
+	if !adaptercore.IsCloudRegion(c.Region) {
+		return fmt.Errorf("bedrock mantle: region must be a canonical cloud region label")
 	}
-	if strings.TrimSpace(c.ProjectRef) == "" || strings.ContainsAny(c.ProjectRef, "\r\n") {
-		return fmt.Errorf("bedrock mantle: stable project reference is required")
+	if !adaptercore.IsPathSegment(c.ProjectRef) {
+		return fmt.Errorf("bedrock mantle: project reference must be one canonical identifier segment")
 	}
-	if c.BaseURL != "" {
-		u, err := url.Parse(c.BaseURL)
-		if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-			return fmt.Errorf("bedrock mantle: base URL must be absolute and credential-free")
-		}
-		if u.Scheme != "https" && !(u.Scheme == "http" && adaptercore.IsLoopbackHost(u.Hostname())) {
-			return fmt.Errorf("bedrock mantle: plain HTTP is allowed only for loopback tests")
-		}
+	if _, err := c.trustedRootEndpoint(); err != nil {
+		return err
 	}
 	switch c.CredentialMode {
 	case CredentialAPIKey:
@@ -89,9 +82,19 @@ func (c Config) validate() error {
 }
 
 func (c Config) rootEndpoint() string {
-	if c.BaseURL != "" {
-		return adaptercore.NormalizeEndpoint(c.BaseURL)
+	endpoint, _ := c.trustedRootEndpoint()
+	return endpoint
+}
+func (c Config) trustedRootEndpoint() (string, error) {
+	host := "bedrock-mantle." + c.Region + ".api.aws"
+	raw := c.BaseURL
+	if raw == "" {
+		raw = "https://" + host
 	}
-	return "https://bedrock-mantle." + c.Region + ".api.aws"
+	endpoint, err := adaptercore.ValidateEndpoint(raw, adaptercore.EndpointPolicy{OfficialHosts: []string{host}, AllowLoopback: true})
+	if err != nil {
+		return "", fmt.Errorf("bedrock mantle: endpoint does not match the Region-derived credential audience: %w", err)
+	}
+	return endpoint, nil
 }
 func (c Config) storesResponses() bool { return c.StoreResponses == nil || *c.StoreResponses }

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -52,24 +51,22 @@ func (Config) Format(state fmt.State, _ rune) {
 }
 func (Config) GoString() string { return "vertex.Config([REDACTED])" }
 func (c Config) validate() error {
-	for name, value := range map[string]string{"project": c.Project, "location": c.Location, "deployment reference": c.DeploymentRef} {
-		if strings.TrimSpace(value) == "" || strings.ContainsAny(value, "\r\n/ ") {
-			return fmt.Errorf("vertex: %s is required and must be a stable reference", name)
-		}
+	if !adaptercore.IsDNSLabel(c.Project) {
+		return fmt.Errorf("vertex: project must be a canonical lowercase DNS label")
+	}
+	if !adaptercore.IsCloudRegion(c.Location) {
+		return fmt.Errorf("vertex: location must be a canonical cloud location label")
+	}
+	if !adaptercore.IsPathSegment(c.DeploymentRef) {
+		return fmt.Errorf("vertex: deployment reference must be one canonical identifier segment")
 	}
 	switch c.DeploymentMode {
 	case DeploymentServerless, DeploymentProvisionedThroughput, DeploymentSelfDeployedModelGarden:
 	default:
 		return fmt.Errorf("vertex: deployment mode is invalid")
 	}
-	if c.BaseURL != "" {
-		u, err := url.Parse(c.BaseURL)
-		if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-			return fmt.Errorf("vertex: base URL must be absolute and credential-free")
-		}
-		if u.Scheme != "https" && !(u.Scheme == "http" && adaptercore.IsLoopbackHost(u.Hostname())) {
-			return fmt.Errorf("vertex: plain HTTP is allowed only for loopback tests")
-		}
+	if _, err := c.trustedRootEndpoint(); err != nil {
+		return err
 	}
 	switch c.CredentialMode {
 	case CredentialAPIKey:
@@ -89,8 +86,18 @@ func (c Config) validate() error {
 	return nil
 }
 func (c Config) rootEndpoint() string {
-	if c.BaseURL != "" {
-		return adaptercore.NormalizeEndpoint(c.BaseURL)
+	endpoint, _ := c.trustedRootEndpoint()
+	return endpoint
+}
+func (c Config) trustedRootEndpoint() (string, error) {
+	host := c.Location + "-aiplatform.googleapis.com"
+	raw := c.BaseURL
+	if raw == "" {
+		raw = "https://" + host
 	}
-	return "https://" + c.Location + "-aiplatform.googleapis.com"
+	endpoint, err := adaptercore.ValidateEndpoint(raw, adaptercore.EndpointPolicy{OfficialHosts: []string{host}, AllowLoopback: true})
+	if err != nil {
+		return "", fmt.Errorf("vertex: endpoint does not match the Location-derived credential audience: %w", err)
+	}
+	return endpoint, nil
 }

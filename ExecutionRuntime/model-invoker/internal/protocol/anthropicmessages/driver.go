@@ -88,6 +88,14 @@ func (d *Driver) Invoke(ctx context.Context, request modelinvoker.Request) (mode
 		}
 		return response, normalized
 	}
+	actualModel := ""
+	if native != nil {
+		actualModel = string(native.Model)
+	}
+	if identityErr := d.base.VerifyResponseModel(request, actualModel, "messages.response_model"); identityErr != nil {
+		return modelinvoker.Response{Provider: d.Binding().Provider, Protocol: modelinvoker.ProtocolMessages, Status: modelinvoker.ResponseStatusFailed},
+			d.base.StampError(ctx, request, identityErr, "messages.response_model")
+	}
 	response, normalizeErr := normalizeMessage(d.base, request, native, headers, d.continuationMapper, d.stopReasonMapper)
 	if len(captured.Body) > 0 {
 		response.RawResponse = modelinvoker.NewRawPayload(captured.Body)

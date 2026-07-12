@@ -13,7 +13,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/upstream"
 )
 
-var testNow = time.Date(2026, 7, 11, 0, 0, 0, 0, time.UTC)
+var testNow = time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
 
 func validationHas(err error, code catalog.IssueCode) bool {
 	var validationError *catalog.ValidationError
@@ -53,7 +53,7 @@ func TestDefaultCatalogSeparatesCallableBindingsFromPlannedControlRecords(t *tes
 		t.Fatalf("protocols = %#v, want %#v", gotProtocols, wantProtocols)
 	}
 	if callable != 39 || len(providers) != 14 {
-		t.Fatalf("callable/providers = %d/%#v, want 39 across fourteen direct/cloud providers", callable, providers)
+		t.Fatalf("callable/providers = %d/%#v, want 39 across fourteen catalog providers", callable, providers)
 	}
 	for _, offering := range []upstream.OfferingID{
 		"zai.glm-coding-plan", "kimi.code-membership", "minimax.token-plan", "mimo.token-plan",

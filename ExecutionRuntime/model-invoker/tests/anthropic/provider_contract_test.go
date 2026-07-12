@@ -38,8 +38,8 @@ func TestAnthropicProviderContract(t *testing.T) {
 	request := modelinvoker.Request{
 		Provider: provider.ProviderID,
 		Protocol: modelinvoker.ProtocolMessages,
-		Endpoint: server.URL,
-		Model:    "contract-model",
+		Endpoint: server.URL + "/v1",
+		Model:    "claude-sonnet-4-6",
 		Input:    []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "hello")},
 		Budget:   modelinvoker.Budget{MaxOutputTokens: 64},
 	}
@@ -53,6 +53,6 @@ func TestAnthropicProviderContract(t *testing.T) {
 	}
 	providercontract.RunBehavior(t, providercontract.BehaviorCase{
 		Provider: adapter, InvokeRequest: request, StreamRequest: request,
-		ExpectedEndpoint: server.URL, NativeCalls: calls.Load,
+		ExpectedEndpoint: server.URL + "/v1", NativeCalls: calls.Load,
 	})
 }

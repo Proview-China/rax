@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"sync"
 
 	modelinvoker "github.com/Proview-China/rax/ExecutionRuntime/model-invoker"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol"
 	"github.com/openai/openai-go/v3/responses"
 )
@@ -30,6 +33,9 @@ type stream struct {
 	rawStream      bytes.Buffer
 	sequence       int64
 	responseMapper ResponseMapper
+	modelVerified  bool
+	closeOnce      sync.Once
+	closeErr       error
 }
 
 func newStream(
@@ -74,6 +80,21 @@ func (s *stream) Next() bool {
 }
 
 func (s *stream) mapEvent(event responses.ResponseStreamEventUnion) {
+	switch event.Type {
+	case "response.created", "response.completed", "response.incomplete", "response.failed":
+		if err := s.base.VerifyResponseModel(s.request, string(event.Response.Model), "responses.stream_model"); err != nil {
+			s.failIdentity(err)
+			return
+		}
+		s.modelVerified = true
+	case "error":
+		// A provider error is terminal and carries no successful model output.
+	default:
+		if !s.modelVerified {
+			s.failIdentity(adaptercore.ResponseModelError(s.base.Binding().Provider, "responses.stream_model", s.request.Model, ""))
+			return
+		}
+	}
 	rawJSON := event.RawJSON()
 	raw := modelinvoker.NewRawPayload([]byte(rawJSON))
 	s.nativeEvents = append(s.nativeEvents, raw)
@@ -227,6 +248,15 @@ func (s *stream) fail(err error, raw modelinvoker.RawPayload, sequence int64) {
 	s.failWithResponse(err, raw, sequence, s.partialResponse())
 }
 
+func (s *stream) failIdentity(err error) {
+	invocationError := modelError(err, "responses.stream_model")
+	s.terminal = true
+	s.err = invocationError
+	s.enqueue(modelinvoker.StreamEvent{Type: modelinvoker.StreamEventError, ResponseID: s.responseID, Error: invocationError}, 0)
+	s.closeNative()
+	s.err = errors.Join(invocationError, adaptercore.SafeCloseError(s.base.Binding().Provider, "responses.stream_close", s.closeErr))
+}
+
 func (s *stream) failWithResponse(err error, raw modelinvoker.RawPayload, sequence int64, response *modelinvoker.Response) {
 	var invocationError *modelinvoker.Error
 	if candidate, ok := err.(*modelinvoker.Error); ok && candidate != nil {
@@ -273,7 +303,28 @@ func (s *stream) Close() error {
 		return nil
 	}
 	s.closed = true
-	return s.native.Close()
+	return adaptercore.SafeCloseError(s.base.Binding().Provider, "responses.stream_close", s.closeNative())
+}
+
+func (s *stream) closeNative() error {
+	if s == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		if s.native != nil {
+			s.closeErr = s.native.Close()
+			s.native = nil
+		}
+	})
+	return s.closeErr
+}
+
+func modelError(err error, operation string) *modelinvoker.Error {
+	if candidate, ok := err.(*modelinvoker.Error); ok && candidate != nil {
+		copy := *candidate
+		return &copy
+	}
+	return &modelinvoker.Error{Kind: modelinvoker.ErrorMapping, Operation: operation, Code: "response_model_mismatch", Message: "provider response model identity is untrusted"}
 }
 
 func (s *stream) captureStreamError(err error) modelinvoker.RawPayload {

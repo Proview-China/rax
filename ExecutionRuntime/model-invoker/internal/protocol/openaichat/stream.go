@@ -3,11 +3,14 @@ package openaichat
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"sort"
+	"sync"
 
 	modelinvoker "github.com/Proview-China/rax/ExecutionRuntime/model-invoker"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol"
 	openaisdk "github.com/openai/openai-go/v3"
 )
@@ -49,6 +52,8 @@ type stream struct {
 	metadataMapper StreamMetadataMapper
 	requestID      string
 	metadata       modelinvoker.ProviderMetadata
+	closeOnce      sync.Once
+	closeErr       error
 }
 
 func newStream(
@@ -108,6 +113,10 @@ func (s *stream) captureStreamError(err error) modelinvoker.RawPayload {
 }
 
 func (s *stream) mapChunk(chunk openaisdk.ChatCompletionChunk) {
+	if err := s.base.VerifyResponseModel(s.request, chunk.Model, "chat_completions.stream_model"); err != nil {
+		s.fail(err, modelinvoker.RawPayload{})
+		return
+	}
 	raw := modelinvoker.NewRawPayload([]byte(chunk.RawJSON()))
 	s.nativeEvents = append(s.nativeEvents, raw)
 	if chunk.RawJSON() != "" {
@@ -117,9 +126,7 @@ func (s *stream) mapChunk(chunk openaisdk.ChatCompletionChunk) {
 	if chunk.ID != "" {
 		s.responseID = chunk.ID
 	}
-	if chunk.Model != "" {
-		s.model = chunk.Model
-	}
+	s.model = chunk.Model
 	if s.metadataMapper != nil {
 		mapped, err := s.metadataMapper.MapChatStreamMetadata(s.request, chunk)
 		if err != nil {
@@ -392,6 +399,12 @@ func (s *stream) fail(err error, raw modelinvoker.RawPayload) {
 	}
 	s.terminal = true
 	s.err = invocationError
+	if invocationError.Code == "response_model_missing" || invocationError.Code == "response_model_mismatch" {
+		s.enqueue(modelinvoker.StreamEvent{Type: modelinvoker.StreamEventError, ResponseID: s.responseID, Error: invocationError})
+		s.closeNative()
+		s.err = errors.Join(invocationError, adaptercore.SafeCloseError(s.base.Binding().Provider, "chat_completions.stream_close", s.closeErr))
+		return
+	}
 	s.enqueue(modelinvoker.StreamEvent{
 		Type: modelinvoker.StreamEventError, ResponseID: s.responseID,
 		Response: s.partialResponse(), Error: invocationError, Raw: raw,
@@ -455,7 +468,20 @@ func (s *stream) Close() error {
 		return nil
 	}
 	s.closed = true
-	return s.native.Close()
+	return adaptercore.SafeCloseError(s.base.Binding().Provider, "chat_completions.stream_close", s.closeNative())
+}
+
+func (s *stream) closeNative() error {
+	if s == nil {
+		return nil
+	}
+	s.closeOnce.Do(func() {
+		if s.native != nil {
+			s.closeErr = s.native.Close()
+			s.native = nil
+		}
+	})
+	return s.closeErr
 }
 
 var _ modelinvoker.Stream = (*stream)(nil)

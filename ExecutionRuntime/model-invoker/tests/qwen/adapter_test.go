@@ -44,6 +44,10 @@ func TestRegionWorkspaceAndCredentialBoundaries(t *testing.T) {
 			if _, err := adapter.Capabilities(context.Background(), query); err != nil {
 				t.Fatalf("derived endpoint rejected: %v", err)
 			}
+			query.Model = "qwen3.7-plus"
+			if _, err := adapter.Capabilities(context.Background(), query); err != nil {
+				t.Fatalf("current recommended qwen3.7-plus rejected: %v", err)
+			}
 			query.Endpoint = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 			if _, err := adapter.Capabilities(context.Background(), query); err == nil {
 				t.Fatal("shared or cross-workspace endpoint accepted")
@@ -138,16 +142,16 @@ func TestChatThinkingJSONObjectAndStreamingUsage(t *testing.T) {
 		captured <- capture{body: body}
 		if !streaming.Load() {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"id":"chat-qwen-1","object":"chat.completion","created":1770000000,"model":"qwen3.6-plus","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","reasoning_content":"qwen thinks","content":"{\"answer\":\"ok\"}"}}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`)
+			_, _ = io.WriteString(w, `{"id":"chat-qwen-1","object":"chat.completion","created":1770000000,"model":"qwen3.6-flash","choices":[{"index":0,"finish_reason":"stop","message":{"role":"assistant","reasoning_content":"qwen thinks","content":"{\"answer\":\"ok\"}"}}],"usage":{"prompt_tokens":3,"completion_tokens":4,"total_tokens":7}}`)
 			return
 		}
 		w.Header().Set("Content-Type", "text/event-stream")
 		flusher := w.(http.Flusher)
 		for _, event := range []string{
-			`{"id":"chat-qwen-stream","model":"qwen3.6-plus","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"think"},"finish_reason":null}]}`,
-			`{"id":"chat-qwen-stream","model":"qwen3.6-plus","choices":[{"index":0,"delta":{"reasoning_content":" more","content":"hello"},"finish_reason":null}]}`,
-			`{"id":"chat-qwen-stream","model":"qwen3.6-plus","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
-			`{"id":"chat-qwen-stream","model":"qwen3.6-plus","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`,
+			`{"id":"chat-qwen-stream","model":"qwen3.6-flash","choices":[{"index":0,"delta":{"role":"assistant","reasoning_content":"think"},"finish_reason":null}]}`,
+			`{"id":"chat-qwen-stream","model":"qwen3.6-flash","choices":[{"index":0,"delta":{"reasoning_content":" more","content":"hello"},"finish_reason":null}]}`,
+			`{"id":"chat-qwen-stream","model":"qwen3.6-flash","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			`{"id":"chat-qwen-stream","model":"qwen3.6-flash","choices":[],"usage":{"prompt_tokens":2,"completion_tokens":3,"total_tokens":5}}`,
 		} {
 			_, _ = fmt.Fprintf(w, "data: %s\n\n", event)
 			flusher.Flush()
@@ -161,7 +165,7 @@ func TestChatThinkingJSONObjectAndStreamingUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r := request(server.URL, "qwen3.6-plus", modelinvoker.ProtocolChatCompletions)
+	r := request(server.URL, "qwen3.6-flash", modelinvoker.ProtocolChatCompletions)
 	r.Input[0] = modelinvoker.MessageInput(modelinvoker.RoleUser, "Reply as a JSON object")
 	r.Output.Type = modelinvoker.OutputJSONObject
 	budget := int64(512)
@@ -234,10 +238,10 @@ func TestSelectionSilentOmissionAndErrorBoundaries(t *testing.T) {
 	low := request(server.URL, "qwen3.7-max", modelinvoker.ProtocolResponses)
 	low.Reasoning = &modelinvoker.Reasoning{Effort: modelinvoker.ReasoningEffortLow}
 	bad = append(bad, low)
-	jsonWithoutPrompt := request(server.URL, "qwen3.6-plus", modelinvoker.ProtocolChatCompletions)
+	jsonWithoutPrompt := request(server.URL, "qwen3.6-flash", modelinvoker.ProtocolChatCompletions)
 	jsonWithoutPrompt.Output.Type = modelinvoker.OutputJSONObject
 	bad = append(bad, jsonWithoutPrompt)
-	continuation := request(server.URL, "qwen3.6-plus", modelinvoker.ProtocolChatCompletions)
+	continuation := request(server.URL, "qwen3.6-flash", modelinvoker.ProtocolChatCompletions)
 	continuation.Input = []modelinvoker.InputItem{modelinvoker.FunctionResultInput("call", "result", false)}
 	bad = append(bad, continuation)
 	for index, r := range bad {

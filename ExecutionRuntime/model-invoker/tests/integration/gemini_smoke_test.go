@@ -15,8 +15,8 @@ import (
 // TestGeminiGenerateContentSmoke is excluded from ordinary test runs and makes
 // exactly one real request only after all three explicit approval gates exist.
 func TestGeminiGenerateContentSmoke(t *testing.T) {
-	if os.Getenv("PRAXIS_GEMINI_SMOKE") != "confirmed" {
-		t.Fatal("set PRAXIS_GEMINI_SMOKE=confirmed only after approving a real API request")
+	if os.Getenv("PRAXIS_LIVE_TESTS") != "1" || os.Getenv("PRAXIS_GEMINI_SMOKE") != "confirmed" {
+		t.Skip("Gemini live smoke requires global and provider confirmations")
 	}
 	apiKey := os.Getenv("GEMINI_API_KEY")
 	model := os.Getenv("GEMINI_SMOKE_MODEL")
@@ -41,13 +41,13 @@ func TestGeminiGenerateContentSmoke(t *testing.T) {
 		Provider: geminiadapter.ProviderID,
 		Protocol: modelinvoker.ProtocolGenerateContent,
 		Model:    model,
-		Input:    []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "Reply with exactly OK.")},
+		Input:    []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "Reply with exactly: praxis-gemini-ok")},
 		Budget:   modelinvoker.Budget{MaxOutputTokens: 16, Timeout: 30 * time.Second},
 	})
 	if err != nil {
 		t.Fatalf("real Gemini smoke request: %v", err)
 	}
-	if response.ID == "" || response.Text() == "" {
+	if response.ID == "" || !hasExactProviderSmokeMarker(response.Text(), "praxis-gemini-ok") {
 		t.Fatalf("incomplete smoke response: id=%q request_id=%q text=%q", response.ID, response.RequestID, response.Text())
 	}
 }

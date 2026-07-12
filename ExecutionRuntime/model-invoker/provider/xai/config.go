@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"unicode"
 
@@ -37,25 +36,17 @@ func (c Config) validate() error {
 			return fmt.Errorf("xai: API key must not contain control characters")
 		}
 	}
-	if strings.TrimSpace(c.BaseURL) == "" {
-		return nil
-	}
-	u, err := url.Parse(c.BaseURL)
-	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("xai: test Base URL must be absolute, credential-free, query-free, and fragment-free")
-	}
-	if !adaptercore.IsLoopbackHost(u.Hostname()) {
-		return fmt.Errorf("xai: Base URL override is allowed only for loopback tests")
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("xai: test Base URL must use HTTP or HTTPS")
-	}
-	return nil
+	_, err := c.trustedEndpoint()
+	return err
 }
 
-func (c Config) endpoint() string {
-	if strings.TrimSpace(c.BaseURL) != "" {
-		return strings.TrimRight(c.BaseURL, "/")
+func (c Config) trustedEndpoint() (string, error) {
+	if c.BaseURL == "" {
+		return defaultBaseURL, nil
 	}
-	return defaultBaseURL
+	endpoint, err := adaptercore.ValidateEndpoint(c.BaseURL, adaptercore.EndpointPolicy{AllowLoopback: true, LoopbackOnly: true})
+	if err != nil {
+		return "", fmt.Errorf("xai: invalid test Base URL: %w", err)
+	}
+	return endpoint, nil
 }

@@ -110,7 +110,7 @@ func TestContextCancellationWinsWithoutRetainingSimultaneousSDKError(t *testing.
 			StatusCode: 529, Request: request, Response: response, RequestID: "req_sdk_should_not_escape",
 		}
 	})}
-	adapter, err := provider.New(provider.Config{APIKey: "secret-test-key", BaseURL: "https://api.anthropic.test", HTTPClient: client})
+	adapter, err := provider.New(provider.Config{APIKey: "secret-test-key", BaseURL: "https://api.anthropic.com", HTTPClient: client})
 	if err != nil {
 		t.Fatal(err)
 	}

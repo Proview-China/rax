@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sync"
 
 	modelinvoker "github.com/Proview-China/rax/ExecutionRuntime/model-invoker"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
@@ -35,18 +36,21 @@ type messageStream struct {
 	continuationMapper ContinuationMapper
 	stopReasonMapper   StopReasonMapper
 
-	accumulator  anthropicsdk.Message
-	blocks       map[int64]*streamContentBlock
-	nativeEvents []modelinvoker.RawPayload
-	queue        []modelinvoker.StreamEvent
-	current      modelinvoker.StreamEvent
-	err          error
-	sequence     int64
-	responseID   string
-	messageStart bool
-	messageDelta bool
-	terminal     bool
-	closed       bool
+	accumulator   anthropicsdk.Message
+	blocks        map[int64]*streamContentBlock
+	nativeEvents  []modelinvoker.RawPayload
+	queue         []modelinvoker.StreamEvent
+	current       modelinvoker.StreamEvent
+	err           error
+	sequence      int64
+	responseID    string
+	messageStart  bool
+	modelVerified bool
+	messageDelta  bool
+	terminal      bool
+	closed        bool
+	closeOnce     sync.Once
+	closeErr      error
 }
 
 func newMessageStream(
@@ -99,6 +103,17 @@ func (s *messageStream) Next() bool {
 }
 
 func (s *messageStream) mapEvent(event anthropicsdk.MessageStreamEventUnion) {
+	typed := event.AsAny()
+	if start, ok := typed.(anthropicsdk.MessageStartEvent); ok {
+		if err := s.base.VerifyResponseModel(s.request, string(start.Message.Model), "messages.stream_model"); err != nil {
+			s.failIdentity(err)
+			return
+		}
+		s.modelVerified = true
+	} else if !s.modelVerified {
+		s.failIdentity(adaptercore.ResponseModelError(s.base.Binding().Provider, "messages.stream_model", s.request.Model, ""))
+		return
+	}
 	raw, err := adaptercore.RawPayload(event.RawJSON(), event)
 	if err != nil {
 		detail := "could not serialize Anthropic stream event audit payload: " + err.Error()
@@ -111,7 +126,6 @@ func (s *messageStream) mapEvent(event anthropicsdk.MessageStreamEventUnion) {
 		return
 	}
 	s.nativeEvents = append(s.nativeEvents, raw)
-	typed := event.AsAny()
 	if err := s.validateEvent(typed); err != nil {
 		s.fail(err, raw)
 		return
@@ -425,6 +439,15 @@ func (s *messageStream) fail(err error, raw modelinvoker.RawPayload) {
 	s.failWithResponse(err, raw, &response)
 }
 
+func (s *messageStream) failIdentity(err error) {
+	invocationError := modelError(err, "messages.stream_model")
+	s.err = invocationError
+	s.terminal = true
+	s.enqueue(modelinvoker.StreamEvent{Type: modelinvoker.StreamEventError, ResponseID: s.responseID, Error: invocationError})
+	s.closeNative()
+	s.err = errors.Join(invocationError, adaptercore.SafeCloseError(s.base.Binding().Provider, "messages.stream_close", s.closeErr))
+}
+
 func (s *messageStream) failWithResponse(err error, raw modelinvoker.RawPayload, response *modelinvoker.Response) {
 	var invocationError *modelinvoker.Error
 	if !errors.As(err, &invocationError) || invocationError == nil {
@@ -459,7 +482,7 @@ func (s *messageStream) partialResponse() modelinvoker.Response {
 	rawResponse, rawErr := adaptercore.RawPayload(s.accumulator.RawJSON(), &s.accumulator)
 	response := modelinvoker.Response{
 		ID: s.responseID, Provider: s.base.Binding().Provider, Protocol: s.base.Binding().Protocol,
-		Model: s.request.Model, Status: status, StopReason: stopReason, StopSequence: partial.StopSequence,
+		Model: string(s.accumulator.Model), Status: status, StopReason: stopReason, StopSequence: partial.StopSequence,
 		Usage: normalizeUsage(s.accumulator.Usage), RequestID: s.base.RequestID(s.headers),
 		ProviderMetadata: messageMetadata(s.base, &s.accumulator, s.headers),
 		MappingReport: modelinvoker.MappingReport{
@@ -516,16 +539,28 @@ func (s *messageStream) Close() error {
 		return nil
 	}
 	s.closed = true
-	return s.closeNative()
+	return adaptercore.SafeCloseError(s.base.Binding().Provider, "messages.stream_close", s.closeNative())
 }
 
 func (s *messageStream) closeNative() error {
-	if s.native == nil {
+	if s == nil {
 		return nil
 	}
-	native := s.native
-	s.native = nil
-	return native.Close()
+	s.closeOnce.Do(func() {
+		if s.native != nil {
+			s.closeErr = s.native.Close()
+			s.native = nil
+		}
+	})
+	return s.closeErr
 }
 
 var _ modelinvoker.Stream = (*messageStream)(nil)
+
+func modelError(err error, operation string) *modelinvoker.Error {
+	if candidate, ok := err.(*modelinvoker.Error); ok && candidate != nil {
+		copy := *candidate
+		return &copy
+	}
+	return &modelinvoker.Error{Kind: modelinvoker.ErrorMapping, Operation: operation, Code: "response_model_mismatch", Message: "provider response model identity is untrusted"}
+}

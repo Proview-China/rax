@@ -20,9 +20,10 @@ func TestConfigValidation(t *testing.T) {
 	}{
 		{name: "missing key", config: provider.Config{}, wantErr: "API key is required"},
 		{name: "relative URL", config: provider.Config{APIKey: "test", BaseURL: "/v1"}, wantErr: "absolute HTTP"},
-		{name: "credentials", config: provider.Config{APIKey: "test", BaseURL: "https://user@example.com"}, wantErr: "credentials"},
-		{name: "query", config: provider.Config{APIKey: "test", BaseURL: "https://example.com?q=1"}, wantErr: "query or fragment"},
-		{name: "remote HTTP", config: provider.Config{APIKey: "test", BaseURL: "http://example.com"}, wantErr: "loopback"},
+		{name: "credentials", config: provider.Config{APIKey: "test", BaseURL: "https://user@example.com"}, wantErr: "user info"},
+		{name: "query", config: provider.Config{APIKey: "test", BaseURL: "https://example.com?q=1"}, wantErr: "query"},
+		{name: "remote HTTP", config: provider.Config{APIKey: "test", BaseURL: "http://example.com"}, wantErr: "HTTPS"},
+		{name: "arbitrary HTTPS", config: provider.Config{APIKey: "test", BaseURL: "https://example.com"}, wantErr: "credential audience"},
 		{name: "loopback HTTP", config: provider.Config{APIKey: "test", BaseURL: "http://127.0.0.1:8080", HTTPClient: http.DefaultClient}},
 	}
 	for _, test := range tests {
@@ -58,9 +59,7 @@ func TestConfigValidationAndFormattingDoNotExposeAPIKey(t *testing.T) {
 	}
 
 	formatSecret := "anthropic-format/a b"
-	adapter, err := provider.New(provider.Config{
-		APIKey: formatSecret, BaseURL: "https://example.test/" + url.PathEscape(formatSecret),
-	})
+	adapter, err := provider.New(provider.Config{APIKey: formatSecret})
 	if err != nil {
 		t.Fatal(err)
 	}

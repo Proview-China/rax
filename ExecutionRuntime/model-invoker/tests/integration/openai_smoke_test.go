@@ -16,8 +16,8 @@ import (
 // It performs one real request only when the caller explicitly supplies all
 // three environment variables documented in the module README.
 func TestOpenAIResponsesSmoke(t *testing.T) {
-	if os.Getenv("PRAXIS_OPENAI_SMOKE") != "confirmed" {
-		t.Fatal("set PRAXIS_OPENAI_SMOKE=confirmed only after approving a real API request")
+	if os.Getenv("PRAXIS_LIVE_TESTS") != "1" || os.Getenv("PRAXIS_OPENAI_SMOKE") != "confirmed" {
+		t.Skip("OpenAI live smoke requires global and provider confirmations")
 	}
 	apiKey := os.Getenv("OPENAI_API_KEY")
 	model := os.Getenv("OPENAI_SMOKE_MODEL")
@@ -42,13 +42,13 @@ func TestOpenAIResponsesSmoke(t *testing.T) {
 		Provider: openaiadapter.ProviderID,
 		Protocol: modelinvoker.ProtocolResponses,
 		Model:    model,
-		Input:    []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "Reply with exactly OK.")},
+		Input:    []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "Reply with exactly: praxis-openai-ok")},
 		Budget:   modelinvoker.Budget{MaxOutputTokens: 16, Timeout: 30 * time.Second},
 	})
 	if err != nil {
 		t.Fatalf("real OpenAI smoke request: %v", err)
 	}
-	if response.ID == "" || response.RequestID == "" || response.Text() == "" {
+	if response.ID == "" || response.RequestID == "" || !hasExactProviderSmokeMarker(response.Text(), "praxis-openai-ok") {
 		t.Fatalf("incomplete smoke response: id=%q request_id=%q text=%q", response.ID, response.RequestID, response.Text())
 	}
 }

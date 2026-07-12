@@ -42,10 +42,8 @@ func New(config Config) (*Adapter, error) {
 			Message: err.Error(), Err: err,
 		})
 	}
-	baseURL := config.BaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
+	baseURL, _ := config.trustedBaseURL()
+	config.BaseURL = baseURL
 	adapter, err := newWithClient(newSDKClient(config), baseURL, redactor)
 	if err != nil {
 		return nil, redactor.Error(providerError(modelinvoker.ErrorInvalidRequest, "configure", err.Error(), nil))
@@ -54,7 +52,7 @@ func New(config Config) (*Adapter, error) {
 }
 
 func newWithClient(client anthropicmessages.Client, baseURL string, redactor adaptercore.Redactor) (*Adapter, error) {
-	endpoint := adaptercore.NormalizeEndpoint(baseURL)
+	endpoint := adaptercore.NormalizeEndpoint(baseURL) + "/v1"
 	binding, err := protocol.NewBinding(ProviderID, modelinvoker.ProtocolMessages, endpoint, requestIDHeader)
 	if err != nil {
 		return nil, fmt.Errorf("configure Messages binding: %w", err)
@@ -74,6 +72,13 @@ func newWithClient(client anthropicmessages.Client, baseURL string, redactor ada
 func (a *Adapter) ID() modelinvoker.ProviderID { return ProviderID }
 
 func (a *Adapter) DefaultProtocol() modelinvoker.Protocol { return modelinvoker.ProtocolMessages }
+
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, _ string) (string, bool) {
+	if a == nil || a.baseURL == "" || protocolID != modelinvoker.ProtocolMessages {
+		return "", false
+	}
+	return a.baseURL, true
+}
 
 func (a *Adapter) Capabilities(ctx context.Context, query modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error) {
 	if a == nil || protocol.IsNil(a.client) || a.messagesDriver == nil {
@@ -130,7 +135,8 @@ func (a *Adapter) Invoke(ctx context.Context, request modelinvoker.Request) (res
 		return modelinvoker.Response{}, err
 	}
 	stampResponseAfterRedaction = true
-	return a.messagesDriver.Invoke(ctx, request)
+	result, resultErr = a.messagesDriver.Invoke(ctx, request)
+	return result, resultErr
 }
 
 func (a *Adapter) Stream(ctx context.Context, request modelinvoker.Request) (result modelinvoker.Stream, resultErr error) {
@@ -162,7 +168,8 @@ func (a *Adapter) Stream(ctx context.Context, request modelinvoker.Request) (res
 	if err := a.validateSelection(request); err != nil {
 		return nil, err
 	}
-	return a.messagesDriver.Stream(ctx, request)
+	result, resultErr = a.messagesDriver.Stream(ctx, request)
+	return result, resultErr
 }
 
 func (a *Adapter) validateSelection(request modelinvoker.Request) error {
@@ -182,3 +189,4 @@ func (a *Adapter) validateSelection(request modelinvoker.Request) error {
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

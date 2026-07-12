@@ -31,11 +31,13 @@ func New(c Config) (*Adapter, error) {
 	if err := c.validate(); err != nil {
 		return nil, redactor.Error(providerError(modelinvoker.ErrorInvalidRequest, "configure", err.Error()))
 	}
+	root, _ := c.trustedRootEndpoint()
+	c.BaseURL = root
 	geminiClient, chatClient, messagesClient, err := newSDKClients(c)
 	if err != nil {
 		return nil, redactor.Error(providerError(modelinvoker.ErrorProviderUnavailable, "configure", "failed to initialize Vertex SDK clients"))
 	}
-	root := strings.TrimRight(c.rootEndpoint(), "/")
+	root = strings.TrimRight(root, "/")
 	generateEndpoint := root + "/v1"
 	chatEndpoint := root + "/v1beta1/projects/" + c.Project + "/locations/" + c.Location + "/endpoints/openapi"
 	messagesEndpoint := root + "/v1/projects/" + c.Project + "/locations/" + c.Location + "/publishers/anthropic"
@@ -83,6 +85,13 @@ func New(c Config) (*Adapter, error) {
 func (a *Adapter) ID() modelinvoker.ProviderID { return ProviderID }
 func (a *Adapter) DefaultProtocol() modelinvoker.Protocol {
 	return modelinvoker.ProtocolGenerateContent
+}
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, _ string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	endpoint, ok := a.endpoints[protocolID]
+	return endpoint, ok && endpoint != ""
 }
 func (a *Adapter) Capabilities(ctx context.Context, q modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error) {
 	if a == nil {
@@ -173,3 +182,4 @@ func providerError(k modelinvoker.ErrorKind, op, msg string) *modelinvoker.Error
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

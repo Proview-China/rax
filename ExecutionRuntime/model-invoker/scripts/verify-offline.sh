@@ -14,11 +14,15 @@ credential_variables=(
   DEEPSEEK_API_KEY
   KIMI_API_KEY
   MOONSHOT_API_KEY
+  KIMI_CODE_API_KEY
   MINIMAX_API_KEY
   MINIMAX_TOKEN_PLAN_API_KEY
   ZAI_API_KEY
   MIMO_API_KEY
+  MIMO_TOKEN_PLAN_API_KEY
   DASHSCOPE_API_KEY
+  ALIBABA_CODING_PLAN_API_KEY
+  ALIBABA_TOKEN_PLAN_API_KEY
   AWS_ACCESS_KEY_ID
   AWS_SECRET_ACCESS_KEY
   AWS_SESSION_TOKEN
@@ -65,6 +69,12 @@ credential_variables=(
   QWEN_SMOKE_MODEL
   PRAXIS_XAI_LIVE_TESTS
   XAI_SMOKE_MODEL
+  PRAXIS_KIMI_CODE_LIVE_TESTS
+  KIMI_CODE_SMOKE_ROUTE_ID
+  KIMI_CODE_SMOKE_MODEL
+  PRAXIS_MINIMAX_TOKEN_PLAN_LIVE_TESTS
+  MINIMAX_TOKEN_PLAN_SMOKE_ROUTE_ID
+  MINIMAX_TOKEN_PLAN_SMOKE_MODEL
   OPENAI_SMOKE_MODEL
   ANTHROPIC_SMOKE_MODEL
   GEMINI_SMOKE_MODEL
@@ -115,6 +125,13 @@ go test -race -count=1 ./...
 # With the credentials and confirmation flags removed above, this cannot make
 # a real provider or subscription request.
 go test -tags=integration -run '^$' ./tests/integration
+
+# Execute only the named live-smoke guard tests. These verify input gating,
+# exact marker matching, and Route/Profile-pinned secret resolution; none of
+# them invokes a Provider or opens a network connection.
+go test -count=1 -tags=integration \
+  -run '^(TestLiveSmokeSecretResolverRejectsCrossRouteAndReferenceDrift|TestSubscriptionSmokeMarkerIsExact|TestSubscriptionSmokeInputGateRequiresEveryExplicitValue|TestDirectRouteGatewaySmokeMarkerIsExact|TestProviderSmokeMarkerIsExact)$' \
+  ./tests/integration
 
 # Keep the cross-language schema and checked-in Markdown block visible as an
 # explicit CI surface even though they are also included by ./....

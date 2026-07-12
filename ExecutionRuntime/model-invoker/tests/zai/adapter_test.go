@@ -190,6 +190,9 @@ func TestConfigAndFormattingNeverLeakKey(t *testing.T) {
 	if _, err := provider.New(provider.Config{APIKey: "secret", BaseURL: "http://example.com/api/paas/v4"}); err == nil {
 		t.Fatal("remote plain HTTP accepted")
 	}
+	if _, err := provider.New(provider.Config{APIKey: "secret", BaseURL: "https://example.com/api/paas/v4"}); err == nil {
+		t.Fatal("arbitrary HTTPS endpoint accepted")
+	}
 	adapter, err := provider.New(provider.Config{APIKey: "secret"})
 	if err != nil {
 		t.Fatal(err)

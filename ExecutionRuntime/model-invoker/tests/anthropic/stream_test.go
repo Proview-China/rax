@@ -330,7 +330,7 @@ func TestStreamRejectsInvalidMessageLifecycle(t *testing.T) {
 			name: "missing message start",
 			events: streamMessageDelta("end_turn") +
 				sseEvent("message_stop", `{"type":"message_stop"}`),
-			want: "message_delta arrived before message_start",
+			want: "omitted the required authoritative model identity",
 		},
 		{
 			name:   "duplicate message start",
@@ -374,7 +374,13 @@ func TestStreamRejectsInvalidMessageLifecycle(t *testing.T) {
 			if modelinvoker.ErrorKindOf(err) != modelinvoker.ErrorMapping || !strings.Contains(err.Error(), test.want) {
 				t.Fatalf("stream error = %v, want mapping containing %q", err, test.want)
 			}
-			assertFailedWithoutCompletion(t, events)
+			if test.name == "missing message start" {
+				if len(events) != 1 || events[0].Type != modelinvoker.StreamEventError || events[0].Response != nil || !events[0].Raw.Empty() {
+					t.Fatalf("identity failure leaked untrusted response/raw: %#v", events)
+				}
+			} else {
+				assertFailedWithoutCompletion(t, events)
+			}
 		})
 	}
 }

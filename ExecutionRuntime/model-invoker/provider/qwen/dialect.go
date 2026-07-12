@@ -20,7 +20,7 @@ var qwenToolName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 func supportedModel(model string) bool {
 	switch model {
-	case "qwen3.7-max", "qwen3-max", "qwen3.6-plus", "qwen3.6-flash", "qwen-plus", "qwen-flash", "qwen3-coder-plus", "qwen3-coder-flash":
+	case "qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash":
 		return true
 	default:
 		return false

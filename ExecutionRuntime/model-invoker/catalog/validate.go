@@ -37,6 +37,7 @@ const (
 	IssueEvidenceExpired               IssueCode = "evidence_expired"
 	IssueInvalidEvidenceDigest         IssueCode = "invalid_evidence_digest"
 	IssueInvalidImplementationStatus   IssueCode = "invalid_implementation_status"
+	IssueInvalidHostActivation         IssueCode = "invalid_host_activation"
 	IssueInvalidAdapterID              IssueCode = "invalid_adapter_id"
 	IssueUnavailableEvidenceCallable   IssueCode = "unavailable_evidence_callable"
 	IssueTermsBlockedCallable          IssueCode = "terms_blocked_callable"
@@ -423,6 +424,20 @@ func validateImplementation(add func(IssueCode, upstream.RouteID, string, string
 	}
 	if implementation.Callable && entry.Route.Offering.Entitlement.AllowedUsage == upstream.AllowedUsageOfficialClientOnly {
 		add(IssueUsageBlockedCallable, routeID, prefix+".implementation.callable", "official-client-only offering cannot be called by Praxis")
+	}
+	if implementation.HostActivationRequirement != "" {
+		if implementation.HostActivationRequirement != HostActivationTrustedSubscriptionAuthorizationResolver {
+			add(IssueInvalidHostActivation, routeID, prefix+".implementation.host_activation_requirement", "unsupported host activation requirement")
+		}
+		if implementation.Callable {
+			add(IssueInvalidHostActivation, routeID, prefix+".implementation.callable", "a host-blocked route cannot be callable")
+		}
+		if entry.Route.Offering.Kind != upstream.OfferingTokenPlan && entry.Route.Offering.Kind != upstream.OfferingCodingPlan {
+			add(IssueInvalidHostActivation, routeID, prefix+".implementation.host_activation_requirement", "trusted subscription authorization applies only to subscription offerings")
+		}
+		if rank < ImplementationImplementedOffline.rank() || implementation.AdapterID == "" {
+			add(IssueInvalidHostActivation, routeID, prefix+".implementation", "a host-blocked route must retain its implemented adapter and offline evidence")
+		}
 	}
 	if rank >= ImplementationImplementedOffline.rank() && (len(implementation.CodePaths) == 0 || len(implementation.TestEvidence) == 0) {
 		add(IssueMissingImplementationEvidence, routeID, prefix+".implementation", "offline implementation requires code paths and test evidence")

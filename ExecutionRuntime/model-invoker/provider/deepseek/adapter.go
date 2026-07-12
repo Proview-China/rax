@@ -6,6 +6,7 @@ import (
 	"io"
 
 	modelinvoker "github.com/Proview-China/rax/ExecutionRuntime/model-invoker"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/compatprovider"
 )
 
@@ -19,7 +20,10 @@ func (Adapter) Format(state fmt.State, _ rune) {
 func (Adapter) GoString() string { return "deepseek.Adapter([REDACTED])" }
 
 func New(config Config) (*Adapter, error) {
-	root := config.root()
+	root, err := config.root()
+	if err != nil {
+		return nil, err
+	}
 	inner, err := compatprovider.New(compatprovider.Config{
 		Provider: ProviderID, DefaultProtocol: modelinvoker.ProtocolChatCompletions,
 		APIKey: config.APIKey, HTTPClient: config.HTTPClient,
@@ -45,6 +49,12 @@ func (a *Adapter) DefaultProtocol() modelinvoker.Protocol {
 		return modelinvoker.ProtocolChatCompletions
 	}
 	return a.inner.DefaultProtocol()
+}
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, requested string) (string, bool) {
+	if a == nil || a.inner == nil {
+		return "", false
+	}
+	return a.inner.CandidateBindingEndpoint(protocolID, requested)
 }
 func (a *Adapter) Capabilities(ctx context.Context, query modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error) {
 	if a == nil || a.inner == nil {
@@ -120,3 +130,4 @@ func providerError(kind modelinvoker.ErrorKind, op, message string) *modelinvoke
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

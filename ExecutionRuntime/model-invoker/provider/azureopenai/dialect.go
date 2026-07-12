@@ -13,6 +13,11 @@ type dialect struct {
 	legacy     bool
 }
 
+// VerifyResponseModel is intentionally indirect: Azure requests are bound to
+// the configured deployment name while compatibility responses may echo the
+// underlying model family. Deployment equality is enforced before transport.
+func (dialect) VerifyResponseModel(modelinvoker.Request, string) error { return nil }
+
 func (d dialect) ValidateRequest(r modelinvoker.Request) error {
 	if r.Model != d.deployment {
 		return mappingError("validate", "request model must equal the configured Azure deployment name")

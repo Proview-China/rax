@@ -21,7 +21,8 @@ func TestPublicConfigAndNewSafetyValidation(t *testing.T) {
 		wantErr bool
 	}{
 		{name: "default endpoint", config: openaiadapter.Config{APIKey: "test-key"}},
-		{name: "HTTPS endpoint", config: openaiadapter.Config{APIKey: "test-key", BaseURL: "https://example.com/v1"}},
+		{name: "official HTTPS endpoint", config: openaiadapter.Config{APIKey: "test-key", BaseURL: "https://api.openai.com/v1"}},
+		{name: "arbitrary remote HTTPS", config: openaiadapter.Config{APIKey: "test-key", BaseURL: "https://example.com/v1"}, wantErr: true},
 		{name: "IPv4 loopback HTTP", config: openaiadapter.Config{APIKey: "test-key", BaseURL: "http://127.0.0.1:1234/v1"}},
 		{name: "IPv6 loopback HTTP", config: openaiadapter.Config{APIKey: "test-key", BaseURL: "http://[::1]:1234/v1"}},
 		{name: "localhost HTTP", config: openaiadapter.Config{APIKey: "test-key", BaseURL: "http://localhost:1234/v1"}},

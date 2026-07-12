@@ -16,8 +16,8 @@ import (
 // runs. It performs one real request only when the caller explicitly supplies
 // the confirmation, API key, and model gates below.
 func TestAnthropicMessagesSmoke(t *testing.T) {
-	if os.Getenv("PRAXIS_ANTHROPIC_SMOKE") != "confirmed" {
-		t.Fatal("set PRAXIS_ANTHROPIC_SMOKE=confirmed only after approving a real API request")
+	if os.Getenv("PRAXIS_LIVE_TESTS") != "1" || os.Getenv("PRAXIS_ANTHROPIC_SMOKE") != "confirmed" {
+		t.Skip("Anthropic live smoke requires global and provider confirmations")
 	}
 	apiKey := os.Getenv("ANTHROPIC_API_KEY")
 	model := os.Getenv("ANTHROPIC_SMOKE_MODEL")
@@ -42,13 +42,13 @@ func TestAnthropicMessagesSmoke(t *testing.T) {
 		Provider: anthropicadapter.ProviderID,
 		Protocol: modelinvoker.ProtocolMessages,
 		Model:    model,
-		Input:    []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "Reply with exactly OK.")},
+		Input:    []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "Reply with exactly: praxis-anthropic-ok")},
 		Budget:   modelinvoker.Budget{MaxOutputTokens: 16, Timeout: 30 * time.Second},
 	})
 	if err != nil {
 		t.Fatalf("real Anthropic smoke request: %v", err)
 	}
-	if response.ID == "" || response.RequestID == "" || response.Text() == "" {
+	if response.ID == "" || response.RequestID == "" || !hasExactProviderSmokeMarker(response.Text(), "praxis-anthropic-ok") {
 		t.Fatalf("incomplete smoke response: id=%q request_id=%q text=%q", response.ID, response.RequestID, response.Text())
 	}
 }

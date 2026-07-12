@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 	"time"
 
@@ -45,17 +44,11 @@ func (Config) Format(state fmt.State, _ rune) {
 func (Config) GoString() string { return "bedrockruntime.Config([REDACTED])" }
 
 func (c Config) validate() error {
-	if strings.TrimSpace(c.Region) == "" || strings.ContainsAny(c.Region, "\r\n/ ") {
-		return fmt.Errorf("bedrock runtime: region is required and must be a stable AWS region")
+	if !adaptercore.IsCloudRegion(c.Region) {
+		return fmt.Errorf("bedrock runtime: region must be a canonical cloud region label")
 	}
-	if c.BaseURL != "" {
-		u, err := url.Parse(c.BaseURL)
-		if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-			return fmt.Errorf("bedrock runtime: base URL must be an absolute credential-free URL without query or fragment")
-		}
-		if u.Scheme != "https" && !(u.Scheme == "http" && adaptercore.IsLoopbackHost(u.Hostname())) {
-			return fmt.Errorf("bedrock runtime: plain HTTP is allowed only for loopback tests")
-		}
+	if _, err := c.trustedEndpoint(); err != nil {
+		return err
 	}
 	switch c.CredentialMode {
 	case CredentialSigV4:
@@ -86,8 +79,18 @@ func (c Config) validate() error {
 }
 
 func (c Config) endpoint() string {
-	if c.BaseURL != "" {
-		return adaptercore.NormalizeEndpoint(c.BaseURL)
+	endpoint, _ := c.trustedEndpoint()
+	return endpoint
+}
+func (c Config) trustedEndpoint() (string, error) {
+	host := "bedrock-runtime." + c.Region + ".amazonaws.com"
+	raw := c.BaseURL
+	if raw == "" {
+		raw = "https://" + host
 	}
-	return "https://bedrock-runtime." + c.Region + ".amazonaws.com"
+	endpoint, err := adaptercore.ValidateEndpoint(raw, adaptercore.EndpointPolicy{OfficialHosts: []string{host}, AllowLoopback: true})
+	if err != nil {
+		return "", fmt.Errorf("bedrock runtime: endpoint does not match the Region-derived credential audience: %w", err)
+	}
+	return endpoint, nil
 }

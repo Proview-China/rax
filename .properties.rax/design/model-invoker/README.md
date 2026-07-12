@@ -3,11 +3,12 @@
 ## 设计状态
 
 - 模块名称：`model-invoker`
-- 当前阶段：第三阶段当前授权范围完成；A-E1离线实现与验收完成，F未触发，G/H明确延期，总计划已转为陈旧计划
+- 当前阶段：Factory A/B双层信任矩阵与gap闭合已完成；ActivationPlan、NewHost、P0 exact模型、Endpoint/Credential audience、响应身份与Factory生命周期均已收口
 - 最近更新：2026-07-11
 - 进入计划阶段：第一、第二阶段均已于 2026-07-10 获得用户明确实施授权
 - 代码实现：统一 Go内核、十四个 Runtime Provider、波次 A上游基础、B完整协议层、C动态订阅控制面、D云托管与 E1全部路线均已离线验收，位置为 `ExecutionRuntime/model-invoker/`
-- 下一阶段：当前无已授权实施波次；E2、Sidecar、第三方首批名单、真实 API与生产评审需新的设计和单独授权
+- 当前候选：默认16条订阅Route为`implemented_offline + callable=false + blocked_by_host_trust`；只有可信宿主激活后才可调用
+- 后续边界：E2、Sidecar、第三方首批名单、真实 API与生产评审仍需新的设计和单独授权
 
 ## 目标
 
@@ -74,6 +75,20 @@ Provider Native API
 ## 设计资产
 
 - [架构与语义映射](./architecture.md)
+- [统一语义原语 v1候选](./semantic-primitives-v1.md)
+- [语义原语×六协议×39默认Route/14活跃Adapter矩阵v1候选](./semantic-matrix-v1candidate.md)
+- [语义矩阵机器CSV](./semantic-matrix-v1candidate.csv)
+- [官方订阅调用面设计卡v1候选](./subscription-route-cards-v1.md)
+- [Route Policy/Audit Invoker v1候选](./route-invocation-facade-v1.md)
+- [上游调用最终候选设计](./route-gateway-final-candidate.md)
+- [Provider 缓存传输边界 v1](./provider-cache-transport-boundary-v1.md)
+- [Provider缓存事实机器CSV v1候选](./provider-cache-facts-v1candidate.csv)
+- [最终候选审核清单](./final-candidate-review.md)
+- [Route Gateway信任闭合修正设计](./route-gateway-trust-closure.md)
+- [宿主激活与十家上游再验证设计](./host-activation-and-upstream-revalidation.md)
+- [Factory A/B双层信任矩阵设计](./factory-trust-matrix-v1.md)
+- [Factory信任矩阵机器CSV v1候选](./factory-trust-matrix-v1candidate.csv)
+- [Factory信任矩阵展开Markdown v1候选](./factory-trust-matrix-v1candidate.md)
 - [厂商与 SDK 调查矩阵](./provider-matrix.md)
 - [第二阶段 Anthropic 与 Gemini Provider 设计](./provider-phase-2.md)
 - [第三阶段完整上游生态设计](./provider-phase-3-upstream-ecosystem.md)
@@ -98,4 +113,4 @@ Provider Native API
 
 第一阶段与第二阶段已经完成离线实现与验收。第三阶段波次 A也已完成：七维 Route身份、Credential引用与约束、Catalog、版本化 Schema、证据 TTL/状态门禁、Catalog生成的 Markdown当前 Binding区块、Runtime AdapterID映射，以及统一离线脚本和 CI入口均已落地。波次 A最初四条 Binding的 AdapterID映射为 OpenAI Responses/Chat → `openai`、Anthropic Messages → `anthropic`、Gemini GenerateContent → `gemini`。
 
-波次 A的三项 fuzz与 B1/B2/B3/B4各两项协议 fuzz均已完成验收。B0固定 SDK中立协议根；B1至 B4抽取四协议 driver；B5/B6统一安全错误与公共 SDK签名边界。波次 C新增动态订阅状态、允许/拒绝 Key前缀、到期/额度/HTTP拒绝、禁止自动 PAYG和 Savings Plan BillingPlan边界。波次 D新增 AWS Bedrock Mantle/Runtime、Google Vertex、Azure OpenAI四个云 Adapter和 Bedrock两协议。波次 E1已完成 DeepSeek Chat/Messages、Kimi/Z.AI按量 Chat、MiniMax Messages/Chat/Responses、MiMo Messages/Chat、Qwen北京/新加坡 Responses/Chat与 xAI `grok-4.5` Responses；reasoning、continuation、区域/Workspace、流、缓存与专属终态均有离线门禁，订阅 Offering继续隔离。当前 Catalog为62条，其中39条 callable、23条控制记录。F审计未发现非 Go独占能力触发证据，未生成 Sidecar空壳；第三方首批名单与真实烟测按当前授权延期。统一离线脚本和最终资产一致性审计已通过，总计划已转为陈旧计划；当前不声明真实可用或生产支持。
+波次 A的三项 fuzz与 B1/B2/B3/B4各两项协议 fuzz均已完成验收。B0固定 SDK中立协议根；B1至 B4抽取四协议 driver；B5/B6统一安全错误与公共 SDK签名边界。波次 C新增动态订阅状态、允许/拒绝 Key前缀、到期/额度/HTTP拒绝、禁止自动 PAYG和 Savings Plan BillingPlan边界。波次 D新增 AWS Bedrock Mantle/Runtime、Google Vertex、Azure OpenAI四个云 Adapter和 Bedrock两协议。波次 E1已完成 DeepSeek Chat/Messages、Kimi/Z.AI按量 Chat、MiniMax Messages/Chat/Responses、MiMo Messages/Chat、Qwen北京/新加坡 Responses/Chat与 xAI `grok-4.5` Responses。最终候选订阅阶段实现Kimi、MiniMax、MiMo、Alibaba共16条Route；信任闭合审核后这些Route默认受宿主信任阻塞。当前Catalog为62条：39条默认callable、16条已实现但host-blocked、7条研究/控制记录；真实烟测仍延期。

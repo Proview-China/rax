@@ -230,7 +230,7 @@ func TestPublicContextAndTransportErrors(t *testing.T) {
 
 	transportFailure := errors.New("dial failed")
 	transportAdapter, err := openaiadapter.New(openaiadapter.Config{
-		APIKey: "test-key", BaseURL: "https://api.example.test/v1",
+		APIKey: "test-key", BaseURL: "https://api.openai.com/v1",
 		HTTPClient: &http.Client{Transport: publicRoundTripFunc(func(*http.Request) (*http.Response, error) {
 			return nil, transportFailure
 		})},
@@ -245,7 +245,7 @@ func TestPublicContextAndTransportErrors(t *testing.T) {
 	}
 
 	contextAdapter, err := openaiadapter.New(openaiadapter.Config{
-		APIKey: "test-key", BaseURL: "https://api.example.test/v1",
+		APIKey: "test-key", BaseURL: "https://api.openai.com/v1",
 		HTTPClient: &http.Client{Transport: publicRoundTripFunc(func(request *http.Request) (*http.Response, error) {
 			<-request.Context().Done()
 			return nil, request.Context().Err()

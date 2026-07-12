@@ -80,7 +80,7 @@ func (a *Adapter) addChat(c Config) error {
 	if err != nil {
 		return err
 	}
-	driver, err := openaichat.New(binding, c.ChatDialect, newOpenAIClient(c.APIKey, endpoint, c.HTTPClient))
+	driver, err := openaichat.New(binding, c.ChatDialect, newOpenAIClient(c.APIKey, endpoint, c.HTTPClient, c.UserAgent))
 	if err != nil {
 		return err
 	}
@@ -93,7 +93,7 @@ func (a *Adapter) addResponses(c Config) error {
 	if err != nil {
 		return err
 	}
-	client := newOpenAIClient(c.APIKey, endpoint, c.HTTPClient)
+	client := newOpenAIClient(c.APIKey, endpoint, c.HTTPClient, c.UserAgent)
 	driver, err := openairesponses.New(binding, c.ResponsesDialect, responsesClient{native: client})
 	if err != nil {
 		return err
@@ -107,7 +107,7 @@ func (a *Adapter) addMessages(c Config) error {
 	if err != nil {
 		return err
 	}
-	driver, err := anthropicmessages.New(binding, c.MessagesDialect, newAnthropicClient(c.APIKey, endpoint, c.HTTPClient, c.MessagesAuthToken))
+	driver, err := anthropicmessages.New(binding, c.MessagesDialect, newAnthropicClient(c.APIKey, endpoint, c.HTTPClient, c.MessagesAuthToken, c.UserAgent))
 	if err != nil {
 		return err
 	}
@@ -125,6 +125,14 @@ func (a *Adapter) DefaultProtocol() modelinvoker.Protocol {
 		return modelinvoker.ProtocolAuto
 	}
 	return a.defaultProtocol
+}
+
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, _ string) (string, bool) {
+	if a == nil {
+		return "", false
+	}
+	endpoint, ok := a.endpoints[protocolID]
+	return endpoint, ok && endpoint != ""
 }
 
 func (a *Adapter) Capabilities(ctx context.Context, query modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error) {
@@ -235,3 +243,4 @@ func providerError(provider modelinvoker.ProviderID, kind modelinvoker.ErrorKind
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

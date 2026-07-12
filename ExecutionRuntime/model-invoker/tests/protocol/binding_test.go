@@ -9,8 +9,10 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	modelinvoker "github.com/Proview-China/rax/ExecutionRuntime/model-invoker"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol"
 )
 
@@ -205,6 +207,41 @@ func TestBindingStampsEveryInvokeIdentityWithoutMutatingInputs(t *testing.T) {
 	}
 	if strings.Contains(fmt.Sprintf("%#v|%s", stampedErr, encoded), secret) {
 		t.Fatal("stamped Error retained native request or credential data")
+	}
+}
+
+func TestBindingPreservesContextAndSafeCloseSentinelsTogether(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		ctx  func() (context.Context, context.CancelFunc)
+		want error
+	}{
+		{"cancelled", func() (context.Context, context.CancelFunc) {
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			return ctx, func() {}
+		}, context.Canceled},
+		{"deadline", func() (context.Context, context.CancelFunc) {
+			return context.WithDeadline(context.Background(), time.Unix(0, 0))
+		}, context.DeadlineExceeded},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctx, cancel := test.ctx()
+			defer cancel()
+			const sentinel = "CONTEXT-CLOSE-SECRET-MUST-NOT-LEAK"
+			closeFailure := errors.New(sentinel)
+			original := errors.Join(
+				&modelinvoker.Error{Kind: modelinvoker.ErrorMapping, Code: "response_model_mismatch", Message: "safe identity failure"},
+				adaptercore.SafeCloseError(testProvider, "stream_close", closeFailure),
+			)
+			stamped := mustBinding(t).StampError(ctx, validRequest(""), original, "stream")
+			if !errors.Is(stamped, test.want) || !errors.Is(stamped, closeFailure) {
+				t.Fatalf("stamped context+close error = %v", stamped)
+			}
+			if strings.Contains(stamped.Error(), sentinel) {
+				t.Fatalf("stamped context+close error leaked sentinel: %v", stamped)
+			}
+		})
 	}
 }
 

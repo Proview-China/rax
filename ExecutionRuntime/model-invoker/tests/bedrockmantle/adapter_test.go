@@ -34,7 +34,7 @@ func TestAllMantleBindingsUseBedrockIdentityAndLocalSDKFake(t *testing.T) {
 		case "/openai/v1/chat/completions":
 			_, _ = fmt.Fprint(w, `{"id":"chat","model":"deployment","choices":[{"index":0,"finish_reason":"stop","message":{"content":"chat ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
 		case "/anthropic/v1/messages":
-			_, _ = fmt.Fprint(w, `{"id":"msg","type":"message","role":"assistant","model":"claude","content":[{"type":"text","text":"messages ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
+			_, _ = fmt.Fprint(w, `{"id":"msg","type":"message","role":"assistant","model":"deployment","content":[{"type":"text","text":"messages ok"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
 		default:
 			http.NotFound(w, r)
 		}

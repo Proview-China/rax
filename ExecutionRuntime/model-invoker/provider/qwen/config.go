@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"regexp"
 	"strings"
 
@@ -52,28 +51,27 @@ func (c Config) validate() error {
 	default:
 		return fmt.Errorf("qwen: region is outside the approved cn-beijing/ap-southeast-1 slice")
 	}
-	if !workspacePattern.MatchString(strings.TrimSpace(c.WorkspaceID)) {
+	if c.WorkspaceID != strings.TrimSpace(c.WorkspaceID) || !workspacePattern.MatchString(c.WorkspaceID) {
 		return fmt.Errorf("qwen: workspace ID must be a safe DNS label")
 	}
-	if strings.TrimSpace(c.BaseURL) == "" {
-		return nil
-	}
-	u, err := url.Parse(c.BaseURL)
-	if err != nil || u.Scheme == "" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("qwen: test Base URL must be absolute, credential-free, query-free, and fragment-free")
-	}
-	if !adaptercore.IsLoopbackHost(u.Hostname()) {
-		return fmt.Errorf("qwen: Base URL override is allowed only for loopback tests")
-	}
-	if u.Scheme != "http" && u.Scheme != "https" {
-		return fmt.Errorf("qwen: test Base URL must use HTTP or HTTPS")
-	}
-	return nil
+	_, err := c.trustedEndpoint()
+	return err
 }
 
-func (c Config) endpoint() string {
-	if strings.TrimSpace(c.BaseURL) != "" {
-		return strings.TrimRight(c.BaseURL, "/")
+func (c Config) trustedEndpoint() (string, error) {
+	if c.BaseURL != "" {
+		endpoint, err := adaptercore.ValidateEndpoint(c.BaseURL, adaptercore.EndpointPolicy{AllowLoopback: true, LoopbackOnly: true})
+		if err != nil {
+			return "", fmt.Errorf("qwen: invalid test Base URL: %w", err)
+		}
+		return endpoint, nil
 	}
-	return "https://" + strings.TrimSpace(c.WorkspaceID) + "." + string(c.Region) + ".maas.aliyuncs.com/compatible-mode/v1"
+	official := "https://" + c.WorkspaceID + "." + string(c.Region) + ".maas.aliyuncs.com/compatible-mode/v1"
+	endpoint, err := adaptercore.ValidateEndpoint(official, adaptercore.EndpointPolicy{
+		OfficialHosts: []string{c.WorkspaceID + "." + string(c.Region) + ".maas.aliyuncs.com"}, OfficialPaths: []string{"/compatible-mode/v1"},
+	})
+	if err != nil {
+		return "", fmt.Errorf("qwen: derived production endpoint is invalid: %w", err)
+	}
+	return endpoint, nil
 }

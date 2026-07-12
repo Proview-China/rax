@@ -17,7 +17,7 @@ func TestMiniMaxLiveSmoke(t *testing.T) {
 	}
 	key, model := os.Getenv("MINIMAX_API_KEY"), os.Getenv("MINIMAX_SMOKE_MODEL")
 	if key == "" || model == "" {
-		t.Skip("MINIMAX_API_KEY and MINIMAX_SMOKE_MODEL are required")
+		t.Fatal("enabled MiniMax live smoke requires MINIMAX_API_KEY and MINIMAX_SMOKE_MODEL")
 	}
 	adapter, err := minimax.New(minimax.Config{APIKey: key})
 	if err != nil {
@@ -33,7 +33,7 @@ func TestMiniMaxLiveSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Text() == "" {
-		t.Fatal("MiniMax returned empty text")
+	if !hasExactProviderSmokeMarker(response.Text(), "praxis-minimax-ok") {
+		t.Fatal("MiniMax response did not match the exact marker")
 	}
 }

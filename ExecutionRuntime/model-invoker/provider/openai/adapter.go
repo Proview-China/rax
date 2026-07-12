@@ -49,10 +49,8 @@ func New(config Config) (*Adapter, error) {
 			Err:       err,
 		})
 	}
-	baseURL := config.BaseURL
-	if baseURL == "" {
-		baseURL = defaultBaseURL
-	}
+	baseURL, _ := config.trustedBaseURL()
+	config.BaseURL = baseURL
 	adapter, err := newWithClient(newSDKClient(config), baseURL, redactor)
 	if err != nil {
 		return nil, redactor.Error(providerError(modelinvoker.ErrorInvalidRequest, "configure", err.Error(), nil))
@@ -93,6 +91,13 @@ func (a *Adapter) ID() modelinvoker.ProviderID { return ProviderID }
 
 func (a *Adapter) DefaultProtocol() modelinvoker.Protocol {
 	return modelinvoker.ProtocolResponses
+}
+
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, _ string) (string, bool) {
+	if a == nil || a.baseURL == "" {
+		return "", false
+	}
+	return a.baseURL, protocolID == modelinvoker.ProtocolResponses || protocolID == modelinvoker.ProtocolChatCompletions
 }
 
 func (a *Adapter) publicBinding(protocolID modelinvoker.Protocol) (protocol.Binding, string, bool) {
@@ -193,16 +198,19 @@ func (a *Adapter) Invoke(ctx context.Context, request modelinvoker.Request) (res
 	if err := a.validateRequest(request); err != nil {
 		return modelinvoker.Response{}, err
 	}
+	var response modelinvoker.Response
+	var err error
 	switch request.Protocol {
 	case modelinvoker.ProtocolResponses:
 		stampResponseAfterRedaction = true
-		return a.responsesDriver.Invoke(ctx, request)
+		response, err = a.responsesDriver.Invoke(ctx, request)
 	case modelinvoker.ProtocolChatCompletions:
 		stampResponseAfterRedaction = true
-		return a.chatDriver.Invoke(ctx, request)
+		response, err = a.chatDriver.Invoke(ctx, request)
 	default:
 		return modelinvoker.Response{}, providerError(modelinvoker.ErrorInvalidRequest, "invoke", fmt.Sprintf("unsupported protocol %q", request.Protocol), nil)
 	}
+	return response, err
 }
 
 func (a *Adapter) Stream(ctx context.Context, request modelinvoker.Request) (result modelinvoker.Stream, resultErr error) {
@@ -233,14 +241,17 @@ func (a *Adapter) Stream(ctx context.Context, request modelinvoker.Request) (res
 	if err := a.validateRequest(request); err != nil {
 		return nil, err
 	}
+	var stream modelinvoker.Stream
+	var err error
 	switch request.Protocol {
 	case modelinvoker.ProtocolResponses:
-		return a.responsesDriver.Stream(ctx, request)
+		stream, err = a.responsesDriver.Stream(ctx, request)
 	case modelinvoker.ProtocolChatCompletions:
-		return a.chatDriver.Stream(ctx, request)
+		stream, err = a.chatDriver.Stream(ctx, request)
 	default:
 		return nil, providerError(modelinvoker.ErrorInvalidRequest, "stream", fmt.Sprintf("unsupported protocol %q", request.Protocol), nil)
 	}
+	return stream, err
 }
 
 func (a *Adapter) validateRequest(request modelinvoker.Request) error {
@@ -330,3 +341,4 @@ func validateOpenAIRequestSemantics(request modelinvoker.Request) error {
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

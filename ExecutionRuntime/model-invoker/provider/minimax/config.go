@@ -4,7 +4,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strings"
+
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 )
 
 const defaultRootURL = "https://api.minimax.io"
@@ -20,12 +21,16 @@ func (Config) Format(state fmt.State, _ rune) {
 }
 func (Config) GoString() string { return "minimax.Config([REDACTED])" }
 
-func (c Config) rootEndpoint() string {
-	if strings.TrimSpace(c.BaseURL) == "" {
-		return defaultRootURL
+func (c Config) rootEndpoint() (string, error) {
+	raw := c.BaseURL
+	if raw == "" {
+		raw = defaultRootURL
 	}
-	return strings.TrimRight(c.BaseURL, "/")
+	endpoint, err := adaptercore.ValidateEndpoint(raw, adaptercore.EndpointPolicy{
+		OfficialHosts: []string{"api.minimax.io"}, AllowLoopback: true,
+	})
+	if err != nil {
+		return "", fmt.Errorf("minimax: invalid base URL: %w", err)
+	}
+	return endpoint, nil
 }
-
-func (c Config) openAIEndpoint() string   { return c.rootEndpoint() + "/v1" }
-func (c Config) messagesEndpoint() string { return c.rootEndpoint() + "/anthropic" }

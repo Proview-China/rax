@@ -22,7 +22,7 @@ func TestCapabilitiesContractAndBoundaries(t *testing.T) {
 		t.Fatalf("identity = %q/%q", adapter.ID(), adapter.DefaultProtocol())
 	}
 
-	query := modelinvoker.CapabilityQuery{Protocol: modelinvoker.ProtocolMessages, Model: "claude-test-model"}
+	query := modelinvoker.CapabilityQuery{Protocol: modelinvoker.ProtocolMessages, Model: "claude-sonnet-4-6"}
 	contract, err := adapter.Capabilities(context.Background(), query)
 	if err != nil {
 		t.Fatalf("Capabilities() error = %v", err)

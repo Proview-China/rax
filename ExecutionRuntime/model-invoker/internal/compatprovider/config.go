@@ -26,11 +26,15 @@ type Config struct {
 	ResponsesEndpoint string
 	MessagesEndpoint  string
 	MessagesAuthToken bool
-	ChatDialect       protocol.Dialect
-	ResponsesDialect  protocol.Dialect
-	MessagesDialect   protocol.Dialect
-	Capabilities      CapabilityBuilder
-	RequestIDHeaders  []string
+	// UserAgent, when non-empty, is forced at the final HTTP transport boundary.
+	// Restricted subscription routes use the attested build/runtime identity and
+	// never accept a caller-supplied header through Request or ProviderOptions.
+	UserAgent        string
+	ChatDialect      protocol.Dialect
+	ResponsesDialect protocol.Dialect
+	MessagesDialect  protocol.Dialect
+	Capabilities     CapabilityBuilder
+	RequestIDHeaders []string
 }
 
 func (c Config) Validate() error {
@@ -39,6 +43,9 @@ func (c Config) Validate() error {
 	}
 	if strings.TrimSpace(c.APIKey) == "" {
 		return fmt.Errorf("%s: API key is required", c.Provider)
+	}
+	if c.UserAgent != "" && (strings.TrimSpace(c.UserAgent) == "" || len(c.UserAgent) > 512 || strings.ContainsAny(c.UserAgent, "\r\n")) {
+		return fmt.Errorf("%s: user agent must be bounded and single-line", c.Provider)
 	}
 	configured := map[modelinvoker.Protocol]struct{}{}
 	checks := []struct {

@@ -95,6 +95,14 @@ func (d *Driver) Invoke(ctx context.Context, request modelinvoker.Request) (mode
 		response := d.failedResponse(request, rawRequest, decisions, captured, headers, err)
 		return response, normalizeFailure(ctx, d.base, request, "chat_completions.create", headers, err)
 	}
+	actualModel := ""
+	if native != nil {
+		actualModel = native.Model
+	}
+	if identityErr := d.base.VerifyResponseModel(request, actualModel, "chat_completions.response_model"); identityErr != nil {
+		return modelinvoker.Response{Provider: d.Binding().Provider, Protocol: modelinvoker.ProtocolChatCompletions, Status: modelinvoker.ResponseStatusFailed},
+			d.base.StampError(ctx, request, identityErr, "chat_completions.response_model")
+	}
 	response, normalizeErr := normalizeResponse(d.base, request, native, headers, d.finishMapper)
 	if len(captured.Body) > 0 {
 		response.RawResponse = modelinvoker.NewRawPayload(captured.Body)

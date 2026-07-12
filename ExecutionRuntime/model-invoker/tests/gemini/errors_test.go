@@ -83,7 +83,7 @@ func TestTransportErrorDoesNotEnterPublicUnwrapChain(t *testing.T) {
 		calls.Add(1)
 		return nil, &url.Error{Op: request.Method, URL: request.URL.String(), Err: errors.New("offline")}
 	})}
-	adapter := newAdapter(t, "https://gemini.invalid.example", client)
+	adapter := newAdapter(t, "", client)
 	_, err := adapter.Invoke(context.Background(), baseRequest())
 	if err == nil || modelinvoker.ErrorKindOf(err) != modelinvoker.ErrorProviderUnavailable {
 		t.Fatalf("Invoke() error = %v", err)
@@ -110,7 +110,7 @@ func TestContextCancellationPreservesOnlyContextSentinel(t *testing.T) {
 		<-request.Context().Done()
 		return nil, request.Context().Err()
 	})}
-	adapter := newAdapter(t, "https://gemini.invalid.example", client)
+	adapter := newAdapter(t, "", client)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	_, err := adapter.Invoke(ctx, baseRequest())

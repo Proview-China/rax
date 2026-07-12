@@ -18,12 +18,7 @@ import (
 var zaiToolName = regexp.MustCompile(`^[A-Za-z0-9_-]{1,64}$`)
 
 func supportedModel(model string) bool {
-	switch model {
-	case "glm-5.2", "glm-5.1", "glm-5-turbo", "glm-5", "glm-4.7", "glm-4.7-flash", "glm-4.7-flashx", "glm-4.6", "glm-4.5", "glm-4.5-air", "glm-4.5-x", "glm-4.5-airx", "glm-4.5-flash", "glm-4-32b-0414-128k":
-		return true
-	default:
-		return false
-	}
+	return model == "glm-5.2"
 }
 func thinkingModel(model string) bool { return supportedModel(model) && model != "glm-4-32b-0414-128k" }
 

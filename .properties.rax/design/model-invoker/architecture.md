@@ -112,6 +112,12 @@ Runtime 只依赖 Praxis 自己的稳定语义，不依赖厂商 SDK。
 - `Metadata`：追踪、租户和业务标签；
 - `ProviderOptions`：经过命名空间隔离的厂商扩展。
 
+### 2.5 Route Policy/Audit层
+
+`RouteInvoker`把显式 `RouteID`与语义 `Request`候选组合。调用方不得再提供 Provider、Protocol或 Endpoint；该层从活动 Catalog绑定这三个选择器，并按固定顺序检查 callable状态、调用时 evidence、static model、Offering policy、订阅 entitlement、禁止自动 PAYG和 Adapter注册，之后才进入预构造的基础 `Invoker`。
+
+`Resolve`只做离线预检，不调用任何 Provider方法。`RouteSelection`保存七维身份、evidence digest和 PolicyDecision；Provider语义映射仍保存在原有 `Response.MappingReport`。该层不解析秘密、不构造 Adapter、不拥有实例生命周期，因此不是完整 Route Gateway。阶段性合同见[Route Policy/Audit Invoker v1候选](./route-invocation-facade-v1.md)，完整组合设计见[上游调用最终候选设计](./route-gateway-final-candidate.md)。
+
 ## 3. 能力并集
 
 每项 Provider 能力必须声明支持级别：

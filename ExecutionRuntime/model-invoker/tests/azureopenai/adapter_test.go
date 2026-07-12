@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -88,5 +89,76 @@ func TestEntraProviderRefreshesWithoutLeakingIntoV1Query(t *testing.T) {
 	}
 	if tokens.calls.Load() != 2 {
 		t.Fatalf("token refresh calls = %d", tokens.calls.Load())
+	}
+}
+
+func TestAzureProjectsNativeModelToDeploymentForInvokeAndStream(t *testing.T) {
+	const deployment = "deploy-a"
+	const nativeModel = "gpt-native-version-different-from-deployment"
+	for _, protocolID := range []modelinvoker.Protocol{modelinvoker.ProtocolChatCompletions, modelinvoker.ProtocolResponses} {
+		for _, streaming := range []bool{false, true} {
+			name := string(protocolID) + "_invoke"
+			if streaming {
+				name = string(protocolID) + "_stream"
+			}
+			t.Run(name, func(t *testing.T) {
+				server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+					if streaming {
+						writer.Header().Set("Content-Type", "text/event-stream")
+						if protocolID == modelinvoker.ProtocolResponses {
+							_, _ = fmt.Fprintf(writer, "data: %s\n\ndata: %s\n\n",
+								`{"type":"response.created","sequence_number":1,"response":{"id":"resp","model":"`+nativeModel+`","status":"in_progress","output":[]}}`,
+								`{"type":"response.completed","sequence_number":2,"response":{"id":"resp","model":"`+nativeModel+`","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":0,"total_tokens":1}}}`)
+						} else {
+							_, _ = fmt.Fprintf(writer, "data: %s\n\n",
+								`{"id":"chat","object":"chat.completion.chunk","model":"`+nativeModel+`","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}]}`)
+						}
+						return
+					}
+					writer.Header().Set("Content-Type", "application/json")
+					if protocolID == modelinvoker.ProtocolResponses {
+						_, _ = fmt.Fprint(writer, `{"id":"resp","model":"`+nativeModel+`","status":"completed","output":[],"usage":{"input_tokens":1,"output_tokens":0,"total_tokens":1}}`)
+					} else {
+						_, _ = fmt.Fprint(writer, `{"id":"chat","model":"`+nativeModel+`","choices":[{"index":0,"finish_reason":"stop","message":{"content":"ok"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+					}
+				}))
+				defer server.Close()
+				adapter, err := provider.New(provider.Config{ResourceEndpoint: server.URL, Region: "eastus", DeploymentName: deployment, CredentialMode: provider.CredentialAPIKey, APIKey: "azure-key", HTTPClient: server.Client()})
+				if err != nil {
+					t.Fatal(err)
+				}
+				request := modelinvoker.Request{Provider: provider.ProviderID, Protocol: protocolID, Endpoint: server.URL + "/openai/v1", Model: deployment, Input: []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "hello")}}
+				if !streaming {
+					response, err := adapter.Invoke(context.Background(), request)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if response.Model != deployment || !strings.Contains(string(response.RawResponse.Bytes()), nativeModel) {
+						t.Fatalf("Azure projected/native response = %#v raw=%q", response, response.RawResponse.Bytes())
+					}
+					return
+				}
+				stream, err := adapter.Stream(context.Background(), request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer stream.Close()
+				var responses int
+				for stream.Next() {
+					if response := stream.Event().Response; response != nil {
+						responses++
+						if response.Model != deployment {
+							t.Fatalf("Azure stream portable Model = %q, want deployment %q", response.Model, deployment)
+						}
+					}
+				}
+				if err := stream.Err(); err != nil {
+					t.Fatal(err)
+				}
+				if responses == 0 {
+					t.Fatal("Azure stream emitted no portable response")
+				}
+			})
+		}
 	}
 }

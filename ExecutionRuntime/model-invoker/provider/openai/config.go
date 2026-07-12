@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"net/url"
 	"strings"
 
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
@@ -30,25 +29,20 @@ func (c Config) validate() error {
 	if strings.TrimSpace(c.APIKey) == "" {
 		return fmt.Errorf("openai: API key is required")
 	}
-	if c.BaseURL == "" {
-		return nil
-	}
+	_, err := c.trustedBaseURL()
+	return err
+}
 
-	u, err := url.Parse(c.BaseURL)
+func (c Config) trustedBaseURL() (string, error) {
+	endpoint := c.BaseURL
+	if endpoint == "" {
+		endpoint = defaultBaseURL
+	}
+	trusted, err := adaptercore.ValidateEndpoint(endpoint, adaptercore.EndpointPolicy{
+		OfficialHosts: []string{"api.openai.com"}, OfficialPaths: []string{"/v1"}, AllowLoopback: true,
+	})
 	if err != nil {
-		return fmt.Errorf("openai: invalid base URL: %w", err)
+		return "", fmt.Errorf("openai: invalid base URL: %w", err)
 	}
-	if u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
-		return fmt.Errorf("openai: base URL must be an absolute HTTP(S) URL")
-	}
-	if u.User != nil {
-		return fmt.Errorf("openai: base URL must not contain credentials")
-	}
-	if u.RawQuery != "" || u.Fragment != "" {
-		return fmt.Errorf("openai: base URL must not contain a query or fragment")
-	}
-	if u.Scheme == "http" && !adaptercore.IsLoopbackHost(u.Hostname()) {
-		return fmt.Errorf("openai: insecure HTTP is allowed only for loopback test servers")
-	}
-	return nil
+	return trusted, nil
 }

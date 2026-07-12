@@ -38,6 +38,8 @@ func New(config Config) (*Adapter, error) {
 			Message: err.Error(), Err: err,
 		})
 	}
+	baseURL, _ := config.trustedBaseURL()
+	config.BaseURL = baseURL
 	client, err := newSDKClient(config)
 	if err != nil {
 		return nil, redactor.Error(providerError(modelinvoker.ErrorProviderUnavailable, "configure", "failed to initialize Gemini Developer API client", nil))
@@ -74,6 +76,13 @@ func (a *Adapter) ID() modelinvoker.ProviderID { return ProviderID }
 
 func (a *Adapter) DefaultProtocol() modelinvoker.Protocol {
 	return modelinvoker.ProtocolGenerateContent
+}
+
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, _ string) (string, bool) {
+	if a == nil || a.endpoint == "" || protocolID != modelinvoker.ProtocolGenerateContent {
+		return "", false
+	}
+	return a.endpoint, true
 }
 
 func (a *Adapter) Capabilities(ctx context.Context, query modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error) {
@@ -183,3 +192,4 @@ func (a *Adapter) validateSelection(request modelinvoker.Request) error {
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

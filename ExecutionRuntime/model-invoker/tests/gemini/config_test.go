@@ -19,14 +19,14 @@ func TestConfigValidationAndVertexRejection(t *testing.T) {
 	}{
 		{name: "missing key", config: provider.Config{}, wantErr: "API key is required"},
 		{name: "relative URL", config: provider.Config{APIKey: "test", BaseURL: "/v1beta"}, wantErr: "absolute HTTP"},
-		{name: "credentials", config: provider.Config{APIKey: "test", BaseURL: "https://user@example.com"}, wantErr: "credentials"},
-		{name: "query", config: provider.Config{APIKey: "test", BaseURL: "https://example.com?key=secret"}, wantErr: "query or fragment"},
-		{name: "remote HTTP", config: provider.Config{APIKey: "test", BaseURL: "http://example.com"}, wantErr: "loopback"},
+		{name: "credentials", config: provider.Config{APIKey: "test", BaseURL: "https://user@example.com"}, wantErr: "user info"},
+		{name: "query", config: provider.Config{APIKey: "test", BaseURL: "https://example.com?key=secret"}, wantErr: "query"},
+		{name: "remote HTTP", config: provider.Config{APIKey: "test", BaseURL: "http://example.com"}, wantErr: "HTTPS"},
 		{name: "bad version", config: provider.Config{APIKey: "test", APIVersion: "v2"}, wantErr: "v1 or v1beta"},
-		{name: "global aiplatform", config: provider.Config{APIKey: "test", BaseURL: "https://aiplatform.googleapis.com"}, wantErr: "Vertex AI"},
-		{name: "regional aiplatform", config: provider.Config{APIKey: "test", BaseURL: "https://us-central1-aiplatform.googleapis.com"}, wantErr: "Vertex AI"},
-		{name: "vertex hostname", config: provider.Config{APIKey: "test", BaseURL: "https://api.vertexai.googleapis.com"}, wantErr: "Vertex AI"},
-		{name: "vertex path", config: provider.Config{APIKey: "test", BaseURL: "https://proxy.example/projects/p/locations/us/publishers/google/models"}, wantErr: "Vertex AI"},
+		{name: "global aiplatform", config: provider.Config{APIKey: "test", BaseURL: "https://aiplatform.googleapis.com"}, wantErr: "credential audience"},
+		{name: "regional aiplatform", config: provider.Config{APIKey: "test", BaseURL: "https://us-central1-aiplatform.googleapis.com"}, wantErr: "credential audience"},
+		{name: "vertex hostname", config: provider.Config{APIKey: "test", BaseURL: "https://api.vertexai.googleapis.com"}, wantErr: "credential audience"},
+		{name: "vertex path", config: provider.Config{APIKey: "test", BaseURL: "https://proxy.example/projects/p/locations/us/publishers/google/models"}, wantErr: "credential audience"},
 		{name: "loopback HTTP", config: provider.Config{APIKey: "test", BaseURL: "http://127.0.0.1:8080", HTTPClient: http.DefaultClient}},
 	}
 	for _, test := range tests {
@@ -62,9 +62,7 @@ func TestConfigValidationAndFormattingDoNotExposeAPIKey(t *testing.T) {
 	}
 
 	formatSecret := "gemini-format/a b"
-	adapter, err := provider.New(provider.Config{
-		APIKey: formatSecret, BaseURL: "https://example.test/" + url.PathEscape(formatSecret),
-	})
+	adapter, err := provider.New(provider.Config{APIKey: formatSecret})
 	if err != nil {
 		t.Fatal(err)
 	}

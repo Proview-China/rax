@@ -16,7 +16,7 @@ import (
 
 func TestUnknownContentBlockRequiresExplicitDegradationAndRemainsAuditable(t *testing.T) {
 	fixture := []byte(`{
-		"id":"msg_unknown","type":"message","role":"assistant","model":"claude-test-model",
+		"id":"msg_unknown","type":"message","role":"assistant","model":"claude-sonnet-4-6",
 		"content":[{"type":"future_block","future_value":"preserve-me"}],
 		"stop_reason":"end_turn","stop_sequence":null,
 		"usage":{"input_tokens":2,"output_tokens":1}
@@ -62,7 +62,7 @@ func TestUnknownContentBlockRequiresExplicitDegradationAndRemainsAuditable(t *te
 
 func TestRedactedThinkingContinuationRoundTripAndDefensivePayload(t *testing.T) {
 	firstFixture := []byte(`{
-		"id":"msg_redacted","type":"message","role":"assistant","model":"claude-test-model",
+		"id":"msg_redacted","type":"message","role":"assistant","model":"claude-sonnet-4-6",
 		"content":[
 			{"type":"redacted_thinking","data":"encrypted-thinking-01"},
 			{"type":"tool_use","id":"toolu_redacted","name":"get_weather","input":{"city":"Paris"},"caller":{"type":"direct"}}
@@ -140,7 +140,7 @@ func TestRedactedThinkingContinuationRoundTripAndDefensivePayload(t *testing.T) 
 
 func TestContinuationStateContainsOnlyResumableWhitelist(t *testing.T) {
 	firstFixture := []byte(`{
-		"id":"msg_filtered","type":"message","role":"assistant","model":"claude-test-model",
+		"id":"msg_filtered","type":"message","role":"assistant","model":"claude-sonnet-4-6",
 		"content":[
 			{"type":"thinking","thinking":"use the tool","signature":"sig_filtered"},
 			{"type":"text","text":"ordinary assistant text"},
@@ -150,7 +150,7 @@ func TestContinuationStateContainsOnlyResumableWhitelist(t *testing.T) {
 		"usage":{"input_tokens":4,"output_tokens":3}
 	}`)
 	secondFixture := []byte(`{
-		"id":"msg_filtered_done","type":"message","role":"assistant","model":"claude-test-model",
+		"id":"msg_filtered_done","type":"message","role":"assistant","model":"claude-sonnet-4-6",
 		"content":[{"type":"text","text":"done"}],
 		"stop_reason":"end_turn","stop_sequence":null,
 		"usage":{"input_tokens":2,"output_tokens":1}
@@ -225,7 +225,7 @@ func TestContinuationToolInputKeepsBusinessCacheControlField(t *testing.T) {
 		}
 		w.Header().Set("content-type", "application/json")
 		_, _ = w.Write([]byte(`{
-			"id":"msg_business_cache","type":"message","role":"assistant","model":"claude-test-model",
+			"id":"msg_business_cache","type":"message","role":"assistant","model":"claude-sonnet-4-6",
 			"content":[{"type":"text","text":"done"}],"stop_reason":"end_turn","stop_sequence":null,
 			"usage":{"input_tokens":2,"output_tokens":1}
 		}`))
@@ -411,7 +411,7 @@ func TestResponseWithIncompleteThinkingDoesNotCreateContinuation(t *testing.T) {
 		w.Header().Set("content-type", "application/json")
 		w.Header().Set("request-id", "req_incomplete_thinking")
 		_, _ = w.Write([]byte(`{
-			"id":"msg_incomplete_thinking","type":"message","role":"assistant","model":"claude-test-model",
+			"id":"msg_incomplete_thinking","type":"message","role":"assistant","model":"claude-sonnet-4-6",
 			"content":[{"type":"thinking","thinking":"unsigned","signature":""}],
 			"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":2,"output_tokens":1}
 		}`))

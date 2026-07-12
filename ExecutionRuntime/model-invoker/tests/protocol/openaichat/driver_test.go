@@ -66,6 +66,7 @@ type fakeStream struct {
 	index    int
 	closed   int
 	terminal error
+	closeErr error
 }
 
 func (s *fakeStream) Next() bool {
@@ -87,7 +88,7 @@ func (s *fakeStream) Err() error { return s.terminal }
 
 func (s *fakeStream) Close() error {
 	s.closed++
-	return nil
+	return s.closeErr
 }
 
 func TestDriverUsesInjectedIdentityAndMapsInvoke(t *testing.T) {
@@ -151,6 +152,22 @@ func TestDriverFailureDropsNativeCause(t *testing.T) {
 	}
 }
 
+func TestDriverInvokeRejectsMissingAndMismatchedAuthoritativeModel(t *testing.T) {
+	for _, test := range []struct{ name, actual, code string }{
+		{"missing", "", "response_model_missing"},
+		{"mismatch", "other-model", "response_model_mismatch"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			native := decodeCompletion(t, `{"id":"untrusted","model":"`+test.actual+`","choices":[{"index":0,"finish_reason":"stop","message":{"content":"untrusted"}}]}`)
+			response, err := mustDriver(t, &fakeDialect{}, &fakeClient{response: &native}).Invoke(context.Background(), validRequest())
+			var invocationError *modelinvoker.Error
+			if !errors.As(err, &invocationError) || invocationError.Code != test.code || response.Status != modelinvoker.ResponseStatusFailed || len(response.Output) != 0 || !response.RawResponse.Empty() {
+				t.Fatalf("authoritative model rejection = %#v / %v", response, err)
+			}
+		})
+	}
+}
+
 func TestDriverStreamPreservesOrderUsageTerminalAndIdentity(t *testing.T) {
 	native := &fakeStream{events: []openaisdk.ChatCompletionChunk{
 		decodeChunk(t, `{"id":"chat_stream","model":"served-model","choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":"stop"}]}`),
@@ -199,6 +216,49 @@ func TestDriverStreamPreservesOrderUsageTerminalAndIdentity(t *testing.T) {
 	}
 }
 
+func TestDriverStreamModelIdentityFailureClosesOnceWithoutPayloadOrCloseLeak(t *testing.T) {
+	for _, test := range []struct{ name, actual, code string }{
+		{"missing", "", "response_model_missing"},
+		{"mismatch", "other-model", "response_model_mismatch"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const sentinel = "CHAT-CLOSE-SECRET-MUST-NOT-LEAK"
+			closeFailure := errors.New(sentinel)
+			native := &fakeStream{events: []openaisdk.ChatCompletionChunk{
+				decodeChunk(t, `{"id":"untrusted","model":"`+test.actual+`","choices":[{"index":0,"delta":{"content":"untrusted"}}]}`),
+			}, closeErr: closeFailure}
+			stream, err := mustDriver(t, &fakeDialect{}, &fakeClient{stream: native}).Stream(context.Background(), validRequest())
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertIdentityFailureStream(t, stream, native, test.code, closeFailure, sentinel)
+		})
+	}
+}
+
+func assertIdentityFailureStream(t *testing.T, stream modelinvoker.Stream, native *fakeStream, code string, closeFailure error, sentinel string) {
+	t.Helper()
+	if !stream.Next() {
+		t.Fatal("identity failure Next() = false")
+	}
+	event := stream.Event()
+	if event.Type != modelinvoker.StreamEventError || event.Error == nil || event.Error.Code != code || event.Response != nil || !event.Raw.Empty() {
+		t.Fatalf("identity failure event = %#v", event)
+	}
+	if err := stream.Err(); !errors.Is(err, closeFailure) || strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("identity failure Err() lost or leaked close cause: %v", err)
+	}
+	if err := stream.Close(); !errors.Is(err, closeFailure) || strings.Contains(err.Error(), sentinel) {
+		t.Fatalf("identity failure Close() lost or leaked close cause: %v", err)
+	}
+	if err := stream.Close(); err != nil {
+		t.Fatalf("second Close() = %v", err)
+	}
+	if native.closed != 1 {
+		t.Fatalf("native Close calls = %d, want 1", native.closed)
+	}
+}
+
 func TestNewRejectsWrongBindingAndNilClients(t *testing.T) {
 	wrong, err := protocol.NewBinding(testProvider, modelinvoker.ProtocolResponses, testEndpoint)
 	if err != nil {
@@ -238,7 +298,7 @@ func mustBinding(t *testing.T) protocol.Binding {
 func validRequest() modelinvoker.Request {
 	return modelinvoker.Request{
 		Provider: testProvider, Protocol: modelinvoker.ProtocolChatCompletions,
-		Endpoint: testEndpoint, Model: "test-model",
+		Endpoint: testEndpoint, Model: "served-model",
 		Input: []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "hello")},
 	}
 }

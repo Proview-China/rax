@@ -20,9 +20,13 @@ func (Adapter) Format(state fmt.State, _ rune) {
 func (Adapter) GoString() string { return "zai.Adapter([REDACTED])" }
 
 func New(config Config) (*Adapter, error) {
+	endpoint, err := config.endpoint()
+	if err != nil {
+		return nil, err
+	}
 	inner, err := compatprovider.New(compatprovider.Config{
 		Provider: ProviderID, DefaultProtocol: modelinvoker.ProtocolChatCompletions,
-		APIKey: config.APIKey, HTTPClient: config.HTTPClient, ChatEndpoint: config.endpoint(),
+		APIKey: config.APIKey, HTTPClient: config.HTTPClient, ChatEndpoint: endpoint,
 		ChatDialect: chatDialect{}, Capabilities: capabilityContract,
 		RequestIDHeaders: []string{"x-request-id", "request-id"},
 	})
@@ -35,6 +39,12 @@ func New(config Config) (*Adapter, error) {
 func (a *Adapter) ID() modelinvoker.ProviderID { return ProviderID }
 func (a *Adapter) DefaultProtocol() modelinvoker.Protocol {
 	return modelinvoker.ProtocolChatCompletions
+}
+func (a *Adapter) CandidateBindingEndpoint(protocolID modelinvoker.Protocol, requested string) (string, bool) {
+	if a == nil || a.inner == nil {
+		return "", false
+	}
+	return a.inner.CandidateBindingEndpoint(protocolID, requested)
 }
 func (a *Adapter) Capabilities(ctx context.Context, q modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error) {
 	if a == nil || a.inner == nil {
@@ -78,3 +88,4 @@ func providerError(kind modelinvoker.ErrorKind, op, message string) *modelinvoke
 }
 
 var _ modelinvoker.Provider = (*Adapter)(nil)
+var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)

@@ -1,5 +1,7 @@
 # 模型调用器第一阶段落地计划
 
+> 最近完成计划：[Factory双层信任闭合](./factory-trust-matrix-v1.md)。18 Factory/14默认活跃Adapter/4订阅Factory的A/B层protocol/profile合同、AST证据、Endpoint/Model/Lifecycle gap与全量离线回归均已完成；[宿主激活计划](./host-activation-and-upstream-revalidation.md)、[信任闭合计划](./route-gateway-trust-closure.md)、[上游调用最终候选计划](./route-gateway-final-candidate.md)与[Route Policy/Audit阶段计划](./route-invocation-facade-v1.md)继续作为历史计划保留。
+
 ## 1. 计划状态
 
 - 模块：`model-invoker`

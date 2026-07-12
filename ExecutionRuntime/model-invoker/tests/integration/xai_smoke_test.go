@@ -17,7 +17,7 @@ func TestXAILiveSmoke(t *testing.T) {
 	}
 	key, model := os.Getenv("XAI_API_KEY"), os.Getenv("XAI_SMOKE_MODEL")
 	if key == "" || model == "" {
-		t.Skip("XAI_API_KEY and XAI_SMOKE_MODEL are required")
+		t.Fatal("enabled xAI live smoke requires XAI_API_KEY and XAI_SMOKE_MODEL")
 	}
 	adapter, err := xai.New(xai.Config{APIKey: key})
 	if err != nil {
@@ -32,7 +32,7 @@ func TestXAILiveSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Text() == "" {
-		t.Fatal("xAI returned empty text")
+	if !hasExactProviderSmokeMarker(response.Text(), "praxis-xai-ok") {
+		t.Fatal("xAI response did not match the exact marker")
 	}
 }

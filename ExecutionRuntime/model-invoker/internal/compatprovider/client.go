@@ -20,8 +20,9 @@ type openAIClient struct {
 	responses responses.ResponseService
 }
 
-func newOpenAIClient(apiKey, endpoint string, client *http.Client) *openAIClient {
+func newOpenAIClient(apiKey, endpoint string, client *http.Client, userAgent string) *openAIClient {
 	httpClient := adaptercore.CloneHTTPClientWithoutRedirects(client)
+	httpClient = withUserAgent(httpClient, userAgent)
 	httpClient = adaptercore.CloneHTTPClientWithResponseCapture(httpClient)
 	opts := []openaioption.RequestOption{
 		openaioption.WithBaseURL(endpoint),
@@ -70,8 +71,9 @@ func (c responsesClient) Stream(ctx context.Context, params responses.ResponseNe
 
 type anthropicClient struct{ messages anthropicsdk.MessageService }
 
-func newAnthropicClient(apiKey, endpoint string, client *http.Client, useAuthToken bool) *anthropicClient {
+func newAnthropicClient(apiKey, endpoint string, client *http.Client, useAuthToken bool, userAgent string) *anthropicClient {
 	httpClient := adaptercore.CloneHTTPClientWithoutRedirects(client)
+	httpClient = withUserAgent(httpClient, userAgent)
 	httpClient = adaptercore.CloneHTTPClientWithResponseCapture(httpClient)
 	opts := []anthropicoption.RequestOption{
 		anthropicoption.WithoutEnvironmentDefaults(),
@@ -86,6 +88,30 @@ func newAnthropicClient(apiKey, endpoint string, client *http.Client, useAuthTok
 	}
 	clientValue := anthropicsdk.NewClient(opts...)
 	return &anthropicClient{messages: clientValue.Messages}
+}
+
+type userAgentTransport struct {
+	next      http.RoundTripper
+	userAgent string
+}
+
+func (transport userAgentTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.Header = request.Header.Clone()
+	clone.Header.Set("User-Agent", transport.userAgent)
+	return transport.next.RoundTrip(clone)
+}
+
+func withUserAgent(client *http.Client, userAgent string) *http.Client {
+	if userAgent == "" {
+		return client
+	}
+	next := client.Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	client.Transport = userAgentTransport{next: next, userAgent: userAgent}
+	return client
 }
 
 func (c *anthropicClient) Create(ctx context.Context, params anthropicsdk.MessageNewParams) (*anthropicsdk.Message, http.Header, error) {

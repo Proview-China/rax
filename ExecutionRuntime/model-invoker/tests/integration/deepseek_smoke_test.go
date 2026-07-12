@@ -17,11 +17,11 @@ func TestDeepSeekLiveSmoke(t *testing.T) {
 	}
 	key := os.Getenv("DEEPSEEK_API_KEY")
 	if key == "" {
-		t.Skip("DEEPSEEK_API_KEY is not set")
+		t.Fatal("enabled DeepSeek live smoke requires DEEPSEEK_API_KEY")
 	}
 	model := os.Getenv("DEEPSEEK_SMOKE_MODEL")
 	if model != "deepseek-v4-flash" && model != "deepseek-v4-pro" {
-		t.Skip("DEEPSEEK_SMOKE_MODEL must name one explicitly approved current v4 model")
+		t.Fatal("enabled DeepSeek live smoke requires an explicitly approved current v4 model")
 	}
 	adapter, err := deepseek.New(deepseek.Config{APIKey: key})
 	if err != nil {
@@ -32,7 +32,7 @@ func TestDeepSeekLiveSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Text() == "" {
-		t.Fatal("DeepSeek returned empty text")
+	if !hasExactProviderSmokeMarker(response.Text(), "praxis-deepseek-ok") {
+		t.Fatal("DeepSeek response did not match the exact marker")
 	}
 }

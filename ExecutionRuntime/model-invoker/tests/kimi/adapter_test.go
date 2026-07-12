@@ -197,6 +197,9 @@ func TestConfigAndFormattingNeverLeakKey(t *testing.T) {
 	if _, err := provider.New(provider.Config{APIKey: "secret", BaseURL: "http://example.com/v1"}); err == nil {
 		t.Fatal("remote plain HTTP accepted")
 	}
+	if _, err := provider.New(provider.Config{APIKey: "secret", BaseURL: "https://example.com/v1"}); err == nil {
+		t.Fatal("arbitrary HTTPS endpoint accepted")
+	}
 	adapter, err := provider.New(provider.Config{APIKey: "secret"})
 	if err != nil {
 		t.Fatal(err)
@@ -205,5 +208,20 @@ func TestConfigAndFormattingNeverLeakKey(t *testing.T) {
 		if strings.Contains(value, "secret") {
 			t.Fatalf("format leaked key: %q", value)
 		}
+	}
+}
+
+func TestResponseModelMismatchIsRejected(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
+		writer.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(writer, `{"id":"mapped","model":"kimi-k2.6","choices":[{"index":0,"finish_reason":"stop","message":{"content":"mapped"}}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`)
+	}))
+	defer server.Close()
+	adapter, err := provider.New(provider.Config{APIKey: "secret", BaseURL: server.URL + "/v1", HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := adapter.Invoke(context.Background(), request(server.URL+"/v1", "kimi-k2.7-code")); modelinvoker.ErrorKindOf(err) != modelinvoker.ErrorMapping {
+		t.Fatalf("response model mismatch kind=%q err=%v", modelinvoker.ErrorKindOf(err), err)
 	}
 }

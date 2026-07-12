@@ -1,13 +1,14 @@
 package catalog
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/upstream"
 )
 
 var (
-	subscriptionCheckedAt  = time.Date(2026, 7, 10, 16, 45, 0, 0, time.UTC)
+	subscriptionCheckedAt  = time.Date(2026, 7, 11, 8, 8, 0, 0, time.UTC)
 	subscriptionValidUntil = subscriptionCheckedAt.Add(7 * 24 * time.Hour)
 )
 
@@ -17,19 +18,32 @@ type subscriptionSpec struct {
 	kind              upstream.OfferingKind
 	canonicalFamily   string
 	modelRef          string
+	models            []string
 	deployment        upstream.DeploymentID
 	region            string
 	credential        upstream.CredentialProfileID
 	credentialEnv     string
 	keyPrefixes       []string
 	allowedClients    []string
+	allowedUsage      upstream.AllowedUsage
 	restrictions      []string
 	source            OfficialSource
+	modelSource       OfficialSource
+	additionalSources []OfficialSource
 	evidence          EvidenceStatus
 	implementation    ImplementationStatus
+	adapterID         string
+	hostActivation    HostActivationRequirement
 	endpointHost      string
 	endpointIDs       []upstream.EndpointID
 	endpointBasePaths map[upstream.ProtocolID]string
+	authOverrides     map[upstream.ProtocolID]subscriptionAuthOverride
+}
+
+type subscriptionAuthOverride struct {
+	credential upstream.CredentialProfileID
+	header     string
+	scheme     string
 }
 
 func subscriptionEntries() []Entry {
@@ -45,36 +59,56 @@ func subscriptionEntries() []Entry {
 		canonicalFamily: "glm", modelRef: "runtime_selected",
 		deployment: "zai.glm-coding-plan.cn", region: "cn",
 		credential: "zai.glm-coding-plan.cn", credentialEnv: "GLM_CODING_PLAN_API_KEY",
-		allowedClients: []string{"claude-code", "cline", "opencode", "roo-code", "kilo-code", "cursor", "crush", "goose"},
-		restrictions:   []string{"only official supported coding tools and product environments", "no application backend or non-interactive automation"},
-		source:         OfficialSource{ID: "zai.glm-coding-plan.quick-start.2026-07-11", Publisher: "Zhipu AI", Kind: SourceProductDocs, URL: "https://docs.bigmodel.cn/cn/coding-plan/quick-start"},
-		evidence:       EvidenceFresh, implementation: ImplementationPlanned,
+		allowedClients: []string{"claude-code", "claude-for-ide", "cline", "opencode", "roo-code", "kilo-code", "cursor", "crush", "goose", "trae", "qoder", "droid", "eigent", "openclaw", "hermes-agent", "sillytavern"},
+		restrictions:   []string{"only the officially listed supported tools and products may use this plan", "Praxis is not listed as a supported product"},
+		allowedUsage:   upstream.AllowedUsageOfficialClientOnly,
+		source:         OfficialSource{ID: "zai.glm-coding-plan.usage-policy.2026-07-11", Publisher: "Z.AI", Kind: SourceTerms, URL: "https://docs.z.ai/devpack/usage-policy.md"},
+		additionalSources: []OfficialSource{
+			{ID: "zai.glm-coding-plan.supported-tools.2026-07-11", Publisher: "Z.AI", Kind: SourceTerms, URL: "https://docs.z.ai/devpack/tool/others.md"},
+			{ID: "zai.glm-coding-plan.quick-start.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/devpack/quick-start.md"},
+		},
+		evidence: EvidenceUnverified, implementation: ImplementationResearchOnly,
 		endpointHost: "open.bigmodel.cn", endpointIDs: []upstream.EndpointID{"zai.glm-coding-plan.cn.openai"},
 		endpointBasePaths: map[upstream.ProtocolID]string{upstream.ProtocolChatCompletions: "/api/coding/paas/v4"},
 	}, upstream.ProtocolChatCompletions)
 
 	addPair(subscriptionSpec{
 		provider: "kimi", offering: "kimi.code-membership", kind: upstream.OfferingCodingPlan,
-		canonicalFamily: "kimi", modelRef: "kimi-for-coding",
+		canonicalFamily: "kimi", modelRef: "kimi-for-coding", models: []string{"kimi-for-coding"},
 		deployment: "kimi.code-membership.global", region: "global",
 		credential: "kimi.code-membership.global", credentialEnv: "KIMI_CODE_API_KEY",
 		restrictions: []string{"personal interactive coding or agent use only", "preserve the real client User-Agent", "product backends must use the pay-as-you-go Kimi platform"},
-		source:       OfficialSource{ID: "kimi.code-membership.overview.2026-07-11", Publisher: "Kimi", Kind: SourceProductDocs, URL: "https://www.kimi.com/code/docs/en/"},
-		evidence:     EvidenceFresh, implementation: ImplementationPlanned,
-		endpointHost: "api.kimi.com", endpointIDs: []upstream.EndpointID{"kimi.code-membership.openai", "kimi.code-membership.anthropic"},
+		source:       OfficialSource{ID: "kimi.code-membership.third-party-agents.2026-07-11", Publisher: "Kimi", Kind: SourceProductDocs, URL: "https://www.kimi.com/code/docs/third-party-tools/other-coding-agents.html"},
+		additionalSources: []OfficialSource{
+			{ID: "kimi.code-membership.community-guidelines.2026-07-11", Publisher: "Kimi", Kind: SourceTerms, URL: "https://www.kimi.com/code/docs/kimi-code/community-guidelines.html"},
+		},
+		evidence: EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "kimi-code",
+		hostActivation: HostActivationTrustedSubscriptionAuthorizationResolver,
+		endpointHost:   "api.kimi.com", endpointIDs: []upstream.EndpointID{"kimi.code-membership.openai", "kimi.code-membership.anthropic"},
 		endpointBasePaths: map[upstream.ProtocolID]string{upstream.ProtocolChatCompletions: "/coding/v1", upstream.ProtocolMessages: "/coding"},
+		authOverrides: map[upstream.ProtocolID]subscriptionAuthOverride{
+			upstream.ProtocolMessages: {credential: "kimi.code-membership.global.messages", header: "x-api-key"},
+		},
 	}, upstream.ProtocolChatCompletions, upstream.ProtocolMessages)
 
 	addPair(subscriptionSpec{
 		provider: "minimax", offering: "minimax.token-plan", kind: upstream.OfferingTokenPlan,
-		canonicalFamily: "minimax-m", modelRef: "runtime_selected",
+		canonicalFamily: "minimax-m", modelRef: "MiniMax-M3", models: []string{"MiniMax-M3", "MiniMax-M2.7", "MiniMax-M2.7-highspeed"},
 		deployment: "minimax.token-plan.global", region: "global",
 		credential: "minimax.token-plan.global", credentialEnv: "MINIMAX_TOKEN_PLAN_API_KEY", keyPrefixes: []string{"sk-cp-"},
 		restrictions: []string{"interactive AI agent and coding tool use only", "Token Plan key is not interchangeable with pay-as-you-go keys"},
 		source:       OfficialSource{ID: "minimax.token-plan.overview.2026-07-11", Publisher: "MiniMax", Kind: SourceProductDocs, URL: "https://platform.minimax.io/docs/token-plan/intro"},
-		evidence:     EvidenceFresh, implementation: ImplementationPlanned,
-		endpointHost: "api.minimax.io", endpointIDs: []upstream.EndpointID{"minimax.token-plan.openai", "minimax.token-plan.anthropic"},
+		modelSource:  OfficialSource{ID: "minimax.token-plan.models.2026-07-11", Publisher: "MiniMax", Kind: SourceModelCatalog, URL: "https://platform.minimax.io/docs/guides/text-generation"},
+		additionalSources: []OfficialSource{
+			{ID: "minimax.token-plan.other-tools.2026-07-11", Publisher: "MiniMax", Kind: SourceProductDocs, URL: "https://platform.minimax.io/docs/token-plan/other-tools"},
+		},
+		evidence: EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "minimax-token-plan",
+		hostActivation: HostActivationTrustedSubscriptionAuthorizationResolver,
+		endpointHost:   "api.minimax.io", endpointIDs: []upstream.EndpointID{"minimax.token-plan.openai", "minimax.token-plan.anthropic"},
 		endpointBasePaths: map[upstream.ProtocolID]string{upstream.ProtocolChatCompletions: "/v1", upstream.ProtocolMessages: "/anthropic"},
+		authOverrides: map[upstream.ProtocolID]subscriptionAuthOverride{
+			upstream.ProtocolMessages: {credential: "minimax.token-plan.global.messages", header: "x-api-key"},
+		},
 	}, upstream.ProtocolChatCompletions, upstream.ProtocolMessages)
 
 	for _, region := range []struct {
@@ -82,12 +116,13 @@ func subscriptionEntries() []Entry {
 	}{{"cn", "token-plan-cn.xiaomimimo.com"}, {"sgp", "token-plan-sgp.xiaomimimo.com"}, {"ams", "token-plan-ams.xiaomimimo.com"}} {
 		addPair(subscriptionSpec{
 			provider: "xiaomi.mimo", offering: "mimo.token-plan", kind: upstream.OfferingTokenPlan,
-			canonicalFamily: "mimo", modelRef: "runtime_selected",
+			canonicalFamily: "mimo", modelRef: "mimo-v2.5", models: []string{"mimo-v2.5", "mimo-v2.5-pro"},
 			deployment: upstream.DeploymentID("mimo.token-plan." + region.id), region: region.id,
 			credential: upstream.CredentialProfileID("mimo.token-plan." + region.id), credentialEnv: "MIMO_TOKEN_PLAN_API_KEY", keyPrefixes: []string{"tp-"},
 			restrictions: []string{"programming tool use only", "automated scripts, custom application backends, and non-coding API use are prohibited"},
-			source:       OfficialSource{ID: "mimo.token-plan.subscription.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceTerms, URL: "https://mimo.mi.com/docs/tokenplan/subscription"},
-			evidence:     EvidenceFresh, implementation: ImplementationPlanned,
+			source:       OfficialSource{ID: "mimo.token-plan.subscription.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceTerms, URL: "https://platform.xiaomimimo.com/static/docs/price/tokenplan/subscription.md"},
+			evidence:     EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "mimo-token-plan",
+			hostActivation:    HostActivationTrustedSubscriptionAuthorizationResolver,
 			endpointHost:      region.host,
 			endpointIDs:       []upstream.EndpointID{upstream.EndpointID("mimo.token-plan." + region.id + ".openai"), upstream.EndpointID("mimo.token-plan." + region.id + ".anthropic")},
 			endpointBasePaths: map[upstream.ProtocolID]string{upstream.ProtocolChatCompletions: "/v1", upstream.ProtocolMessages: "/anthropic"},
@@ -95,16 +130,21 @@ func subscriptionEntries() []Entry {
 	}
 
 	for _, region := range []struct {
-		id, host string
-	}{{"cn", "coding.dashscope.aliyuncs.com"}, {"intl", "coding-intl.dashscope.aliyuncs.com"}} {
+		id, host, sourceURL string
+		models              []string
+	}{
+		{"cn", "coding.dashscope.aliyuncs.com", "https://help.aliyun.com/en/model-studio/coding-plan", alibabaCodingPlanModels("cn")},
+		{"intl", "coding-intl.dashscope.aliyuncs.com", "https://www.alibabacloud.com/help/en/model-studio/coding-plan", alibabaCodingPlanModels("intl")},
+	} {
 		addPair(subscriptionSpec{
 			provider: "alibaba.model-studio", offering: "alibaba.coding-plan", kind: upstream.OfferingCodingPlan,
-			canonicalFamily: "multi-model", modelRef: "runtime_selected",
+			canonicalFamily: "multi-model", modelRef: region.models[0], models: region.models,
 			deployment: upstream.DeploymentID("alibaba.coding-plan." + region.id), region: region.id,
 			credential: upstream.CredentialProfileID("alibaba.coding-plan." + region.id), credentialEnv: "ALIBABA_CODING_PLAN_API_KEY", keyPrefixes: []string{"sk-sp-"},
 			restrictions: []string{"interactive AI programming tools and OpenClaw-type agents only", "automated scripts, workflow platforms, API test tools, and application backends are prohibited"},
-			source:       OfficialSource{ID: "alibaba.coding-plan.overview.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceTerms, URL: "https://help.aliyun.com/en/model-studio/coding-plan"},
-			evidence:     EvidenceFresh, implementation: ImplementationPlanned,
+			source:       OfficialSource{ID: "alibaba.coding-plan." + region.id + ".exact-models.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceModelCatalog, URL: region.sourceURL},
+			evidence:     EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "alibaba-plan",
+			hostActivation:    HostActivationTrustedSubscriptionAuthorizationResolver,
 			endpointHost:      region.host,
 			endpointIDs:       []upstream.EndpointID{upstream.EndpointID("alibaba.coding-plan." + region.id + ".openai"), upstream.EndpointID("alibaba.coding-plan." + region.id + ".anthropic")},
 			endpointBasePaths: map[upstream.ProtocolID]string{upstream.ProtocolChatCompletions: "/v1", upstream.ProtocolMessages: "/apps/anthropic"},
@@ -113,12 +153,14 @@ func subscriptionEntries() []Entry {
 
 	addPair(subscriptionSpec{
 		provider: "alibaba.model-studio", offering: "alibaba.token-plan-team", kind: upstream.OfferingTokenPlan,
-		canonicalFamily: "multi-model", modelRef: "runtime_selected",
+		canonicalFamily: "multi-model", modelRef: "qwen3.7-max", models: alibabaTokenPlanTeamModels(),
 		deployment: "alibaba.token-plan-team.cn-beijing", region: "cn-beijing",
-		credential: "alibaba.token-plan-team.cn-beijing", credentialEnv: "ALIBABA_TOKEN_PLAN_API_KEY",
+		credential: "alibaba.token-plan-team.cn-beijing", credentialEnv: "ALIBABA_TOKEN_PLAN_API_KEY", keyPrefixes: []string{"sk-sp-"},
 		restrictions: []string{"programming tools and OpenClaw-type agents only", "workflow automation, API test tools, custom applications, and non-interactive backends are prohibited"},
 		source:       OfficialSource{ID: "alibaba.token-plan-team.quick-start.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://help.aliyun.com/en/model-studio/token-plan-quickstart"},
-		evidence:     EvidenceFresh, implementation: ImplementationPlanned,
+		modelSource:  OfficialSource{ID: "alibaba.token-plan-team.exact-models.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceModelCatalog, URL: "https://help.aliyun.com/en/model-studio/token-plan-overview"},
+		evidence:     EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "alibaba-plan",
+		hostActivation:    HostActivationTrustedSubscriptionAuthorizationResolver,
 		endpointHost:      "token-plan.cn-beijing.maas.aliyuncs.com",
 		endpointIDs:       []upstream.EndpointID{"alibaba.token-plan-team.openai", "alibaba.token-plan-team.anthropic"},
 		endpointBasePaths: map[upstream.ProtocolID]string{upstream.ProtocolChatCompletions: "/compatible-mode/v1", upstream.ProtocolMessages: "/apps/anthropic"},
@@ -130,8 +172,19 @@ func subscriptionEntries() []Entry {
 
 func subscriptionEntry(spec subscriptionSpec, protocolID upstream.ProtocolID, endpointID upstream.EndpointID, basePath string) Entry {
 	routeID := upstream.RouteID(string(spec.deployment) + "." + string(protocolID))
+	credentialID := spec.credential
+	authHeader, authScheme := "Authorization", "Bearer"
+	allowedEndpointIDs := append([]upstream.EndpointID(nil), spec.endpointIDs...)
+	if override, ok := spec.authOverrides[protocolID]; ok {
+		credentialID, authHeader, authScheme = override.credential, override.header, override.scheme
+		allowedEndpointIDs = []upstream.EndpointID{endpointID}
+	}
+	allowedUsage := spec.allowedUsage
+	if allowedUsage == "" {
+		allowedUsage = upstream.AllowedUsageInteractiveCodingOnly
+	}
 	entitlement := upstream.CommercialEntitlement{
-		AllowedUsage: upstream.AllowedUsageInteractiveCodingOnly, RequiresExplicitContext: true,
+		AllowedUsage: allowedUsage, RequiresExplicitContext: true,
 		AllowsAutomaticPAYGSwitch: false, ClientRestrictions: append([]string(nil), spec.restrictions...),
 		SubjectPolicy: upstream.SubjectPolicyPersonalOnly, TenancyPolicy: upstream.TenancyPolicySingleTenantOnly,
 		ExecutionPolicy: upstream.ExecutionPolicyForegroundOnly, ProductionPolicy: upstream.ProductionPolicyForbidden,
@@ -148,33 +201,78 @@ func subscriptionEntry(spec subscriptionSpec, protocolID upstream.ProtocolID, en
 			Protocol:   upstream.ProtocolBinding{ID: protocolID},
 			Endpoint:   upstream.Endpoint{ID: endpointID, Scheme: "https", HostTemplate: spec.endpointHost, BasePath: basePath, CredentialAudience: spec.endpointHost},
 			Credential: upstream.CredentialProfile{
-				ID: spec.credential, Type: upstream.CredentialAPIKey,
+				ID: credentialID, Type: upstream.CredentialAPIKey,
 				References: []upstream.CredentialReference{{Purpose: upstream.CredentialPurposeAPIKey, Store: "env", Name: spec.credentialEnv}},
 				Audience:   spec.endpointHost, AuthPlacement: upstream.AuthPlacementHeader,
-				AuthHeader: "Authorization", AuthScheme: "Bearer", KeyPrefixes: append([]string(nil), spec.keyPrefixes...),
+				AuthHeader: authHeader, AuthScheme: authScheme, KeyPrefixes: append([]string(nil), spec.keyPrefixes...),
 				AllowedProviderIDs: []upstream.ProviderID{spec.provider}, AllowedOfferingIDs: []upstream.OfferingID{spec.offering},
 				AllowedDeploymentIDs: []upstream.DeploymentID{spec.deployment}, AllowedRegions: []string{spec.region},
-				AllowedEndpointIDs: append([]upstream.EndpointID(nil), spec.endpointIDs...), Lifecycle: upstream.CredentialLifecycleStatic,
+				AllowedEndpointIDs: allowedEndpointIDs, Lifecycle: upstream.CredentialLifecycleStatic,
 			},
 		},
 		Maturity:       MaturityUnknown,
-		ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID},
-		Sources:        []OfficialSource{spec.source},
+		ModelDiscovery: exactProviderModels(spec.models),
+		Sources:        subscriptionSources(spec),
 		Evidence:       Evidence{Status: spec.evidence, TTLClass: EvidenceTTL7Days, CheckedAt: subscriptionCheckedAt, ValidUntil: subscriptionValidUntil},
 		SDKs:           []SDKMetadata{protocolSDKMetadata(protocolID)},
 		Capabilities:   protocolPlanCapabilities(protocolID),
 		IgnoredFields:  []string{}, ExtensionFields: []string{},
 		StreamEvents: protocolStreamEvents(protocolID), ErrorDialect: protocolErrorDialect(protocolID),
-		Boundaries:     OperationalBoundaries{Production: ProductionProhibited, Quota: QuotaSubscriptionWindow, Expiry: ExpirySubscriptionPeriod},
-		Implementation: Implementation{Status: spec.implementation, Callable: false},
+		Boundaries: OperationalBoundaries{Production: ProductionProhibited, Quota: QuotaSubscriptionWindow, Expiry: ExpirySubscriptionPeriod},
+		Implementation: Implementation{
+			Status: spec.implementation, Callable: spec.adapterID != "" && spec.hostActivation == "", AdapterID: spec.adapterID,
+			HostActivationRequirement: spec.hostActivation,
+		},
 	}
-	if spec.modelRef == "kimi-for-coding" {
-		entry.ModelDiscovery = ModelDiscovery{
-			Method: ModelDiscoveryStaticCatalog, AliasPolicy: ModelAliasStable,
-			Aliases: []ModelAlias{{Alias: "kimi-for-coding", ProviderModelRef: "kimi-for-coding", Stable: true}},
-		}
+	if spec.adapterID != "" {
+		entry.Capabilities = implementedPlanCapabilities(protocolID)
+		entry.Implementation.CodePaths = []string{"provider/plancompat", "internal/compatprovider", "internal/protocol/" + protocolPackage(protocolID), "routegateway"}
+		entry.Implementation.TestEvidence = []string{"tests/plancompat", "tests/routegateway", "tests/semanticmatrix"}
 	}
 	return finalizeDefaultEntry(entry)
+}
+
+func exactProviderModels(models []string) ModelDiscovery {
+	if len(models) == 0 {
+		return ModelDiscovery{Method: ModelDiscoveryRuntimeSelected, AliasPolicy: ModelAliasExactProviderID}
+	}
+	aliases := make([]ModelAlias, 0, len(models))
+	for index, model := range models {
+		aliases = append(aliases, ModelAlias{Alias: fmt.Sprintf("exact-%03d", index+1), ProviderModelRef: model, Stable: true})
+	}
+	return ModelDiscovery{Method: ModelDiscoveryStaticCatalog, AliasPolicy: ModelAliasExactProviderID, Aliases: aliases}
+}
+
+func subscriptionSources(spec subscriptionSpec) []OfficialSource {
+	sources := []OfficialSource{spec.source}
+	if spec.modelSource.ID != "" {
+		sources = append(sources, spec.modelSource)
+	}
+	sources = append(sources, spec.additionalSources...)
+	return sources
+}
+
+func alibabaCodingPlanModels(region string) []string {
+	// Keep the region branches separate even while the official 2026-07-11
+	// exact-string lists are equal. A later regional drift must update one
+	// Route family without silently changing the other.
+	switch region {
+	case "cn":
+		return []string{"qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
+	case "intl":
+		return []string{"qwen3.7-plus", "qwen3.6-plus", "kimi-k2.5", "glm-5", "MiniMax-M2.5", "qwen3.5-plus", "qwen3-max-2026-01-23", "qwen3-coder-next", "qwen3-coder-plus", "glm-4.7"}
+	default:
+		return nil
+	}
+}
+
+func alibabaTokenPlanTeamModels() []string {
+	return []string{
+		"qwen3.7-max", "qwen3.7-plus", "qwen3.6-plus", "qwen3.6-flash",
+		"deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v3.2",
+		"kimi-k2.7-code", "kimi-k2.6", "kimi-k2.5",
+		"glm-5.2", "glm-5.1", "glm-5", "MiniMax-M2.5",
+	}
 }
 
 func protocolSDKMetadata(protocolID upstream.ProtocolID) SDKMetadata {
@@ -204,6 +302,24 @@ func protocolPlanCapabilities(protocolID upstream.ProtocolID) []CapabilityMetada
 	}
 	if protocolID == upstream.ProtocolMessages {
 		overrides["provider_continuation"] = CapabilityMetadata{Support: CapabilityUnknown, Limitations: []string{"thinking and tool continuation require route-specific fixtures"}}
+	}
+	return completeCapabilities(overrides)
+}
+
+func implementedPlanCapabilities(protocolID upstream.ProtocolID) []CapabilityMetadata {
+	overrides := map[string]CapabilityMetadata{
+		"text_generation":       {Support: CapabilityCompatible},
+		"streaming":             {Support: CapabilityCompatible},
+		"tool_calling":          {Support: CapabilityCompatible},
+		"parallel_tool_calling": {Support: CapabilityUnsupported, Limitations: []string{"parallel tool control is not approved in the restricted subscription slice"}},
+		"structured_output":     {Support: CapabilityUnsupported, Limitations: []string{"structured output is not approved in the restricted subscription slice"}},
+		"reasoning":             {Support: CapabilityUnsupported, Limitations: []string{"portable reasoning controls require plan-specific fixtures"}},
+		"usage_reporting":       {Support: CapabilityCompatible, Limitations: []string{"token usage is preserved but does not represent subscription quota"}},
+	}
+	if protocolID == upstream.ProtocolMessages {
+		overrides["function_error_result"] = CapabilityMetadata{Support: CapabilityCompatible}
+	} else {
+		overrides["function_error_result"] = CapabilityMetadata{Support: CapabilityPartial, Limitations: []string{"Chat preserves result text but not the portable is_error marker"}}
 	}
 	return completeCapabilities(overrides)
 }

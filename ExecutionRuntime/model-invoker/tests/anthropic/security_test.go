@@ -142,7 +142,9 @@ func TestMaliciousAnthropicSuccessfulResponseIsRedacted(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, err := adapter.Invoke(context.Background(), baseRequest())
+	request := baseRequest()
+	request.Model = secret
+	response, err := adapter.Invoke(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,6 +181,7 @@ func TestMaliciousAnthropicStreamEventsStateAndErrorsAreRedacted(t *testing.T) {
 		t.Fatal(err)
 	}
 	request := baseRequest()
+	request.Model = secret
 	request.Reasoning = &modelinvoker.Reasoning{Effort: modelinvoker.ReasoningEffortHigh}
 	stream, err := adapter.Stream(context.Background(), request)
 	if err != nil {

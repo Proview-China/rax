@@ -18,7 +18,7 @@ func TestQwenLiveSmoke(t *testing.T) {
 	key, workspace, model := os.Getenv("DASHSCOPE_API_KEY"), os.Getenv("QWEN_SMOKE_WORKSPACE_ID"), os.Getenv("QWEN_SMOKE_MODEL")
 	region := qwen.Region(os.Getenv("QWEN_SMOKE_REGION"))
 	if key == "" || workspace == "" || model == "" || region == "" {
-		t.Skip("DASHSCOPE_API_KEY, QWEN_SMOKE_WORKSPACE_ID, QWEN_SMOKE_REGION and QWEN_SMOKE_MODEL are required")
+		t.Fatal("enabled Qwen live smoke requires DASHSCOPE_API_KEY, QWEN_SMOKE_WORKSPACE_ID, QWEN_SMOKE_REGION and QWEN_SMOKE_MODEL")
 	}
 	adapter, err := qwen.New(qwen.Config{APIKey: key, Region: region, WorkspaceID: workspace})
 	if err != nil {
@@ -35,7 +35,7 @@ func TestQwenLiveSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if response.Text() == "" {
-		t.Fatal("Qwen returned empty text")
+	if !hasExactProviderSmokeMarker(response.Text(), "praxis-qwen-ok") {
+		t.Fatal("Qwen response did not match the exact marker")
 	}
 }
