@@ -25,11 +25,12 @@
 - Factory A/B双层信任闭合：18个Builtin Factory、14个默认活跃Adapter与4个订阅Factory均有按protocol/profile展开的Endpoint/Credential/Model/Lifecycle机器合同和AST证据门禁；
 - 执行并集 Runtime v1：`union/profile/effect/execution`、Direct bridge、Codex App Server、Claude、Gemini ACP、current Kimi ACP、Qwen Harness Adapter均已完成离线实现；同一四类 IntentGraph 的六路 Mechanism差异与 Effect/Verification/Satisfaction收敛已通过本地集成；
 - 执行并集第二轮 Review：测试证明的 P0/P1 语义、身份、并发、Effect关联和Harness隔离缺口已修复；普通、五轮全仓shuffle、全仓Race/Vet、五路生产Adapter+fake process集成、五项Fuzz、四项benchmark均已通过，默认覆盖率`76.6%`、合并integration profile为`76.7%`；真实API/OAuth/订阅/官方二进制联调仍为`not_run`；
+- 第三方中转兼容：独立`third-party-relay` Provider与显式opt-in Factory支持Chat Completions、Responses、Messages、GenerateContent；7/8真实Route已完成文本与Tool Call，Gemini原生Route因中转上游持续429保留容量复测项；
 - 已实现 Runtime Provider：OpenAI、Anthropic、Gemini、AWS Bedrock Mantle、AWS Bedrock Runtime、Google Vertex AI、Azure OpenAI、DeepSeek、Kimi、Z.AI、MiniMax、Xiaomi MiMo、Qwen、xAI；
 - 已实现协议：Responses、Chat Completions、Messages、GenerateContent、Bedrock Converse、Bedrock InvokeModel；
 - 锁定主要 SDK：`openai-go/v3 v3.41.1`、`anthropic-sdk-go v1.56.0`、`go-genai v1.63.0`、`aws-sdk-go-v2/service/bedrockruntime v1.55.0`；
 - 测试方式：手写 fake、官方 SDK、本机 `httptest`/TLS server、JSON/SSE/AWS event-stream固定样本与 fuzz；
-- 真实 API：未执行成功的认证模型调用，保留显式 build tag 烟雾测试入口；
+- 真实 API：Codex Pro App Server以及第三方Relay的Gemini/Grok/GPT/Claude多协议已执行认证调用；其余Route保留显式build tag烟雾入口；
 - 生产结论：尚未做真实账号、具体模型和公网容量验证，不能据此声明生产可用。
 
 ## 组成
@@ -62,7 +63,8 @@
 | `provider/mimo` | Xiaomi MiMo按量 Messages/Chat、V2.5 thinking、专属终态与 Token Plan隔离 |
 | `provider/qwen` | Alibaba Model Studio北京/新加坡 Workspace专属 Responses/Chat、thinking、server state与订阅隔离 |
 | `provider/plancompat` | Kimi/MiniMax/MiMo/Alibaba官方订阅的受限Chat/Messages、真实User-Agent和严格Key/host边界 |
-| `internal/compatprovider` | 组合官方兼容协议 driver与 SDK transport，不拥有厂商身份或能力判断 |
+| `provider/relaycompat` | 显式第三方中转Route、精确模型与Endpoint门禁；独立身份，不冒充官方Provider |
+| `internal/compatprovider` | 组合Chat/Responses/Messages/GenerateContent协议 driver与 SDK transport，不拥有厂商身份或能力判断 |
 | `internal/adaptercore` | SDK 无关的端点、能力、Raw、Header、无跳转、响应捕获与脱敏脚手架 |
 | `internal/protocol` | SDK中立的协议 Binding、Driver、Dialect、Failure归一化与强制身份边界 |
 | `internal/protocol/openaichat` | Chat Completions映射、官方 SDK窄缝隙、响应归一化、安全 Failure提取和流状态机 |
@@ -80,7 +82,7 @@
 | `tests/cachefacts` | 39条Route缓存事实CSV漂移、唯一xAI严格key传输面和零策略所有权门禁 |
 | `tests/plancompat` | 四类订阅、Chat/Messages、真实User-Agent、Key/host、HTTP/JSON与SSE离线闭环 |
 | `tests/openai`、`tests/anthropic`、`tests/gemini`、`tests/{bedrockmantle,bedrockruntime,vertex,azureopenai,deepseek,kimi,zai,minimax,mimo,qwen,xai}` | 通过公开 API、官方 SDK 与本机 HTTP fake验证十四个 Runtime Provider |
-| `tests/integration` | 显式`integration` build tag下的Provider直连、十家P0 Gateway与Kimi Code/MiniMax Token两类P1真实烟测入口；另含Codex/Claude/Gemini/Kimi/Qwen生产Harness Adapter + fake child process完整Runtime离线集成；MiMo/Alibaba套餐只做离线验证 |
+| `tests/integration` | 显式`integration` build tag下的Provider直连、第三方Relay、十家P0 Gateway与Kimi Code/MiniMax Token两类P1真实烟测入口；另含Codex/Claude/Gemini/Kimi/Qwen生产Harness Adapter + fake child process完整Runtime离线集成；MiMo/Alibaba套餐只做离线验证 |
 | `tests/{unioncontract,profilecompiler,effectobserver,executionunion,executiondirect,harnesslocal,conformance,performance}` | 执行并集白盒、黑盒、六路本地集成、N01-N14、第二轮合同反例、Race、Fuzz、覆盖率和性能基准 |
 | `tests/upstream`、`tests/catalog`、`tests/catalogassets` | 波次 A的 Route/Credential/Catalog/Schema/Markdown、AdapterID和 fuzz门禁 |
 | `tests/protocol` | 波次 B0的身份注入、Failure安全、流生命周期、typed-nil与 AST边界反例 |
@@ -546,7 +548,7 @@ go test -tags=integration -run '^TestOfficialHarnessRoutesLiveSmoke/kimi_current
 go test -tags=integration -run '^TestOfficialHarnessRoutesLiveSmoke/qwen_sdk_cli$' ./tests/integration
 ```
 
-第一轮实现阶段只执行了 `go test -tags=integration -run '^$' ./tests/integration`。第二轮Review已由统一离线入口执行完整`go test -tags=integration ./tests/integration`：生产Harness Adapter + fake child process离线集成真实运行。2026-07-13又完成Codex Pro临时登录、官方CLI与Codex App Server单Route真实验证；其余真实API/订阅Route仍未执行认证调用。
+第一轮实现阶段只执行了 `go test -tags=integration -run '^$' ./tests/integration`。第二轮Review已由统一离线入口执行完整`go test -tags=integration ./tests/integration`：生产Harness Adapter + fake child process离线集成真实运行。2026-07-13完成Codex Pro临时登录、官方CLI与Codex App Server单Route真实验证；2026-07-14完成第三方Relay的7/8多协议文本与Tool Call，Gemini原生Route因中转上游429未获得成功响应。其他真实API/订阅Route仍未执行认证调用。
 
 ## 当前限制
 

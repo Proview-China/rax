@@ -75,6 +75,7 @@ Provider Native API
 ## 设计资产
 
 - [架构与语义映射](./architecture.md)
+- [第三方中转站兼容 Route v1](./third-party-relay-compat-v1.md)
 - [Praxis执行语义并集v1设计草案](./execution-semantic-union-v1-draft.md)
 - [Intent、Mechanism、Effect与Profile路由v1设计草案](./intent-mechanism-effect-profile-routing-v1-draft.md)
 - [上游官方Agent行为与HarnessDelta研究（2026-07-13）](./upstream-official-agent-behavior-and-harness-delta-research-20260713.md)

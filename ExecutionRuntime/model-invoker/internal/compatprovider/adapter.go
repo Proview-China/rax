@@ -10,6 +10,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol/anthropicmessages"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol/geminigenerate"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol/openaichat"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol/openairesponses"
 )
@@ -51,6 +52,11 @@ func New(config Config) (*Adapter, error) {
 	}
 	if config.MessagesEndpoint != "" {
 		if err := a.addMessages(config); err != nil {
+			return nil, redactor.Error(err)
+		}
+	}
+	if config.GenerateEndpoint != "" {
+		if err := a.addGenerate(config); err != nil {
 			return nil, redactor.Error(err)
 		}
 	}
@@ -112,6 +118,23 @@ func (a *Adapter) addMessages(c Config) error {
 		return err
 	}
 	return a.addBinding(modelinvoker.ProtocolMessages, endpoint, driver, c.RequestIDHeaders)
+}
+
+func (a *Adapter) addGenerate(c Config) error {
+	endpoint := adaptercore.NormalizeEndpoint(c.GenerateEndpoint)
+	binding, err := protocol.NewBinding(c.Provider, modelinvoker.ProtocolGenerateContent, endpoint, c.RequestIDHeaders...)
+	if err != nil {
+		return err
+	}
+	client, err := newGenerateClient(c.APIKey, c.GenerateBaseURL, c.GenerateAPIVersion, c.HTTPClient, c.UserAgent)
+	if err != nil {
+		return err
+	}
+	driver, err := geminigenerate.New(binding, c.GenerateDialect, client)
+	if err != nil {
+		return err
+	}
+	return a.addBinding(modelinvoker.ProtocolGenerateContent, endpoint, driver, c.RequestIDHeaders)
 }
 
 func (a *Adapter) ID() modelinvoker.ProviderID {

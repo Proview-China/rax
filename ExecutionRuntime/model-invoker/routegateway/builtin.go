@@ -22,6 +22,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/openai"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/plancompat"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/qwen"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/relaycompat"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/vertex"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/xai"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/provider/zai"
@@ -83,6 +84,40 @@ func NewBuiltinFactoryRegistry() (*FactoryRegistry, error) {
 		factories = append(factories, definitions[index])
 	}
 	return NewFactoryRegistry(factories...)
+}
+
+// NewRelayCompatFactory returns the explicit opt-in factory for user-supplied
+// third-party relay catalog Routes. It is intentionally excluded from the
+// default registry and catalog so no relay is mistaken for an official direct
+// upstream or silently enabled by installing Praxis.
+func NewRelayCompatFactory() AdapterFactory {
+	return builtinFactory{adapterID: relaycompat.ProviderID, build: buildRelayCompat}
+}
+
+func buildRelayCompat(_ context.Context, input FactoryInput) (modelinvoker.Provider, error) {
+	key, err := requiredSecret(input.Secret, upstream.CredentialPurposeAPIKey)
+	if err != nil {
+		return nil, err
+	}
+	protocolID := runtimeProtocolForFactory(input.Entry.Route.Protocol.ID)
+	config := relaycompat.Config{
+		APIKey: key, BaseURL: input.Endpoint, Protocol: protocolID,
+		AllowedModels: []string{input.Entry.Route.Model.ProviderModelRef},
+		UserAgent:     input.ClientIdentity.UserAgent, HTTPClient: input.HTTPClient,
+	}
+	if protocolID == modelinvoker.ProtocolGenerateContent {
+		version := input.Entry.Route.Protocol.APIVersion
+		if version != "v1" && version != "v1beta" {
+			return nil, gatewayError(modelinvoker.ErrorMapping, "relay_generate_version_invalid", "relay GenerateContent Route requires API version v1 or v1beta", nil)
+		}
+		suffix := "/" + version
+		if !strings.HasSuffix(input.Endpoint, suffix) {
+			return nil, gatewayError(modelinvoker.ErrorMapping, "relay_generate_endpoint_invalid", "relay GenerateContent endpoint must end with its API version", nil)
+		}
+		config.BaseURL = strings.TrimSuffix(input.Endpoint, suffix)
+		config.APIVersion = version
+	}
+	return relaycompat.New(config)
 }
 
 func buildPlan(_ context.Context, input FactoryInput) (modelinvoker.Provider, error) {

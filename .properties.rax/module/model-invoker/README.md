@@ -1,5 +1,7 @@
 # 模型调用器模块说明
 
+第三方中转兼容的边界、组成和首轮真实结果见[第三方中转站兼容模块说明 v1](./third-party-relay-compat-v1.md)。该路线使用独立`third-party-relay`身份和显式Factory，不放宽任何官方Provider Endpoint门禁。
+
 ## 1. 模块作用
 
 `model-invoker` 是 Praxis Runtime 与模型 Provider/Harness 之间的稳定调用边界。它解决五个问题：

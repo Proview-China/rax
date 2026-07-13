@@ -18,14 +18,17 @@ import (
 type CapabilityBuilder func(context.Context, modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error)
 
 type Config struct {
-	Provider          modelinvoker.ProviderID
-	DefaultProtocol   modelinvoker.Protocol
-	APIKey            string
-	HTTPClient        *http.Client
-	ChatEndpoint      string
-	ResponsesEndpoint string
-	MessagesEndpoint  string
-	MessagesAuthToken bool
+	Provider           modelinvoker.ProviderID
+	DefaultProtocol    modelinvoker.Protocol
+	APIKey             string
+	HTTPClient         *http.Client
+	ChatEndpoint       string
+	ResponsesEndpoint  string
+	MessagesEndpoint   string
+	GenerateEndpoint   string
+	GenerateBaseURL    string
+	GenerateAPIVersion string
+	MessagesAuthToken  bool
 	// UserAgent, when non-empty, is forced at the final HTTP transport boundary.
 	// Restricted subscription routes use the attested build/runtime identity and
 	// never accept a caller-supplied header through Request or ProviderOptions.
@@ -33,6 +36,7 @@ type Config struct {
 	ChatDialect      protocol.Dialect
 	ResponsesDialect protocol.Dialect
 	MessagesDialect  protocol.Dialect
+	GenerateDialect  protocol.Dialect
 	Capabilities     CapabilityBuilder
 	RequestIDHeaders []string
 }
@@ -56,6 +60,7 @@ func (c Config) Validate() error {
 		{modelinvoker.ProtocolChatCompletions, c.ChatEndpoint, c.ChatDialect},
 		{modelinvoker.ProtocolResponses, c.ResponsesEndpoint, c.ResponsesDialect},
 		{modelinvoker.ProtocolMessages, c.MessagesEndpoint, c.MessagesDialect},
+		{modelinvoker.ProtocolGenerateContent, c.GenerateEndpoint, c.GenerateDialect},
 	}
 	for _, check := range checks {
 		if check.endpoint == "" {
@@ -71,6 +76,14 @@ func (c Config) Validate() error {
 			return err
 		}
 		configured[check.protocol] = struct{}{}
+	}
+	if c.GenerateEndpoint != "" {
+		if err := validateEndpoint(c.Provider, c.GenerateBaseURL); err != nil {
+			return fmt.Errorf("%s: GenerateContent base URL is invalid: %w", c.Provider, err)
+		}
+		if c.GenerateAPIVersion != "v1" && c.GenerateAPIVersion != "v1beta" {
+			return fmt.Errorf("%s: GenerateContent API version must be v1 or v1beta", c.Provider)
+		}
 	}
 	if len(configured) == 0 {
 		return fmt.Errorf("%s: at least one protocol endpoint is required", c.Provider)

@@ -2,10 +2,13 @@ package compatprovider
 
 import (
 	"context"
+	"fmt"
+	"iter"
 	"net/http"
 
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/adaptercore"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol/anthropicmessages"
+	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol/geminigenerate"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol/openaichat"
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/internal/protocol/openairesponses"
 	anthropicsdk "github.com/anthropics/anthropic-sdk-go"
@@ -13,6 +16,7 @@ import (
 	openaisdk "github.com/openai/openai-go/v3"
 	openaioption "github.com/openai/openai-go/v3/option"
 	"github.com/openai/openai-go/v3/responses"
+	"google.golang.org/genai"
 )
 
 type openAIClient struct {
@@ -126,8 +130,138 @@ func (c *anthropicClient) Stream(ctx context.Context, params anthropicsdk.Messag
 	return stream, adaptercore.ResponseHeaders(raw)
 }
 
+type generateClient struct{ models *genai.Models }
+
+func newGenerateClient(apiKey, baseURL, apiVersion string, client *http.Client, userAgent string) (*generateClient, error) {
+	httpClient := adaptercore.CloneHTTPClientWithoutRedirects(client)
+	httpClient = withUserAgent(httpClient, userAgent)
+	httpClient = adaptercore.CloneHTTPClientWithResponseCapture(httpClient)
+	sdk, err := genai.NewClient(context.Background(), &genai.ClientConfig{
+		APIKey: apiKey, Backend: genai.BackendGeminiAPI, HTTPClient: httpClient,
+		HTTPOptions: genai.HTTPOptions{BaseURL: baseURL, APIVersion: apiVersion},
+	})
+	if err != nil {
+		return nil, err
+	}
+	if sdk == nil || sdk.Models == nil {
+		return nil, fmt.Errorf("GenerateContent SDK returned an uninitialized client")
+	}
+	return &generateClient{models: sdk.Models}, nil
+}
+
+func (c *generateClient) GenerateContent(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (*genai.GenerateContentResponse, http.Header, error) {
+	response, err := c.models.GenerateContent(ctx, model, contents, config)
+	var headers http.Header
+	if response != nil && response.SDKHTTPResponse != nil && response.SDKHTTPResponse.Headers != nil {
+		headers = response.SDKHTTPResponse.Headers.Clone()
+	}
+	return response, headers, err
+}
+
+func (c *generateClient) GenerateContentStream(ctx context.Context, model string, contents []*genai.Content, config *genai.GenerateContentConfig) (geminigenerate.EventStream, http.Header, error) {
+	stream := newGenerateResponseStream(c.models.GenerateContentStream(ctx, model, contents, config))
+	var headers http.Header
+	if current := stream.Current(); current != nil && current.SDKHTTPResponse != nil && current.SDKHTTPResponse.Headers != nil {
+		headers = current.SDKHTTPResponse.Headers.Clone()
+	}
+	if err := stream.Err(); err != nil {
+		_ = stream.Close()
+		return nil, headers, err
+	}
+	return stream, headers, nil
+}
+
+type generateResponseStream struct {
+	next       func() (*genai.GenerateContentResponse, error, bool)
+	stop       func()
+	current    *genai.GenerateContentResponse
+	err        error
+	prefetched bool
+	exhausted  bool
+	closed     bool
+}
+
+func newGenerateResponseStream(sequence iter.Seq2[*genai.GenerateContentResponse, error]) *generateResponseStream {
+	next, stop := iter.Pull2(sequence)
+	stream := &generateResponseStream{next: next, stop: stop}
+	stream.prefetch()
+	return stream
+}
+
+func (s *generateResponseStream) prefetch() {
+	if s.closed || s.exhausted || s.prefetched || s.err != nil {
+		return
+	}
+	response, err, ok := s.next()
+	if !ok {
+		s.exhausted = true
+		return
+	}
+	if err != nil {
+		s.err = err
+		return
+	}
+	if response == nil {
+		s.err = fmt.Errorf("GenerateContent SDK stream returned a nil response")
+		return
+	}
+	s.current, s.prefetched = response, true
+}
+
+func (s *generateResponseStream) Next() bool {
+	if s == nil || s.closed || s.err != nil || s.exhausted {
+		return false
+	}
+	if s.prefetched {
+		s.prefetched = false
+		return true
+	}
+	response, err, ok := s.next()
+	if !ok {
+		s.exhausted = true
+		return false
+	}
+	if err != nil {
+		s.err = err
+		return false
+	}
+	if response == nil {
+		s.err = fmt.Errorf("GenerateContent SDK stream returned a nil response")
+		return false
+	}
+	s.current = response
+	return true
+}
+
+func (s *generateResponseStream) Current() *genai.GenerateContentResponse {
+	if s == nil {
+		return nil
+	}
+	return s.current
+}
+
+func (s *generateResponseStream) Err() error {
+	if s == nil {
+		return fmt.Errorf("GenerateContent SDK stream is nil")
+	}
+	return s.err
+}
+
+func (s *generateResponseStream) Close() error {
+	if s == nil || s.closed {
+		return nil
+	}
+	s.closed = true
+	if s.stop != nil {
+		s.stop()
+	}
+	return nil
+}
+
 var (
-	_ openaichat.Client        = (*openAIClient)(nil)
-	_ openairesponses.Client   = responsesClient{}
-	_ anthropicmessages.Client = (*anthropicClient)(nil)
+	_ openaichat.Client          = (*openAIClient)(nil)
+	_ openairesponses.Client     = responsesClient{}
+	_ anthropicmessages.Client   = (*anthropicClient)(nil)
+	_ geminigenerate.Client      = (*generateClient)(nil)
+	_ geminigenerate.EventStream = (*generateResponseStream)(nil)
 )
