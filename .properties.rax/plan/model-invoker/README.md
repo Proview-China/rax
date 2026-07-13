@@ -1,8 +1,14 @@
-# 模型调用器第一阶段落地计划
+# 模型调用器计划索引
 
-> 最近完成计划：[Factory双层信任闭合](./factory-trust-matrix-v1.md)。18 Factory/14默认活跃Adapter/4订阅Factory的A/B层protocol/profile合同、AST证据、Endpoint/Model/Lifecycle gap与全量离线回归均已完成；[宿主激活计划](./host-activation-and-upstream-revalidation.md)、[信任闭合计划](./route-gateway-trust-closure.md)、[上游调用最终候选计划](./route-gateway-final-candidate.md)与[Route Policy/Audit阶段计划](./route-invocation-facade-v1.md)继续作为历史计划保留。
+> 最近完成计划：[执行语义并集第二轮 Review 与测试加固计划 v2](./execution-semantic-union-review-hardening-v2.md)。P0/P1 合同缺口已修复；高价值单元、并发、故障注入与五路真实 Adapter + fake process 集成已通过最终离线门禁，真实凭据和官方二进制继续为`not_run`。
 
-## 1. 计划状态
+> 前序完成计划：[执行语义并集 Runtime 实施计划 v1](./execution-semantic-union-runtime-v1.md)。`union/profile/effect/execution`、Direct与五条Harness Adapter、白盒、黑盒、N01-N14和六路本地收敛已完成离线验收；计划保留为“陈旧计划（已完成）”，真实 API、OAuth 和订阅联调继续标记为`not_run`。
+
+> 设计收口计划：[全量上游支持与 Profile 并集计划 v1](./upstream-support-and-profile-union-v1.md)。该计划形成时物理模块和 Runtime 实现尚未获授权；现已由上面的独立实施计划承接，不回写或删除这份历史边界。
+>
+> 历史完成计划：[Factory双层信任闭合](./factory-trust-matrix-v1.md)。18 Factory/14默认活跃Adapter/4订阅Factory的A/B层protocol/profile合同、AST证据、Endpoint/Model/Lifecycle gap与全量离线回归均已完成；[宿主激活计划](./host-activation-and-upstream-revalidation.md)、[信任闭合计划](./route-gateway-trust-closure.md)、[上游调用最终候选计划](./route-gateway-final-candidate.md)与[Route Policy/Audit阶段计划](./route-invocation-facade-v1.md)继续作为历史计划保留。
+
+## 1. 历史第一阶段计划状态
 
 - 模块：`model-invoker`
 - 计划版本：`v1`

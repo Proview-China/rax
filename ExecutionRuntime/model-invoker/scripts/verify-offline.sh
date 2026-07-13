@@ -8,6 +8,13 @@ cd "$module_root"
 # Offline verification must be deterministic and unable to opt into smoke tests.
 credential_variables=(
   OPENAI_API_KEY
+  OPENAI_ACCESS_TOKEN
+  CLAUDE_CODE_OAUTH_TOKEN
+  ANTHROPIC_AUTH_TOKEN
+  ANTHROPIC_BASE_URL
+  CLAUDE_CODE_USE_BEDROCK
+  CLAUDE_CODE_USE_VERTEX
+  CLAUDE_CODE_USE_FOUNDRY
   ANTHROPIC_API_KEY
   GEMINI_API_KEY
   XAI_API_KEY
@@ -38,6 +45,7 @@ credential_variables=(
   AWS_CONTAINER_CREDENTIALS_RELATIVE_URI
   GOOGLE_APPLICATION_CREDENTIALS
   GOOGLE_API_KEY
+  GOOGLE_GENAI_USE_VERTEXAI
   GOOGLE_CLOUD_PROJECT
   GOOGLE_CLOUD_LOCATION
   AZURE_CLIENT_ID
@@ -86,11 +94,36 @@ credential_variables=(
   AZURE_OPENAI_ENDPOINT
   AZURE_OPENAI_REGION
   AZURE_OPENAI_DEPLOYMENT
+  PRAXIS_HARNESS_PROBE
+  PRAXIS_CODEX_HARNESS_LIVE
+  PRAXIS_CLAUDE_HARNESS_LIVE
+  PRAXIS_GEMINI_HARNESS_LIVE
+  PRAXIS_KIMI_HARNESS_LIVE
+  PRAXIS_QWEN_HARNESS_LIVE
 )
 for variable in "${credential_variables[@]}"; do
   unset "$variable"
 done
 unset GOFLAGS
+
+# Even a credential-free official CLI can reuse a user's existing login or
+# configuration directory. Default verification points every supported
+# Harness at a fresh empty home, and production tests must still require an
+# explicit fake executable rather than PATH discovery.
+harness_home="$(mktemp -d)"
+trap 'rm -rf -- "$harness_home"' EXIT
+mkdir -p \
+  "$harness_home/codex" \
+  "$harness_home/claude" \
+  "$harness_home/gemini" \
+  "$harness_home/kimi" \
+  "$harness_home/qwen"
+export CODEX_HOME="$harness_home/codex"
+export CLAUDE_CONFIG_DIR="$harness_home/claude"
+export GEMINI_CLI_HOME="$harness_home/gemini"
+export KIMI_CODE_HOME="$harness_home/kimi"
+export QWEN_CODE_HOME="$harness_home/qwen"
+export QWEN_HOME="$harness_home/qwen"
 
 # Dependency acquisition is the only step allowed to use the configured module
 # proxy. All verification commands below run with outbound HTTP proxies pointed
@@ -121,17 +154,12 @@ go test -count=1 ./...
 go test -shuffle=on -count=1 ./...
 go test -race -count=1 ./...
 
-# Compile the explicitly gated smoke-test package without selecting any test.
-# With the credentials and confirmation flags removed above, this cannot make
-# a real provider or subscription request.
-go test -tags=integration -run '^$' ./tests/integration
-
-# Execute only the named live-smoke guard tests. These verify input gating,
-# exact marker matching, and Route/Profile-pinned secret resolution; none of
-# them invokes a Provider or opens a network connection.
-go test -count=1 -tags=integration \
-  -run '^(TestLiveSmokeSecretResolverRejectsCrossRouteAndReferenceDrift|TestSubscriptionSmokeMarkerIsExact|TestSubscriptionSmokeInputGateRequiresEveryExplicitValue|TestDirectRouteGatewaySmokeMarkerIsExact|TestProviderSmokeMarkerIsExact)$' \
-  ./tests/integration
+# Run the complete integration-tag package after every credential and live
+# confirmation was removed, with fresh Harness homes and outbound proxies
+# closed. Live tests must therefore skip; guard tests and the five production
+# Adapter/fake-process lifecycle tests must run. A future live test that forgets
+# its gate fails here instead of silently escaping the offline contract.
+go test -count=1 -tags=integration ./tests/integration
 
 # Keep the cross-language schema and checked-in Markdown block visible as an
 # explicit CI surface even though they are also included by ./....

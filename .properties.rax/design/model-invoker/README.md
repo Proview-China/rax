@@ -3,10 +3,10 @@
 ## 设计状态
 
 - 模块名称：`model-invoker`
-- 当前阶段：Factory A/B双层信任矩阵与gap闭合已完成；ActivationPlan、NewHost、P0 exact模型、Endpoint/Credential audience、响应身份与Factory生命周期均已收口
-- 最近更新：2026-07-11
-- 进入计划阶段：第一、第二阶段均已于 2026-07-10 获得用户明确实施授权
-- 代码实现：统一 Go内核、十四个 Runtime Provider、波次 A上游基础、B完整协议层、C动态订阅控制面、D云托管与 E1全部路线均已离线验收，位置为 `ExecutionRuntime/model-invoker/`
+- 当前阶段：Factory A/B双层信任矩阵与gap闭合已完成；双执行平面的Intent、Mechanism、Effect与Profile路由v1、主要上游HarnessDelta、六条代表Route纸面编译及跨Route一致性合同已完成设计收口，并已由独立计划完成Runtime离线实现与验收
+- 最近更新：2026-07-13
+- 进入计划阶段：第一、第二阶段于2026-07-10获授权；执行并集Runtime于2026-07-13获授权并完成
+- 代码实现：统一 Go内核、十四个 Runtime Provider、波次 A上游基础、B完整协议层、C动态订阅控制面、D云托管、E1全部路线，以及`union/profile/effect/execution`与六条代表Route Adapter均已离线验收，位置为 `ExecutionRuntime/model-invoker/`
 - 当前候选：默认16条订阅Route为`implemented_offline + callable=false + blocked_by_host_trust`；只有可信宿主激活后才可调用
 - 后续边界：E2、Sidecar、第三方首批名单、真实 API与生产评审仍需新的设计和单独授权
 
@@ -75,10 +75,20 @@ Provider Native API
 ## 设计资产
 
 - [架构与语义映射](./architecture.md)
+- [Praxis执行语义并集v1设计草案](./execution-semantic-union-v1-draft.md)
+- [Intent、Mechanism、Effect与Profile路由v1设计草案](./intent-mechanism-effect-profile-routing-v1-draft.md)
+- [上游官方Agent行为与HarnessDelta研究（2026-07-13）](./upstream-official-agent-behavior-and-harness-delta-research-20260713.md)
+- [代表Route纸面编译与跨Route一致性合同v1](./representative-route-paper-compilation-and-union-conformance-v1.md)
+- [执行语义并集 Runtime 实施计划 v1](../../plan/model-invoker/execution-semantic-union-runtime-v1.md)
+- [执行并集 Runtime v1 模块说明](../../module/model-invoker/execution-semantic-union-runtime-v1.md)
+- [并集语义编译与一致性设计图源](./grounding/union-route-compilation-and-conformance-v1.drawio)
+- [并集语义编译与一致性设计图预览](./grounding/union-route-compilation-and-conformance-v1.png)
+- [Codex、OpenCode、OpenClaw调用原语研究（2026-07-12）](./codex-opencode-openclaw-semantic-primitives-research-20260712.md)
 - [统一语义原语 v1候选](./semantic-primitives-v1.md)
 - [语义原语×六协议×39默认Route/14活跃Adapter矩阵v1候选](./semantic-matrix-v1candidate.md)
 - [语义矩阵机器CSV](./semantic-matrix-v1candidate.csv)
 - [官方订阅调用面设计卡v1候选](./subscription-route-cards-v1.md)
+- [订阅调用与官方Harness路由研究（2026-07-12）](./subscription-and-official-harness-research-20260712.md)
 - [Route Policy/Audit Invoker v1候选](./route-invocation-facade-v1.md)
 - [上游调用最终候选设计](./route-gateway-final-candidate.md)
 - [Provider 缓存传输边界 v1](./provider-cache-transport-boundary-v1.md)

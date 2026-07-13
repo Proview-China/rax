@@ -9,6 +9,7 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/bedrockruntime v1.55.0
 	github.com/aws/smithy-go v1.27.3
 	github.com/openai/openai-go/v3 v3.41.1
+	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	golang.org/x/oauth2 v0.30.0
 	google.golang.org/genai v1.63.0
 )
