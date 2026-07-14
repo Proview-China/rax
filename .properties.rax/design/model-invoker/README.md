@@ -3,8 +3,8 @@
 ## 设计状态
 
 - 模块名称：`model-invoker`
-- 当前阶段：Factory A/B双层信任矩阵与gap闭合已完成；双执行平面的Intent、Mechanism、Effect与Profile路由v1、主要上游HarnessDelta、六条代表Route纸面编译及跨Route一致性合同已完成设计收口，并已由独立计划完成Runtime离线实现与验收
-- 最近更新：2026-07-13
+- 当前阶段：外围Operation/Resource/Job/Realtime并集、本地与企业自建上游、官方媒体/资源/Batch/Live首批能力已完成设计、实现与离线验收
+- 最近更新：2026-07-14
 - 进入计划阶段：第一、第二阶段于2026-07-10获授权；执行并集Runtime于2026-07-13获授权并完成
 - 代码实现：统一 Go内核、十四个 Runtime Provider、波次 A上游基础、B完整协议层、C动态订阅控制面、D云托管、E1全部路线，以及`union/profile/effect/execution`与六条代表Route Adapter均已离线验收，位置为 `ExecutionRuntime/model-invoker/`
 - 当前候选：默认16条订阅Route为`implemented_offline + callable=false + blocked_by_host_trust`；只有可信宿主激活后才可调用
@@ -38,12 +38,13 @@
 - 服务端会话状态；
 - 用量、错误、取消、超时和重试；
 - Provider 原生能力与统一语义之间的映射。
+- 媒体生成、Embedding/Rerank、Files/Stores、Video/Batch Job与Realtime Session；
+- 本地OpenAI-compatible、Ollama、llama.cpp及企业HTTPS自建端点。
 
 ## 暂不纳入核心范围
 
-- 图像、视频、音乐等生成产品的完整统一；
-- 语音实时通信的完整实现；
 - 微调、评测、模型部署和账号管理；
+- 浏览器WebRTC、SIP、ephemeral token签发及厂商全部长尾资源的强类型builder；
 - Agent Run Engine、记忆系统和多 Agent 编排；
 - Rust 计算层。
 
@@ -74,6 +75,10 @@ Provider Native API
 
 ## 设计资产
 
+- [外围上游能力官方研究（2026-07-14）](./upstream-peripheral-capability-research-20260714.md)
+- [外围能力并集与本地上游设计v1](./peripheral-union-and-local-upstream-v1.md)
+- [外围能力实施计划v1](../../plan/model-invoker/peripheral-union-and-local-upstream-v1.md)
+- [外围能力并集与本地上游模块说明v1](../../module/model-invoker/peripheral-union-and-local-upstream-v1.md)
 - [架构与语义映射](./architecture.md)
 - [第三方中转站兼容 Route v1](./third-party-relay-compat-v1.md)
 - [Praxis执行语义并集v1设计草案](./execution-semantic-union-v1-draft.md)

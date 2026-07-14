@@ -26,6 +26,7 @@
 - 执行并集 Runtime v1：`union/profile/effect/execution`、Direct bridge、Codex App Server、Claude、Gemini ACP、current Kimi ACP、Qwen Harness Adapter均已完成离线实现；同一四类 IntentGraph 的六路 Mechanism差异与 Effect/Verification/Satisfaction收敛已通过本地集成；
 - 执行并集第二轮 Review：测试证明的 P0/P1 语义、身份、并发、Effect关联和Harness隔离缺口已修复；普通、五轮全仓shuffle、全仓Race/Vet、五路生产Adapter+fake process集成、五项Fuzz、四项benchmark均已通过，默认覆盖率`76.6%`、合并integration profile为`76.7%`；真实API/OAuth/订阅/官方二进制联调仍为`not_run`；
 - 第三方中转兼容：独立`third-party-relay` Provider与显式opt-in Factory支持Chat Completions、Responses、Messages、GenerateContent；7/8真实Route已完成文本与Tool Call，Gemini原生Route因中转上游持续429保留容量复测项；
+- 外围并集 v1：新增`operation/resource/job/realtime`四类生命周期、官方原生HTTP/WebSocket执行边界、Gemini可信resumable upload、OpenAI视频完整Job生命周期、十家上游operation specs和本地/企业自建`local-openai-compatible`、Ollama、llama.cpp显式Provider；
 - 已实现 Runtime Provider：OpenAI、Anthropic、Gemini、AWS Bedrock Mantle、AWS Bedrock Runtime、Google Vertex AI、Azure OpenAI、DeepSeek、Kimi、Z.AI、MiniMax、Xiaomi MiMo、Qwen、xAI；
 - 已实现协议：Responses、Chat Completions、Messages、GenerateContent、Bedrock Converse、Bedrock InvokeModel；
 - 锁定主要 SDK：`openai-go/v3 v3.41.1`、`anthropic-sdk-go v1.56.0`、`go-genai v1.63.0`、`aws-sdk-go-v2/service/bedrockruntime v1.55.0`；
@@ -64,6 +65,12 @@
 | `provider/qwen` | Alibaba Model Studio北京/新加坡 Workspace专属 Responses/Chat、thinking、server state与订阅隔离 |
 | `provider/plancompat` | Kimi/MiniMax/MiMo/Alibaba官方订阅的受限Chat/Messages、真实User-Agent和严格Key/host边界 |
 | `provider/relaycompat` | 显式第三方中转Route、精确模型与Endpoint门禁；独立身份，不冒充官方Provider |
+| `provider/localcompat` | 本地/企业自建OpenAI-compatible、Ollama、llama.cpp文本调用；匿名模式清除环境继承凭据，企业模式要求HTTPS |
+| `operation`、`operation/nativehttp` | 媒体、Embedding、Rerank、Moderation、Batch、Files、Stores统一类型、能力门禁、JSON/multipart/binary/SSE/NDJSON执行 |
+| `operation/specs` | OpenAI、Anthropic、Gemini、xAI、Kimi、MiniMax、Z.AI、MiMo、Qwen、Ollama、llama.cpp和显式自建能力描述 |
+| `operation/geminiupload` | Gemini Files API可信两阶段resumable upload；一次性URL必须同源且路径受限 |
+| `resource`、`job` | Files/Stores与Video/Batch生命周期门面；Batch NDJSON结果只能流式读取 |
+| `realtime`、`realtime/nativews` | OpenAI Realtime、Gemini Live、xAI Voice和本地WebSocket统一Session/事件；认证与模型位置保持原生差异 |
 | `internal/compatprovider` | 组合Chat/Responses/Messages/GenerateContent协议 driver与 SDK transport，不拥有厂商身份或能力判断 |
 | `internal/adaptercore` | SDK 无关的端点、能力、Raw、Header、无跳转、响应捕获与脱敏脚手架 |
 | `internal/protocol` | SDK中立的协议 Binding、Driver、Dialect、Failure归一化与强制身份边界 |
@@ -548,15 +555,48 @@ go test -tags=integration -run '^TestOfficialHarnessRoutesLiveSmoke/kimi_current
 go test -tags=integration -run '^TestOfficialHarnessRoutesLiveSmoke/qwen_sdk_cli$' ./tests/integration
 ```
 
-第一轮实现阶段只执行了 `go test -tags=integration -run '^$' ./tests/integration`。第二轮Review已由统一离线入口执行完整`go test -tags=integration ./tests/integration`：生产Harness Adapter + fake child process离线集成真实运行。2026-07-13完成Codex Pro临时登录、官方CLI与Codex App Server单Route真实验证；2026-07-14完成第三方Relay的7/8多协议文本与Tool Call，Gemini原生Route因中转上游429未获得成功响应。其他真实API/订阅Route仍未执行认证调用。
+第一轮实现阶段只执行了 `go test -tags=integration -run '^$' ./tests/integration`。第二轮Review已由统一离线入口执行完整`go test -tags=integration ./tests/integration`：生产Harness Adapter + fake child process离线集成真实运行。2026-07-13完成Codex Pro临时登录、官方CLI与Codex App Server单Route真实验证；2026-07-14完成第三方Relay的7/8多协议文本与Tool Call，Gemini原生Route因中转上游429未获得成功响应。同日又用外围Operation对四类中转执行零生成Files List探针：GPT与Grok返回503、Claude返回401、Gemini原生路径返回404，因此这些中转不得声明透传官方文件存储。其他真实API/订阅Route仍未执行认证调用。
+
+## 外围 Operation、Resource、Job 与 Realtime
+
+外围能力不塞进LLM `Request/Response`。调用方分别构造：
+
+- `operation.Request`：Embedding、Rerank、Moderation、图像、视频、ASR、TTS、音乐、Token Count；
+- `resource.Client`：Files和Stores；
+- `job.Client`：Video和Batch，其中NDJSON批结果强制走`StreamResults`；
+- `realtime.Provider`：OpenAI Realtime、Gemini Live、xAI Voice或本地WebSocket Session。
+
+`operation/specs`只提供官方已核对的method/path/lifecycle描述。模型型Operation只有在宿主传入精确模型白名单时才会出现；JSON或multipart中的真实`model`还会与`Request.Model`二次绑定。自建OpenAI-compatible不会因为存在`/v1`就自动获得Files、Batch或媒体能力。
+
+本地文本示例：
+
+```go
+adapter, err := localcompat.New(localcompat.Config{
+    Product: localcompat.ProductOllama,
+    Trust: localcompat.TrustLocal,
+    BaseURL: "http://127.0.0.1:11434/v1",
+    Protocol: modelinvoker.ProtocolChatCompletions,
+    AllowedModels: []string{"qwen3:8b"},
+    SupportedCapabilities: []modelinvoker.Capability{
+        modelinvoker.CapabilityTextGeneration,
+        modelinvoker.CapabilityStreaming,
+    },
+})
+```
+
+匿名本地模式会在最终transport删除`Authorization`、`X-API-Key`、OpenAI Organization/Project和Cookie，避免继承进程环境里的官方凭据。企业自建模式要求HTTPS、精确Base URL、模型白名单和显式能力白名单。Ollama/llama.cpp原生Embedding、Rerank及实验图像通过`operation/specs`接入；文本优先复用其官方OpenAI兼容面。
+
+Gemini文件上传使用`operation/geminiupload`完成官方两阶段resumable协议。一次性上传URL只能与握手端点同源且位于`/upload/v1beta/`，不能由请求传入。xAI Collections生命周期与文档搜索分别使用Management Key和Inference Key，因此`XAIManagement()`与`XAI()`是两个不能合并凭据的spec集合。
 
 ## 当前限制
 
 - 没有真实云账号、具体云模型、认证成功调用或公网容量结论；
 - 没有执行真实套餐或付费调用；Catalog中的 `implemented_offline`不表示生产支持；
 - 十家直连P0 Route由Catalog短TTL exact集合门禁；云部署仍按Deployment或宿主绑定验证，未来动态发现必须另做可信Resolver而不能fallback-open；
-- 只实现文本、函数、结构化输出、推理、状态等 Agent 核心语义；
-- Gemini Interactions/Live、云 Batch、Hosted Tools与 Prompt Cache创建均未实现；
+- 已实现外围通用transport与首批官方spec，但各厂商媒体参数仍以受控原生Body为主，尚未全部提升为强类型builder；
+- Realtime已实现WebSocket Session；浏览器WebRTC、SIP、ephemeral-token签发和MiniMax专用实时方言尚未实现；
+- OpenAI Uploads/Containers、Gemini Context Cache、Z.AI Context Cache、声音复刻/设计/管理等长尾资源尚未形成专用强类型门面；
+- 云平台异步推理、Hosted Tools和跨Provider资产迁移尚未实现；
 - RouteID门面本身不实现自动 Route选择、Credential秘密解析、Provider构造、Context Engine或缓存策略；其上方`profile/`已经实现Semantic Route Profile v1，这不等于全局Profile System已完成；
 - 没有 TypeScript Sidecar、尚未实施的其他矩阵 Provider、Rust 或 Agent 编排；
 - 覆盖率用于记录现状，仓库尚未设定百分比门禁。

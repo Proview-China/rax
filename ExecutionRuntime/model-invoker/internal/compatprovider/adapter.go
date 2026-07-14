@@ -86,7 +86,7 @@ func (a *Adapter) addChat(c Config) error {
 	if err != nil {
 		return err
 	}
-	driver, err := openaichat.New(binding, c.ChatDialect, newOpenAIClient(c.APIKey, endpoint, c.HTTPClient, c.UserAgent))
+	driver, err := openaichat.New(binding, c.ChatDialect, newOpenAIClient(c.APIKey, endpoint, c.HTTPClient, c.UserAgent, c.AllowAnonymous))
 	if err != nil {
 		return err
 	}
@@ -99,7 +99,7 @@ func (a *Adapter) addResponses(c Config) error {
 	if err != nil {
 		return err
 	}
-	client := newOpenAIClient(c.APIKey, endpoint, c.HTTPClient, c.UserAgent)
+	client := newOpenAIClient(c.APIKey, endpoint, c.HTTPClient, c.UserAgent, c.AllowAnonymous)
 	driver, err := openairesponses.New(binding, c.ResponsesDialect, responsesClient{native: client})
 	if err != nil {
 		return err

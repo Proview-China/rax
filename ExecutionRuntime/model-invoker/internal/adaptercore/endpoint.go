@@ -213,6 +213,16 @@ func NormalizeEndpoint(value string) string {
 	return u.String()
 }
 
+// ParseEndpointForPolicy exposes only URL parsing needed by configurable
+// compatibility boundaries. Trust is still decided by ValidateEndpoint.
+func ParseEndpointForPolicy(value string) (*url.URL, error) {
+	parsed, err := url.Parse(value)
+	if err != nil || parsed == nil || parsed.Scheme == "" || parsed.Host == "" {
+		return nil, fmt.Errorf("endpoint must be an absolute URL")
+	}
+	return parsed, nil
+}
+
 // EffectiveEndpoint reports the request override when present, otherwise the
 // adapter's configured endpoint.
 func EffectiveEndpoint(requested, configured string) string {

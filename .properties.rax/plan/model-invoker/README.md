@@ -1,5 +1,7 @@
 # 模型调用器计划索引
 
+> 最近完成计划：[外围能力并集与本地上游实施计划 v1](./peripheral-union-and-local-upstream-v1.md)。`operation/resource/job/realtime`、官方spec、Gemini resumable upload、本地/企业自建兼容面、低成本中转外围探针、最终离线门禁和资产同步均已完成；计划保留为“陈旧计划（已完成）”。
+
 > 当前完成计划：[第三方中转站兼容 Route 实施计划 v1](./third-party-relay-compat-v1.md)。独立Relay Provider、显式Factory、四协议离线合同与7/8真实文本/Tool Call已完成；Gemini原生Route保留中转上游429容量复测项。
 
 > 最近完成计划：[执行语义并集第二轮 Review 与测试加固计划 v2](./execution-semantic-union-review-hardening-v2.md)。P0/P1 合同缺口已修复；高价值单元、并发、故障注入与五路真实 Adapter + fake process 集成已通过最终离线门禁，真实凭据和官方二进制继续为`not_run`。

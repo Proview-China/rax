@@ -23,6 +23,11 @@
 | 执行并集 Runtime v1 | [execution-semantic-union-runtime-v1.md](execution-semantic-union-runtime-v1.md) | 五个顶层原语、Intent/Mechanism/Effect、Profile 编译、事件账本、Direct/Harness、Effect observer、测试与真实联调边界 |
 | 执行并集第二轮 Review | [Review v2 计划](../../plan/model-invoker/execution-semantic-union-review-hardening-v2.md) / [完成快照](../../memory/model-invoker/20260713-115300-执行语义并集第二轮Review与测试加固完成.md) | P0/P1 合同修复、单元/并发/故障矩阵、五路生产 Adapter 离线集成与 P2 边界 |
 | Go module | `ExecutionRuntime/model-invoker/` | 统一内核、十四个 Runtime Provider、上游控制面与 RouteID调用门面 |
+| 外围并集 Runtime | `ExecutionRuntime/model-invoker/{operation,resource,job,realtime}/` | 媒体、Embedding/Rerank、Files/Stores、Video/Batch Job与双向Session四类生命周期 |
+| 外围官方Spec | `ExecutionRuntime/model-invoker/operation/specs/` | OpenAI、Anthropic、Gemini、xAI、Kimi、MiniMax、Z.AI、MiMo、Qwen、Ollama、llama.cpp与显式自建能力描述 |
+| Gemini文件上传 | `ExecutionRuntime/model-invoker/operation/geminiupload/` | 官方resumable两阶段上传、同源一次性URL门禁和资源归一化 |
+| 本地/企业自建 | `ExecutionRuntime/model-invoker/provider/localcompat/` | OpenAI-compatible、Ollama、llama.cpp文本面，匿名凭据清除、HTTPS企业面和精确能力白名单 |
+| 外围测试 | `ExecutionRuntime/model-invoker/tests/{operation,realtime,localcompat}/` | JSON、multipart、binary、SSE、NDJSON、WebSocket、resumable upload、端点/模型/认证负向与fuzz |
 | 执行并集类型/Profile | `ExecutionRuntime/model-invoker/{union,profile}/` | 五顶层原语、Intent/Mechanism/Effect、三因子 Profile、Manifest、MappingReport 与确定性 Route 编译 |
 | 执行与效果观察 | `ExecutionRuntime/model-invoker/{execution,effect}/` | EventLedger、审批/取消/终态、Direct bridge、Codex/Claude/Gemini/Kimi/Qwen Harness、真实 Effect observer |
 | 执行并集测试 | `ExecutionRuntime/model-invoker/tests/{unioncontract,profilecompiler,effectobserver,executionunion,executiondirect,harnesslocal,conformance,performance}/` | 白盒、黑盒、N01-N14、六路语义收敛、Race、Fuzz、覆盖率和基准 |
@@ -189,12 +194,14 @@ Qwen最终命令与结果记录在[第三阶段波次 E1 Qwen完成快照](../..
 
 执行并集第二轮独立 Review、P0/P1 修复、五路生产 Adapter + fake process 集成和最终测试数字记录在[执行语义并集第二轮 Review 与测试加固完成快照](../../memory/model-invoker/20260713-115300-执行语义并集第二轮Review与测试加固完成.md)中。
 
+外围Operation/Resource/Job/Realtime、本地与企业自建上游、真实中转外围探针和最终门禁记录在[外围能力并集与本地上游模块说明v1](./peripheral-union-and-local-upstream-v1.md)及[完成快照](../../memory/model-invoker/20260714-160000-外围能力并集与本地上游完成.md)中。
+
 ## 7. 当前限制与风险
 
 1. 所有真实 API、真实云账号与真实套餐烟雾测试延期，当前结果只证明离线协议、安全、生命周期和控制面链路；
 2. 模型能力会漂移；需要阻断静默映射的短 TTL Provider方言会内置精确切片并在证据刷新时更新；
-3. Gemini Developer与 Vertex已经分离实现；Interactions、Live与多候选仍未实现；
-4. 多模态、Hosted Tools、Batch、Realtime、后台执行与 Prompt Cache 创建未实现；
+3. Gemini Developer与 Vertex已经分离实现；Live WebSocket已作为独立Realtime能力实现，Interactions、多候选与浏览器WebRTC尚未实现；
+4. 媒体、Files/Stores、Batch/Video Job与Realtime首批并集已实现；Hosted Tools、后台执行、Prompt Cache创建和各家长尾资源仍未统一；
 5. Catalog当前含39条默认callable Binding、16条带Adapter但host-blocked的订阅Route和7条研究/控制记录；host-blocked不等于默认可调用；
 6. 第三阶段最终记录的全仓合并覆盖率为76.7%，原最终候选为77.8%，信任闭合后为77.5%，宿主激活再验证后为78.0%；Factory双层信任与生命周期gap闭合后`-covermode=atomic -coverpkg=./... ./tests/...`实测为79.4%。执行并集第二轮Review按全仓`./...`口径为76.6%，再合并integration-tag profile为76.7%；这些测试集合与历史口径不同，不能直接横向比较，且仍只记录现状，不设百分比门禁。
 7. RouteInvoker不负责Credential秘密解析、Provider构造和实例生命周期；这些职责已由`routegateway`完成离线实现。生产宿主的真实Resolver接线仍待Runtime联合审核。`model-invoker/profile`内的Semantic Route Profile v1已完成离线实现；不在本模块范围的是全局Runtime Kernel、Context Engine、全局`profile-system`的持久化/管理/装配及缓存策略。

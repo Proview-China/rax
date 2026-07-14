@@ -18,9 +18,13 @@ import (
 type CapabilityBuilder func(context.Context, modelinvoker.CapabilityQuery) (modelinvoker.CapabilityContract, error)
 
 type Config struct {
-	Provider           modelinvoker.ProviderID
-	DefaultProtocol    modelinvoker.Protocol
-	APIKey             string
+	Provider        modelinvoker.ProviderID
+	DefaultProtocol modelinvoker.Protocol
+	APIKey          string
+	// AllowAnonymous permits an empty API key. Concrete public providers must
+	// opt in explicitly; the transport then strips inherited authentication
+	// headers so OPENAI_* environment state cannot escape to a local endpoint.
+	AllowAnonymous     bool
 	HTTPClient         *http.Client
 	ChatEndpoint       string
 	ResponsesEndpoint  string
@@ -45,8 +49,11 @@ func (c Config) Validate() error {
 	if strings.TrimSpace(string(c.Provider)) == "" {
 		return fmt.Errorf("compatible provider: provider ID is required")
 	}
-	if strings.TrimSpace(c.APIKey) == "" {
+	if strings.TrimSpace(c.APIKey) == "" && !c.AllowAnonymous {
 		return fmt.Errorf("%s: API key is required", c.Provider)
+	}
+	if c.APIKey != "" && (c.APIKey != strings.TrimSpace(c.APIKey) || strings.ContainsAny(c.APIKey, "\r\n\x00")) {
+		return fmt.Errorf("%s: API key is invalid", c.Provider)
 	}
 	if c.UserAgent != "" && (strings.TrimSpace(c.UserAgent) == "" || len(c.UserAgent) > 512 || strings.ContainsAny(c.UserAgent, "\r\n")) {
 		return fmt.Errorf("%s: user agent must be bounded and single-line", c.Provider)

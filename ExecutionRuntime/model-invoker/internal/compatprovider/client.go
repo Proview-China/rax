@@ -24,9 +24,10 @@ type openAIClient struct {
 	responses responses.ResponseService
 }
 
-func newOpenAIClient(apiKey, endpoint string, client *http.Client, userAgent string) *openAIClient {
+func newOpenAIClient(apiKey, endpoint string, client *http.Client, userAgent string, allowAnonymous bool) *openAIClient {
 	httpClient := adaptercore.CloneHTTPClientWithoutRedirects(client)
 	httpClient = withUserAgent(httpClient, userAgent)
+	httpClient = withPinnedOpenAIAuth(httpClient, apiKey, allowAnonymous)
 	httpClient = adaptercore.CloneHTTPClientWithResponseCapture(httpClient)
 	opts := []openaioption.RequestOption{
 		openaioption.WithBaseURL(endpoint),
@@ -38,6 +39,35 @@ func newOpenAIClient(apiKey, endpoint string, client *http.Client, userAgent str
 		chat:      openaisdk.NewChatCompletionService(opts...),
 		responses: responses.NewResponseService(opts...),
 	}
+}
+
+type authStrippingTransport struct {
+	next   http.RoundTripper
+	apiKey string
+}
+
+func (transport authStrippingTransport) RoundTrip(request *http.Request) (*http.Response, error) {
+	clone := request.Clone(request.Context())
+	clone.Header = request.Header.Clone()
+	for _, name := range []string{"Authorization", "Proxy-Authorization", "Cookie", "X-API-Key", "Api-Key", "OpenAI-Organization", "OpenAI-Project"} {
+		clone.Header.Del(name)
+	}
+	if transport.apiKey != "" {
+		clone.Header.Set("Authorization", "Bearer "+transport.apiKey)
+	}
+	return transport.next.RoundTrip(clone)
+}
+
+func withPinnedOpenAIAuth(client *http.Client, apiKey string, allowAnonymous bool) *http.Client {
+	if apiKey == "" && !allowAnonymous {
+		return client
+	}
+	next := client.Transport
+	if next == nil {
+		next = http.DefaultTransport
+	}
+	client.Transport = authStrippingTransport{next: next, apiKey: apiKey}
+	return client
 }
 
 func (c *openAIClient) Create(ctx context.Context, params openaisdk.ChatCompletionNewParams) (*openaisdk.ChatCompletion, http.Header, error) {
