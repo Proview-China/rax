@@ -238,3 +238,49 @@ func TestLocalCompatibleChatAndResponsesStreaming(t *testing.T) {
 		})
 	}
 }
+
+func TestLocalCompatibleAdapterAttestsExactResponseModel(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		body, _ := io.ReadAll(r.Body)
+		if strings.Contains(string(body), `"stream":true`) {
+			w.Header().Set("Content-Type", "text/event-stream")
+			_, _ = io.WriteString(w, "data: {\"id\":\"chat\",\"object\":\"chat.completion.chunk\",\"model\":\"other\",\"choices\":[{\"index\":0,\"delta\":{},\"finish_reason\":\"stop\"}]}\n\ndata: [DONE]\n\n")
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"chat","object":"chat.completion","model":"other","choices":[{"index":0,"finish_reason":"stop","message":{"content":"bad"}}]}`)
+	}))
+	defer server.Close()
+	adapter, err := localcompat.New(localcompat.Config{
+		Product: localcompat.ProductGeneric, Trust: localcompat.TrustLocal, BaseURL: server.URL + "/v1",
+		Protocol: modelinvoker.ProtocolChatCompletions, AllowedModels: []string{"m"},
+		SupportedCapabilities: []modelinvoker.Capability{modelinvoker.CapabilityTextGeneration, modelinvoker.CapabilityStreaming},
+		HTTPClient:            server.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := modelinvoker.Request{
+		Provider: localcompat.ProviderGeneric, Protocol: modelinvoker.ProtocolChatCompletions,
+		Endpoint: server.URL + "/v1", Model: "m",
+		Input: []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "x")},
+	}
+	if _, err := adapter.Invoke(context.Background(), request); modelinvoker.ErrorKindOf(err) != modelinvoker.ErrorMapping {
+		t.Fatalf("local invoke accepted response model drift: %v", err)
+	}
+	request.Stream = true
+	stream, err := adapter.Stream(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	found := false
+	for stream.Next() {
+		if event := stream.Event(); event.Type == modelinvoker.StreamEventError && event.Error != nil && event.Error.Code == "response_model_mismatch" {
+			found = true
+		}
+	}
+	if !found || modelinvoker.ErrorKindOf(stream.Err()) != modelinvoker.ErrorMapping {
+		t.Fatalf("local stream accepted response model drift: found=%t err=%v", found, stream.Err())
+	}
+}

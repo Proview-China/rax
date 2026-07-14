@@ -101,3 +101,84 @@ func TestRequestValidationRejectsUnsafeFields(t *testing.T) {
 		}
 	}
 }
+
+func TestInvokerRejectsProviderResultIdentityAndArtifactDrift(t *testing.T) {
+	provider := &fakeProvider{id: "p", contract: operation.CapabilityContract{
+		operation.ImageGenerate: {Level: operation.SupportNative, Models: []string{"m"}},
+	}}
+	registry, _ := operation.NewRegistry(provider)
+	invoker, _ := operation.NewInvoker(registry)
+	request := operation.Request{Provider: "p", Kind: operation.ImageGenerate, Model: "m"}
+	results := []operation.Result{
+		{Provider: "other"},
+		{Kind: operation.VideoGenerate},
+		{Model: "other"},
+		{Artifacts: []operation.Artifact{{Kind: operation.ArtifactImage, Data: []byte("x"), URL: "https://example.com/x"}}},
+		{Artifacts: []operation.Artifact{{Kind: operation.ArtifactImage, URL: "https://example.com/x"}}},
+	}
+	for index, candidate := range results {
+		provider.invoke = func(context.Context, operation.Request) (operation.Result, error) {
+			return candidate, nil
+		}
+		if _, err := invoker.Invoke(context.Background(), request); modelinvoker.ErrorKindOf(err) != modelinvoker.ErrorMapping {
+			t.Fatalf("provider result drift %d was not rejected: %v", index, err)
+		}
+	}
+	provider.invoke = func(context.Context, operation.Request) (operation.Result, error) {
+		return operation.Result{Artifacts: []operation.Artifact{{
+			Kind: operation.ArtifactImage, URL: "https://example.com/x", ExpiryUnknown: true,
+		}}}, nil
+	}
+	if _, err := invoker.Invoke(context.Background(), request); err != nil {
+		t.Fatalf("valid provider artifact was rejected: %v", err)
+	}
+}
+
+func TestInvokerIsolatesCallerRequestsAndProviderResults(t *testing.T) {
+	provider := &fakeProvider{id: "p", contract: operation.CapabilityContract{
+		operation.ImageGenerate: {Level: operation.SupportNative, Models: []string{"m"}},
+	}}
+	query := map[string][]string{"tag": {"original"}}
+	metadata := modelinvoker.Metadata{"trace": "original"}
+	options := modelinvoker.ProviderOptions{"p": []byte(`{"mode":"original"}`)}
+	providerResult := operation.Result{
+		Job:              &operation.JobRef{ID: "job-original"},
+		Resource:         &operation.ResourceRef{ID: "resource-original"},
+		Artifacts:        []operation.Artifact{{Kind: operation.ArtifactImage, Data: []byte("image-original"), Metadata: map[string]string{"source": "original"}}},
+		Vectors:          []operation.Vector{{Values: []float32{1, 2}}},
+		Rankings:         []operation.Ranking{{Text: "rank-original"}},
+		ProviderMetadata: modelinvoker.ProviderMetadata{"request-id": "original"},
+	}
+	provider.invoke = func(_ context.Context, request operation.Request) (operation.Result, error) {
+		request.Query["tag"][0] = "provider-mutated"
+		request.Metadata["trace"] = "provider-mutated"
+		request.ProviderOptions["p"][0] = 'X'
+		return providerResult, nil
+	}
+	registry, _ := operation.NewRegistry(provider)
+	invoker, _ := operation.NewInvoker(registry)
+	result, err := invoker.Invoke(context.Background(), operation.Request{
+		Provider: "p", Kind: operation.ImageGenerate, Model: "m",
+		Query: query, Metadata: metadata, ProviderOptions: options,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if query["tag"][0] != "original" || metadata["trace"] != "original" || string(options["p"]) != `{"mode":"original"}` {
+		t.Fatal("operation provider mutated caller-owned request state")
+	}
+
+	providerResult.Job.ID = "mutated"
+	providerResult.Resource.ID = "mutated"
+	providerResult.Artifacts[0].Data[0] = 'X'
+	providerResult.Artifacts[0].Metadata["source"] = "mutated"
+	providerResult.Vectors[0].Values[0] = 99
+	providerResult.Rankings[0].Text = "mutated"
+	providerResult.ProviderMetadata["request-id"] = "mutated"
+	if result.Job.ID != "job-original" || result.Resource.ID != "resource-original" ||
+		string(result.Artifacts[0].Data) != "image-original" || result.Artifacts[0].Metadata["source"] != "original" ||
+		result.Vectors[0].Values[0] != 1 || result.Rankings[0].Text != "rank-original" ||
+		result.ProviderMetadata["request-id"] != "original" {
+		t.Fatal("operation result aliases provider-owned state")
+	}
+}

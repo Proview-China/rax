@@ -135,6 +135,26 @@ func TestInvokerInvokeResolvesDefaultProtocolAndCompletesResponse(t *testing.T) 
 	}
 }
 
+func TestInvokerRejectsProviderResponseIdentityDrift(t *testing.T) {
+	request := validRequest()
+	cases := []Response{
+		{Model: "other"},
+	}
+	for index, candidate := range cases {
+		provider := newFakeProvider(request.Provider)
+		provider.defaultProtocol = ProtocolResponses
+		provider.capabilitiesFunc = func(context.Context, CapabilityQuery) (CapabilityContract, error) {
+			return nativeContract(), nil
+		}
+		provider.invokeFunc = func(context.Context, Request) (Response, error) {
+			return candidate, nil
+		}
+		if _, err := newTestInvoker(t, provider).Invoke(context.Background(), request); ErrorKindOf(err) != ErrorMapping {
+			t.Fatalf("response identity drift %d was not rejected: %v", index, err)
+		}
+	}
+}
+
 func TestInvokerRevalidatesStateAfterResolvingDefaultProtocol(t *testing.T) {
 	tests := []struct {
 		name          string

@@ -3,7 +3,7 @@
 ## 设计状态
 
 - 模块名称：`model-invoker`
-- 当前阶段：外围Operation/Resource/Job/Realtime并集、本地与企业自建上游、官方媒体/资源/Batch/Live首批能力已完成设计、实现与离线验收
+- 当前阶段：全上游统一原语层Code Review已闭环；LLM、Harness、外围、Realtime、本地与Relay已进入可机器校验的联合Surface矩阵
 - 最近更新：2026-07-14
 - 进入计划阶段：第一、第二阶段于2026-07-10获授权；执行并集Runtime于2026-07-13获授权并完成
 - 代码实现：统一 Go内核、十四个 Runtime Provider、波次 A上游基础、B完整协议层、C动态订阅控制面、D云托管、E1全部路线，以及`union/profile/effect/execution`与六条代表Route Adapter均已离线验收，位置为 `ExecutionRuntime/model-invoker/`
@@ -75,6 +75,7 @@ Provider Native API
 
 ## 设计资产
 
+- [全上游统一原语层Code Review（2026-07-14）](./upstream-primitive-code-review-20260714.md)
 - [外围上游能力官方研究（2026-07-14）](./upstream-peripheral-capability-research-20260714.md)
 - [外围能力并集与本地上游设计v1](./peripheral-union-and-local-upstream-v1.md)
 - [外围能力实施计划v1](../../plan/model-invoker/peripheral-union-and-local-upstream-v1.md)

@@ -2,6 +2,7 @@ package localcompat
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 
@@ -76,18 +77,102 @@ func (a *Adapter) Invoke(ctx context.Context, request modelinvoker.Request) (mod
 	if a == nil || a.inner == nil {
 		return modelinvoker.Response{}, localError("", modelinvoker.ErrorProviderUnavailable, "invoke", "adapter is not initialized")
 	}
-	return a.inner.Invoke(ctx, request)
+	response, err := a.inner.Invoke(ctx, request)
+	if err == nil {
+		if modelErr := exactModelError(a.ID(), request.Model, response.Model); modelErr != nil {
+			return modelinvoker.Response{}, modelErr
+		}
+	}
+	return response, err
 }
 func (a *Adapter) Stream(ctx context.Context, request modelinvoker.Request) (modelinvoker.Stream, error) {
 	if a == nil || a.inner == nil {
 		return nil, localError("", modelinvoker.ErrorProviderUnavailable, "stream", "adapter is not initialized")
 	}
-	return a.inner.Stream(ctx, request)
+	stream, err := a.inner.Stream(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	return &modelStream{inner: stream, provider: a.ID(), requested: request.Model}, nil
 }
 
 func localError(provider modelinvoker.ProviderID, kind modelinvoker.ErrorKind, operation, message string) *modelinvoker.Error {
 	return &modelinvoker.Error{Kind: kind, Provider: provider, Operation: operation, Message: message}
 }
 
+func exactModelError(provider modelinvoker.ProviderID, requested, actual string) *modelinvoker.Error {
+	if actual == requested {
+		return nil
+	}
+	code, message := "response_model_mismatch", "local response model does not match the exact selected model"
+	if actual == "" {
+		code, message = "response_model_missing", "local response is missing the exact selected model"
+	}
+	return &modelinvoker.Error{Kind: modelinvoker.ErrorMapping, Provider: provider, Operation: "validate_response", Code: code, Message: message}
+}
+
+type modelStream struct {
+	inner       modelinvoker.Stream
+	provider    modelinvoker.ProviderID
+	requested   string
+	event       modelinvoker.StreamEvent
+	err         error
+	done        bool
+	closed      bool
+	innerClosed bool
+}
+
+func (stream *modelStream) Next() bool {
+	if stream == nil || stream.inner == nil || stream.done || stream.closed {
+		return false
+	}
+	if !stream.inner.Next() {
+		stream.done = true
+		stream.err = stream.inner.Err()
+		return false
+	}
+	stream.event = stream.inner.Event()
+	if stream.event.Response != nil {
+		if modelErr := exactModelError(stream.provider, stream.requested, stream.event.Response.Model); modelErr != nil {
+			stream.event = modelinvoker.StreamEvent{
+				Type: modelinvoker.StreamEventError, Sequence: stream.event.Sequence,
+				ResponseID: stream.event.ResponseID, Error: modelErr,
+			}
+			stream.err = modelErr
+			stream.done = true
+			if closeErr := stream.inner.Close(); closeErr != nil {
+				stream.err = errors.Join(stream.err, closeErr)
+			}
+			stream.innerClosed = true
+			return true
+		}
+	}
+	return true
+}
+func (stream *modelStream) Event() modelinvoker.StreamEvent {
+	if stream == nil {
+		return modelinvoker.StreamEvent{}
+	}
+	return stream.event
+}
+func (stream *modelStream) Err() error {
+	if stream == nil {
+		return nil
+	}
+	return stream.err
+}
+func (stream *modelStream) Close() error {
+	if stream == nil || stream.closed {
+		return nil
+	}
+	stream.closed = true
+	if stream.inner == nil || stream.innerClosed {
+		return nil
+	}
+	stream.innerClosed = true
+	return stream.inner.Close()
+}
+
 var _ modelinvoker.Provider = (*Adapter)(nil)
 var _ adaptercore.CandidateBindingReceipt = (*Adapter)(nil)
+var _ modelinvoker.Stream = (*modelStream)(nil)

@@ -291,7 +291,13 @@ func TestInvokerStreamWrapperAndErrorNormalization(t *testing.T) {
 	registry, _ := operation.NewRegistry(provider)
 	invoker, _ := operation.NewInvoker(registry)
 	stream, err := invoker.Stream(context.Background(), operation.Request{Provider: "p", Kind: operation.ImageGenerate})
-	if err != nil || !stream.Next() || stream.Event().Text != "x" || stream.Err().Error() != "terminal" {
+	if err != nil || !stream.Next() || stream.Event().Type != operation.StreamStarted || stream.Event().Result == nil || stream.Event().Result.MappingReport.Action != operation.MappingExact {
+		t.Fatalf("stream wrapper did not own the semantic start: event=%+v err=%v", stream.Event(), err)
+	}
+	if !stream.Next() || stream.Event().Text != "x" || stream.Event().Sequence != 2 {
+		t.Fatalf("stream wrapper did not re-sequence the provider event: event=%+v", stream.Event())
+	}
+	if stream.Next() || modelinvoker.ErrorKindOf(stream.Err()) != modelinvoker.ErrorProvider {
 		t.Fatalf("stream wrapper failed: event=%+v err=%v terminal=%v", stream.Event(), err, stream.Err())
 	}
 	if err := stream.Close(); err != nil || !inner.closed {
@@ -315,5 +321,52 @@ func TestInvokerStreamWrapperAndErrorNormalization(t *testing.T) {
 	provider.invokeErr = &modelinvoker.Error{Kind: modelinvoker.ErrorRateLimit, Message: "limited"}
 	if _, err := invoker.Invoke(context.Background(), operation.Request{Provider: "p", Kind: operation.ImageGenerate}); modelinvoker.ErrorKindOf(err) != modelinvoker.ErrorRateLimit {
 		t.Fatalf("typed invoke error was not preserved: %v", err)
+	}
+}
+
+func TestInvokerStreamSynthesizesOneAttestedTerminalAndRejectsResultDrift(t *testing.T) {
+	inner := &matrixStream{events: []operation.StreamEvent{{Type: operation.StreamTextDelta, Sequence: 44, Text: "x"}}}
+	provider := &matrixProvider{id: "p", kinds: []operation.Kind{operation.ImageGenerate}, stream: inner}
+	registry, _ := operation.NewRegistry(provider)
+	invoker, _ := operation.NewInvoker(registry)
+	request := operation.Request{Provider: "p", Kind: operation.ImageGenerate, Model: "m"}
+	stream, err := invoker.Stream(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var events []operation.StreamEvent
+	for stream.Next() {
+		events = append(events, stream.Event())
+	}
+	if stream.Err() != nil || len(events) != 3 ||
+		events[0].Type != operation.StreamStarted ||
+		events[1].Type != operation.StreamTextDelta ||
+		events[2].Type != operation.StreamCompleted {
+		t.Fatalf("unexpected semantic stream lifecycle: %+v err=%v", events, stream.Err())
+	}
+	for index, event := range events {
+		if event.Sequence != int64(index+1) {
+			t.Fatalf("event %d sequence = %d", index, event.Sequence)
+		}
+	}
+	terminal := events[2].Result
+	if terminal == nil || terminal.Provider != "p" || terminal.Kind != operation.ImageGenerate ||
+		terminal.Model != "m" || terminal.MappingReport.Action != operation.MappingExact {
+		t.Fatalf("terminal result was not attested: %+v", terminal)
+	}
+	if stream.Next() {
+		t.Fatal("semantic stream emitted more than one terminal event")
+	}
+
+	provider.stream = &matrixStream{events: []operation.StreamEvent{{
+		Type:   operation.StreamCompleted,
+		Result: &operation.Result{Provider: "other"},
+	}}}
+	stream, _ = invoker.Stream(context.Background(), request)
+	if !stream.Next() || stream.Event().Type != operation.StreamStarted {
+		t.Fatal("stream did not start")
+	}
+	if stream.Next() || modelinvoker.ErrorKindOf(stream.Err()) != modelinvoker.ErrorMapping {
+		t.Fatalf("conflicting streamed result identity was not rejected: %v", stream.Err())
 	}
 }

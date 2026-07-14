@@ -1,5 +1,7 @@
 # 模型调用器计划索引
 
+> 最近完成Review计划：[全上游统一原语层Code Review v1](./upstream-primitive-code-review-v1.md)。780条LLM能力行与206条Harness/Operation/Realtime/Local/Relay Surface行已形成联合机器证明；Realtime Invoker、结果身份与外围流生命周期缺口已修复。
+
 > 最近完成计划：[外围能力并集与本地上游实施计划 v1](./peripheral-union-and-local-upstream-v1.md)。`operation/resource/job/realtime`、官方spec、Gemini resumable upload、本地/企业自建兼容面、低成本中转外围探针、最终离线门禁和资产同步均已完成；计划保留为“陈旧计划（已完成）”。
 
 > 最近完成测试计划：[外围并集大批量测试与集成加固 v1](./peripheral-test-hardening-v1.md)。新增18个测试/Fuzz入口，外围切片覆盖率从62.9%提升到85.2%，修复生命周期Client nil receiver panic与NDJSON/binary正常EOF缺少统一完成事件。

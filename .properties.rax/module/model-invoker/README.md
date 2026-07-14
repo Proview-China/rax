@@ -22,6 +22,7 @@
 | 计划 | `.properties.rax/plan/model-invoker/` | 各阶段陈旧计划及已完成的上游调用与统一封装 v1计划 |
 | 执行并集 Runtime v1 | [execution-semantic-union-runtime-v1.md](execution-semantic-union-runtime-v1.md) | 五个顶层原语、Intent/Mechanism/Effect、Profile 编译、事件账本、Direct/Harness、Effect observer、测试与真实联调边界 |
 | 执行并集第二轮 Review | [Review v2 计划](../../plan/model-invoker/execution-semantic-union-review-hardening-v2.md) / [完成快照](../../memory/model-invoker/20260713-115300-执行语义并集第二轮Review与测试加固完成.md) | P0/P1 合同修复、单元/并发/故障矩阵、五路生产 Adapter 离线集成与 P2 边界 |
+| 全上游原语层Review闭环 | [模块说明](./upstream-primitive-review-closure-v1.md) | 780条LLM能力行、206条Surface行、Realtime Invoker、外围流与结果身份闭合 |
 | Go module | `ExecutionRuntime/model-invoker/` | 统一内核、十四个 Runtime Provider、上游控制面与 RouteID调用门面 |
 | 外围并集 Runtime | `ExecutionRuntime/model-invoker/{operation,resource,job,realtime}/` | 媒体、Embedding/Rerank、Files/Stores、Video/Batch Job与双向Session四类生命周期 |
 | 外围官方Spec | `ExecutionRuntime/model-invoker/operation/specs/` | OpenAI、Anthropic、Gemini、xAI、Kimi、MiniMax、Z.AI、MiMo、Qwen、Ollama、llama.cpp与显式自建能力描述 |
@@ -196,6 +197,8 @@ Qwen最终命令与结果记录在[第三阶段波次 E1 Qwen完成快照](../..
 执行并集第二轮独立 Review、P0/P1 修复、五路生产 Adapter + fake process 集成和最终测试数字记录在[执行语义并集第二轮 Review 与测试加固完成快照](../../memory/model-invoker/20260713-115300-执行语义并集第二轮Review与测试加固完成.md)中。
 
 外围Operation/Resource/Job/Realtime、本地与企业自建上游、真实中转外围探针和最终门禁记录在[外围能力并集与本地上游模块说明v1](./peripheral-union-and-local-upstream-v1.md)及[完成快照](../../memory/model-invoker/20260714-160000-外围能力并集与本地上游完成.md)中。
+
+全上游统一原语层Code Review、联合Surface矩阵、合同修复和最终门禁记录在[Review闭环模块说明](./upstream-primitive-review-closure-v1.md)及[完成快照](../../memory/model-invoker/20260714-170400-全上游统一原语层Review闭环.md)中。
 
 ## 7. 当前限制与风险
 

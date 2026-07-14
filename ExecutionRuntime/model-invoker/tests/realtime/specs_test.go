@@ -8,12 +8,17 @@ import (
 )
 
 func TestOfficialRealtimeSpecsPassPinnedValidation(t *testing.T) {
-	configs := []nativews.Config{
-		specs.OpenAI("key", []string{"gpt-realtime"}),
-		specs.Gemini("key", []string{"gemini-live"}),
-		specs.XAI("key", []string{"grok-voice"}),
+	definitions := specs.Definitions()
+	if len(definitions) != 3 {
+		t.Fatalf("realtime surface registry count drifted: %d", len(definitions))
 	}
-	for _, config := range configs {
+	seen := map[string]bool{}
+	for _, definition := range definitions {
+		if definition.ID == "" || definition.Provider == "" || seen[definition.ID] {
+			t.Fatalf("invalid realtime definition: %+v", definition)
+		}
+		seen[definition.ID] = true
+		config := definition.Config("key", []string{"model"})
 		if _, err := nativews.New(config); err != nil {
 			t.Fatalf("%s spec failed validation: %v", config.Provider, err)
 		}

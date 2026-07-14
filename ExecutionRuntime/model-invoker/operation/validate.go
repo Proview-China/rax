@@ -8,14 +8,27 @@ import (
 	"strings"
 )
 
-var knownKinds = map[Kind]struct{}{
-	EmbeddingCreate: {}, RerankCreate: {}, ModerationCreate: {}, ImageGenerate: {}, ImageEdit: {}, ImageVariation: {},
-	VideoGenerate: {}, VideoEdit: {}, VideoExtend: {}, VideoRemix: {}, AudioTranscribe: {}, AudioTranslate: {},
-	VideoGet: {}, VideoDelete: {}, VideoContent: {},
-	SpeechGenerate: {}, MusicGenerate: {}, TokenCount: {}, BatchCreate: {}, BatchList: {}, BatchGet: {}, BatchCancel: {}, BatchDelete: {}, BatchResults: {},
-	FileCreate: {}, FileList: {}, FileGet: {}, FileDelete: {}, FileContent: {}, StoreCreate: {}, StoreList: {}, StoreGet: {},
-	StoreDelete: {}, StoreSearch: {},
+var allKinds = []Kind{
+	EmbeddingCreate, RerankCreate, ModerationCreate, ImageGenerate, ImageEdit, ImageVariation,
+	VideoGenerate, VideoEdit, VideoExtend, VideoRemix, VideoGet, VideoDelete, VideoContent,
+	AudioTranscribe, AudioTranslate, SpeechGenerate, MusicGenerate, TokenCount,
+	BatchCreate, BatchList, BatchGet, BatchCancel, BatchDelete, BatchResults,
+	FileCreate, FileList, FileGet, FileDelete, FileContent,
+	StoreCreate, StoreList, StoreGet, StoreDelete, StoreSearch,
 }
+
+var knownKinds = func() map[Kind]struct{} {
+	result := make(map[Kind]struct{}, len(allKinds))
+	for _, kind := range allKinds {
+		result[kind] = struct{}{}
+	}
+	return result
+}()
+
+// AllKinds returns the closed, stable operation vocabulary. Callers use this
+// to build conformance matrices without maintaining a second list that can
+// silently drift from Request.Validate.
+func AllKinds() []Kind { return append([]Kind(nil), allKinds...) }
 
 func (r Request) Validate() error {
 	if strings.TrimSpace(string(r.Provider)) == "" {
@@ -62,8 +75,10 @@ func (r Request) Validate() error {
 }
 
 func ValidateArtifact(a Artifact) error {
-	if a.Kind == "" {
-		return fmt.Errorf("artifact kind is required")
+	switch a.Kind {
+	case ArtifactImage, ArtifactVideo, ArtifactAudio, ArtifactText, ArtifactFile, ArtifactJSON:
+	default:
+		return fmt.Errorf("artifact kind %q is unknown", a.Kind)
 	}
 	sources := 0
 	if len(a.Data) > 0 {
@@ -86,6 +101,14 @@ func ValidateArtifact(a Artifact) error {
 	}
 	if a.SizeBytes < 0 {
 		return fmt.Errorf("artifact size must not be negative")
+	}
+	if a.MIMEType != "" {
+		if _, _, err := mime.ParseMediaType(a.MIMEType); err != nil {
+			return fmt.Errorf("artifact MIME type is invalid")
+		}
+	}
+	if strings.ContainsAny(a.Filename+a.ResourceID+a.SHA256, "\r\n\x00") {
+		return fmt.Errorf("artifact identifiers must be single-line")
 	}
 	return nil
 }

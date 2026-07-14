@@ -90,12 +90,16 @@ func TestPeripheralUnionOfflineEndToEndAcrossHTTPResourceJobLocalAndRealtime(t *
 
 	local, err := localcompat.New(localcompat.Config{
 		Product: localcompat.ProductOllama, Trust: localcompat.TrustLocal, BaseURL: httpServer.URL + "/v1", Protocol: modelinvoker.ProtocolChatCompletions,
-		AllowedModels: []string{"local-model"}, SupportedCapabilities: []modelinvoker.Capability{modelinvoker.CapabilityTextGeneration}, HTTPClient: httpServer.Client(),
+		AllowedModels: []string{"local-model"}, SupportedCapabilities: []modelinvoker.Capability{
+			modelinvoker.CapabilityTextGeneration, modelinvoker.CapabilityUsageReporting,
+		}, HTTPClient: httpServer.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	textResponse, err := local.Invoke(context.Background(), modelinvoker.Request{
+	modelRegistry, _ := modelinvoker.NewRegistry(local)
+	modelInvoker, _ := modelinvoker.NewInvoker(modelRegistry)
+	textResponse, err := modelInvoker.Invoke(context.Background(), modelinvoker.Request{
 		Provider: localcompat.ProviderOllama, Protocol: modelinvoker.ProtocolChatCompletions, Endpoint: httpServer.URL + "/v1", Model: "local-model",
 		Input: []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "hello")}, Budget: modelinvoker.Budget{MaxOutputTokens: 8},
 	})
@@ -124,7 +128,9 @@ func TestPeripheralUnionOfflineEndToEndAcrossHTTPResourceJobLocalAndRealtime(t *
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, err := live.Open(context.Background(), realtime.Request{Provider: "voice", Model: "voice-model", Modalities: []realtime.Modality{realtime.Audio}})
+	liveRegistry, _ := realtime.NewRegistry(live)
+	liveInvoker, _ := realtime.NewInvoker(liveRegistry)
+	session, err := liveInvoker.Open(context.Background(), realtime.Request{Provider: "voice", Model: "voice-model", Modalities: []realtime.Modality{realtime.Audio}})
 	if err != nil {
 		t.Fatal(err)
 	}

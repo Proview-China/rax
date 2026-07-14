@@ -102,6 +102,9 @@ func (i *Invoker) Invoke(ctx context.Context, request Request) (Response, error)
 	for attempt := 1; attempt <= i.retry.MaxAttempts; attempt++ {
 		response, err = provider.Invoke(callContext, request)
 		if err == nil {
+			if identityErr := validateResponseIdentity(response, request); identityErr != nil {
+				return Response{MappingReport: report}, withMappingReport(identityErr, report)
+			}
 			response = completeResponse(response, request, report)
 			return response, nil
 		}
@@ -203,6 +206,18 @@ func completeResponse(response Response, request Request, report MappingReport) 
 	}
 	response.MappingReport = mergeMappingReports(report, response.MappingReport)
 	return response
+}
+
+func validateResponseIdentity(response Response, request Request) error {
+	if response.Model == "" {
+		// Some low-level providers do not echo a model. RouteGateway owns the
+		// stronger exact-route requirement and rejects a missing model there.
+		return nil
+	}
+	if response.Model != request.Model {
+		return &Error{Kind: ErrorMapping, Provider: request.Provider, Operation: "validate_response", Code: "response_model_mismatch", Message: "provider response model does not match the exact selected model"}
+	}
+	return nil
 }
 
 func isRetryable(err error) bool {

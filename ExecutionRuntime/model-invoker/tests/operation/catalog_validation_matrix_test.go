@@ -27,24 +27,24 @@ func TestEveryOfficialAndLocalCatalogBuildsAsAClosedNativeProvider(t *testing.T)
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
 	models := allModelAllowlist()
-	catalogs := []struct {
+	definitions := specs.Definitions()
+	if len(definitions) != 14 {
+		t.Fatalf("operation surface registry count drifted: %d", len(definitions))
+	}
+	catalogs := make([]struct {
 		name  string
 		specs []nativehttp.Spec
-	}{
-		{"openai", specs.OpenAI(models)},
-		{"anthropic", specs.Anthropic(models)},
-		{"gemini", specs.Gemini(models)},
-		{"xai", specs.XAI(models)},
-		{"xai-management", specs.XAIManagement()},
-		{"kimi", specs.Kimi(models)},
-		{"zai", specs.ZAI(models)},
-		{"mimo", specs.MiMo(models)},
-		{"minimax", specs.MiniMax(models)},
-		{"qwen", specs.Qwen(models)},
-		{"qwen-compatible-batch", specs.QwenOpenAICompatibleBatch()},
-		{"ollama", specs.Ollama(models)},
-		{"llamacpp", specs.LlamaCPP(models)},
-		{"generic", specs.GenericOpenAICompatible(models)},
+	}, 0, len(definitions))
+	seenDefinitions := map[string]bool{}
+	for _, definition := range definitions {
+		if definition.ID == "" || definition.Provider == "" || seenDefinitions[definition.ID] {
+			t.Fatalf("invalid operation surface definition: %+v", definition)
+		}
+		seenDefinitions[definition.ID] = true
+		catalogs = append(catalogs, struct {
+			name  string
+			specs []nativehttp.Spec
+		}{definition.ID, definition.Specs(models)})
 	}
 	for _, catalog := range catalogs {
 		t.Run(catalog.name, func(t *testing.T) {

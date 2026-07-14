@@ -35,8 +35,10 @@ func TestAnonymousLocalChatDoesNotInheritOpenAIEnvironmentCredentials(t *testing
 	adapter, err := localcompat.New(localcompat.Config{
 		Product: localcompat.ProductGeneric, Trust: localcompat.TrustLocal, BaseURL: server.URL + "/v1",
 		Protocol: modelinvoker.ProtocolChatCompletions, AllowedModels: []string{"local-model"},
-		SupportedCapabilities: []modelinvoker.Capability{modelinvoker.CapabilityTextGeneration, modelinvoker.CapabilityStreaming},
-		HTTPClient:            server.Client(),
+		SupportedCapabilities: []modelinvoker.Capability{
+			modelinvoker.CapabilityTextGeneration, modelinvoker.CapabilityStreaming, modelinvoker.CapabilityUsageReporting,
+		},
+		HTTPClient: server.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -47,7 +49,9 @@ func TestAnonymousLocalChatDoesNotInheritOpenAIEnvironmentCredentials(t *testing
 		Input:  []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "hello")},
 		Budget: modelinvoker.Budget{MaxOutputTokens: 8},
 	}
-	response, err := adapter.Invoke(context.Background(), request)
+	registry, _ := modelinvoker.NewRegistry(adapter)
+	invoker, _ := modelinvoker.NewInvoker(registry)
+	response, err := invoker.Invoke(context.Background(), request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -59,25 +63,21 @@ func TestAnonymousLocalChatDoesNotInheritOpenAIEnvironmentCredentials(t *testing
 func TestLocalProductsHaveDistinctIdentityAndFailClosed(t *testing.T) {
 	server := httptest.NewServer(http.NotFoundHandler())
 	defer server.Close()
-	products := []struct {
-		product localcompat.Product
-		id      modelinvoker.ProviderID
-	}{
-		{localcompat.ProductGeneric, localcompat.ProviderGeneric},
-		{localcompat.ProductOllama, localcompat.ProviderOllama},
-		{localcompat.ProductLlamaCPP, localcompat.ProviderLlamaCPP},
+	definitions := localcompat.Definitions()
+	if len(definitions) != 3 {
+		t.Fatalf("local product registry count drifted: %d", len(definitions))
 	}
-	for _, item := range products {
+	for _, item := range definitions {
 		adapter, err := localcompat.New(localcompat.Config{
-			Product: item.product, Trust: localcompat.TrustLocal, BaseURL: server.URL + "/v1",
+			Product: item.Product, Trust: localcompat.TrustLocal, BaseURL: server.URL + "/v1",
 			Protocol: modelinvoker.ProtocolResponses, AllowedModels: []string{"m"},
 			SupportedCapabilities: []modelinvoker.Capability{modelinvoker.CapabilityTextGeneration}, HTTPClient: server.Client(),
 		})
 		if err != nil {
-			t.Fatalf("%s: %v", item.product, err)
+			t.Fatalf("%s: %v", item.Product, err)
 		}
-		if adapter.ID() != item.id {
-			t.Fatalf("%s ID = %q, want %q", item.product, adapter.ID(), item.id)
+		if adapter.ID() != item.Provider {
+			t.Fatalf("%s ID = %q, want %q", item.Product, adapter.ID(), item.Provider)
 		}
 	}
 
@@ -110,13 +110,17 @@ func TestEnterpriseEndpointRequiresHTTPSAndUsesConfiguredCredential(t *testing.T
 	defer server.Close()
 	adapter, err := localcompat.New(localcompat.Config{
 		Product: localcompat.ProductGeneric, Trust: localcompat.TrustEnterprise, BaseURL: server.URL + "/v1", APIKey: secret,
-		Protocol: modelinvoker.ProtocolChatCompletions, AllowedModels: []string{"m"}, SupportedCapabilities: []modelinvoker.Capability{modelinvoker.CapabilityTextGeneration}, HTTPClient: server.Client(),
+		Protocol: modelinvoker.ProtocolChatCompletions, AllowedModels: []string{"m"}, SupportedCapabilities: []modelinvoker.Capability{
+			modelinvoker.CapabilityTextGeneration, modelinvoker.CapabilityUsageReporting,
+		}, HTTPClient: server.Client(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	request := modelinvoker.Request{Provider: localcompat.ProviderGeneric, Protocol: modelinvoker.ProtocolChatCompletions, Endpoint: server.URL + "/v1", Model: "m", Input: []modelinvoker.InputItem{modelinvoker.MessageInput(modelinvoker.RoleUser, "x")}, Budget: modelinvoker.Budget{MaxOutputTokens: 8}}
-	response, err := adapter.Invoke(context.Background(), request)
+	registry, _ := modelinvoker.NewRegistry(adapter)
+	invoker, _ := modelinvoker.NewInvoker(registry)
+	response, err := invoker.Invoke(context.Background(), request)
 	if err != nil || response.Text() != "ok" {
 		t.Fatalf("Invoke() = %+v, %v", response, err)
 	}

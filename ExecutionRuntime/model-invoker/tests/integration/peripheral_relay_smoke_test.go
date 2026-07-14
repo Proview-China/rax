@@ -61,9 +61,17 @@ func TestPeripheralRelayFileListSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	registry, err := operation.NewRegistry(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	invoker, err := operation.NewInvoker(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	result, err := p.Invoke(ctx, operation.Request{
+	result, err := invoker.Invoke(ctx, operation.Request{
 		Provider: provider, Kind: operation.FileList,
 		Query: query, Budget: operation.Budget{MaxResponseBytes: 1 << 20},
 	})
