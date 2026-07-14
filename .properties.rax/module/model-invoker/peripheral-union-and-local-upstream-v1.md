@@ -46,6 +46,7 @@
 - Operation、Resource、Job、Gemini upload、Realtime和本地适配均有单元、负向、`httptest`/WebSocket黑盒测试；
 - 两项3秒Fuzz通过；Operation校验约82k次、原生Spec/凭据安全约57k次；
 - 集成测试默认不读取真实凭据，真实入口需要显式环境变量双开关。
+- 大批量测试加固后，本切片`operation/resource/job/realtime/localcompat`统一`-coverpkg`语句覆盖率为`85.2%`；具体矩阵见[测试加固说明](./peripheral-test-hardening-v1.md)。
 
 ## 6. 真实探针
 

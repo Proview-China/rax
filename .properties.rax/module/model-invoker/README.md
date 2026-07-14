@@ -28,6 +28,7 @@
 | Gemini文件上传 | `ExecutionRuntime/model-invoker/operation/geminiupload/` | 官方resumable两阶段上传、同源一次性URL门禁和资源归一化 |
 | 本地/企业自建 | `ExecutionRuntime/model-invoker/provider/localcompat/` | OpenAI-compatible、Ollama、llama.cpp文本面，匿名凭据清除、HTTPS企业面和精确能力白名单 |
 | 外围测试 | `ExecutionRuntime/model-invoker/tests/{operation,realtime,localcompat}/` | JSON、multipart、binary、SSE、NDJSON、WebSocket、resumable upload、端点/模型/认证负向与fuzz |
+| 外围测试加固v1 | [模块说明](./peripheral-test-hardening-v1.md) | 18个新增测试/Fuzz、跨HTTP/Resource/Job/Local/Realtime集成、85.2%切片覆盖率与两项缺陷修正 |
 | 执行并集类型/Profile | `ExecutionRuntime/model-invoker/{union,profile}/` | 五顶层原语、Intent/Mechanism/Effect、三因子 Profile、Manifest、MappingReport 与确定性 Route 编译 |
 | 执行与效果观察 | `ExecutionRuntime/model-invoker/{execution,effect}/` | EventLedger、审批/取消/终态、Direct bridge、Codex/Claude/Gemini/Kimi/Qwen Harness、真实 Effect observer |
 | 执行并集测试 | `ExecutionRuntime/model-invoker/tests/{unioncontract,profilecompiler,effectobserver,executionunion,executiondirect,harnesslocal,conformance,performance}/` | 白盒、黑盒、N01-N14、六路语义收敛、Race、Fuzz、覆盖率和基准 |

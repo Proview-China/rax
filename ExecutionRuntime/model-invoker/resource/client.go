@@ -54,12 +54,18 @@ func (c *Client) Delete(ctx context.Context, request Request) (operation.Result,
 	return c.invoke(ctx, request, operation.FileDelete, operation.StoreDelete)
 }
 func (c *Client) Content(ctx context.Context, request Request) (operation.Result, error) {
+	if c == nil || c.invoker == nil {
+		return operation.Result{}, fmt.Errorf("resource client is not initialized")
+	}
 	if request.Kind != File {
 		return operation.Result{}, fmt.Errorf("content is available only for file resources")
 	}
 	return c.invoker.Invoke(ctx, toOperation(request, operation.FileContent))
 }
 func (c *Client) Search(ctx context.Context, request Request) (operation.Result, error) {
+	if c == nil || c.invoker == nil {
+		return operation.Result{}, fmt.Errorf("resource client is not initialized")
+	}
 	if request.Kind != Store {
 		return operation.Result{}, fmt.Errorf("search is available only for store resources")
 	}

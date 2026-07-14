@@ -2,7 +2,7 @@
 
 ## 1. 状态
 
-- 状态：`v1candidate`
+- 状态：`v1 implemented_offline`
 - 日期：2026-07-14
 - 上游事实基线：[上游外围能力官方事实研究](./upstream-peripheral-capability-research-20260714.md)
 - 实现位置：`ExecutionRuntime/model-invoker/`
@@ -85,6 +85,8 @@ queued -> validating -> running -> finalizing -> succeeded
 Provider 原生状态映射到上述状态，同时保留 `NativeStatus`。未知状态不猜测，返回 `unknown` 并保留原文。
 
 结果获取可以返回 Artifacts、ResourceRefs 或结果文件。轮询策略属于调用方/Runtime Policy，不属于 Provider SDK。
+
+所有正常结束的HTTP流必须恰好产生一个`StreamCompleted`。SSE的`[DONE]`显式生成该事件；NDJSON或binary在正常EOF时合成一次该事件；异常EOF只保留`Err`，不得同时伪造成功终态。
 
 ## 6. Realtime 协议
 

@@ -683,6 +683,7 @@ type httpStream struct {
 	sequence   int64
 	err        error
 	closed     bool
+	terminal   bool
 	rawRequest []byte
 }
 
@@ -697,7 +698,7 @@ func newHTTPStream(provider modelinvoker.ProviderID, request operation.Request, 
 	return stream
 }
 func (s *httpStream) Next() bool {
-	if s == nil || s.closed || s.err != nil {
+	if s == nil || s.closed || s.err != nil || s.terminal {
 		return false
 	}
 	s.sequence++
@@ -710,6 +711,7 @@ func (s *httpStream) Next() bool {
 			line = bytes.TrimSpace(bytes.TrimPrefix(line, []byte("data:")))
 			if bytes.Equal(line, []byte("[DONE]")) {
 				s.event = operation.StreamEvent{Type: operation.StreamCompleted, Sequence: s.sequence}
+				s.terminal = true
 				return true
 			}
 			s.event = operation.StreamEvent{Type: operation.StreamNative, Sequence: s.sequence, Raw: modelinvoker.NewRawPayload(line)}
@@ -717,8 +719,11 @@ func (s *httpStream) Next() bool {
 		}
 		if err := s.scanner.Err(); err != nil {
 			s.err = err
+			return false
 		}
-		return false
+		s.event = operation.StreamEvent{Type: operation.StreamCompleted, Sequence: s.sequence}
+		s.terminal = true
+		return true
 	}
 	buffer := make([]byte, 32<<10)
 	count, err := s.reader.Read(buffer)
@@ -728,6 +733,12 @@ func (s *httpStream) Next() bool {
 	}
 	if err != nil && !errors.Is(err, io.EOF) {
 		s.err = err
+		return false
+	}
+	if errors.Is(err, io.EOF) {
+		s.event = operation.StreamEvent{Type: operation.StreamCompleted, Sequence: s.sequence}
+		s.terminal = true
+		return true
 	}
 	return false
 }

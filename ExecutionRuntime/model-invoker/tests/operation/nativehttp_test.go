@@ -224,6 +224,54 @@ func TestNativeHTTPStreamsSSEWithoutReorderingNativeEvents(t *testing.T) {
 	if !stream.Next() || stream.Event().Type != operation.StreamCompleted || stream.Event().Sequence != 2 {
 		t.Fatalf("unexpected terminal SSE event: %+v", stream.Event())
 	}
+	if stream.Next() {
+		t.Fatalf("SSE stream emitted more than one terminal event: %+v", stream.Event())
+	}
+}
+
+func TestNativeHTTPNDJSONAndBinaryStreamsEmitExactlyOneEOFCompletion(t *testing.T) {
+	tests := []struct {
+		name string
+		mode nativehttp.ResponseMode
+		body string
+		want operation.StreamEventType
+	}{
+		{"ndjson", nativehttp.ResponseNDJSON, "{\"id\":1}\n{\"id\":2}\n", operation.StreamNative},
+		{"binary", nativehttp.ResponseBinary, "binary", operation.StreamArtifactChunk},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { _, _ = io.WriteString(w, test.body) }))
+			defer server.Close()
+			p, err := nativehttp.New(nativehttp.Config{
+				Provider: "p", BaseURL: server.URL, Trust: nativehttp.TrustLocal, Auth: nativehttp.AuthAnonymous,
+				Specs: []nativehttp.Spec{{Kind: operation.BatchResults, Method: http.MethodGet, Path: "/results/{id}", RequiresResourceID: true, Lifecycle: operation.LifecycleJob, Support: operation.SupportNative, ResponseMode: test.mode}},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			stream, err := p.Stream(context.Background(), operation.Request{Provider: "p", Kind: operation.BatchResults, ResourceID: "id"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer stream.Close()
+			count, completed := 0, 0
+			for stream.Next() {
+				count++
+				if stream.Event().Type == operation.StreamCompleted {
+					completed++
+				} else if stream.Event().Type != test.want {
+					t.Fatalf("unexpected event: %+v", stream.Event())
+				}
+			}
+			if stream.Err() != nil || completed != 1 || count < 2 {
+				t.Fatalf("count=%d completed=%d err=%v", count, completed, stream.Err())
+			}
+			if stream.Next() {
+				t.Fatal("stream emitted a second completion")
+			}
+		})
+	}
 }
 
 func TestNativeHTTPRejectsStreamingResponseThroughInvokeBeforeNetwork(t *testing.T) {

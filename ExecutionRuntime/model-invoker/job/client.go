@@ -48,12 +48,18 @@ func (c *Client) Get(ctx context.Context, request Request) (operation.Result, er
 	return c.invoke(ctx, request, operation.VideoGet, operation.BatchGet)
 }
 func (c *Client) List(ctx context.Context, request Request) (operation.Result, error) {
+	if c == nil || c.invoker == nil {
+		return operation.Result{}, fmt.Errorf("job client is not initialized")
+	}
 	if request.Kind != Batch {
 		return operation.Result{}, fmt.Errorf("list is available only for batch jobs")
 	}
 	return c.invoker.Invoke(ctx, toOperation(request, operation.BatchList))
 }
 func (c *Client) Results(ctx context.Context, request Request) (operation.Result, error) {
+	if c == nil || c.invoker == nil {
+		return operation.Result{}, fmt.Errorf("job client is not initialized")
+	}
 	if request.Kind != Video {
 		return operation.Result{}, fmt.Errorf("synchronous results are available only for video jobs; batch results require StreamResults")
 	}
@@ -69,12 +75,18 @@ func (c *Client) StreamResults(ctx context.Context, request Request) (operation.
 	return c.invoker.Stream(ctx, toOperation(request, operation.BatchResults))
 }
 func (c *Client) Cancel(ctx context.Context, request Request) (operation.Result, error) {
+	if c == nil || c.invoker == nil {
+		return operation.Result{}, fmt.Errorf("job client is not initialized")
+	}
 	if request.Kind != Batch {
 		return operation.Result{}, fmt.Errorf("cancel is available only for batch jobs")
 	}
 	return c.invoker.Invoke(ctx, toOperation(request, operation.BatchCancel))
 }
 func (c *Client) Delete(ctx context.Context, request Request) (operation.Result, error) {
+	if c == nil || c.invoker == nil {
+		return operation.Result{}, fmt.Errorf("job client is not initialized")
+	}
 	switch request.Kind {
 	case Video:
 		return c.invoker.Invoke(ctx, toOperation(request, operation.VideoDelete))
