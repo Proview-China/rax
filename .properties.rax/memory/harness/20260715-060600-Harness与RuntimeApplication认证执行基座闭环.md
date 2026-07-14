@@ -1,0 +1,11 @@
+# Harness与Runtime/Application认证执行基座闭环
+
+时间：2026-07-15 06:06（Asia/Shanghai）
+
+Runtime、Application与Harness的6+1开发前置已经形成真实组合闭环。组合验收不使用Foundation成功回包冒充生产事实，而是串联真实Binding Set、Plan Certification、Operation Admission/Permit/Delegation、Harness Model Provider relay、独立Operation Settlement、Run Claim Evidence Association、Runtime Run Settlement、Termination Report和Cleanup。
+
+正常路径证明Claim仍不越权生成Outcome，最终结果由Runtime独立Settlement Owner提交；Claim Evidence与Association回包丢失后按exact Fact恢复。未知路径证明Provider Execute只发生一次，连续Resume不会重派，独立Inspect确认结果后才继续结算。
+
+本轮还闭合了两个跨模块反例：首次合法Declared Delegation的Prepared Inspect返回NotFound而非伪造Precondition；含SandboxLease指针的Operation Subject按canonical值比较。Application只接受由exact持久Enforcement证明的Permit事实revision单调加一，拒绝无来源或跨级跳变。
+
+当前裁决是“6+1及后续自定义组件开发可解锁”，不是“生产部署完成”。自定义组件必须通过namespaced Manifest、Capability、Domain Adapter和版本化Port接入，不得要求Runtime/Application/Harness新增kind switch，也不得把内存fake、测试Provider或Conformance Candidate声称为生产Backend、认证、RPC、Scheduler或SLA。

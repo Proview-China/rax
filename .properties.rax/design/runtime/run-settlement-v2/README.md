@@ -1,0 +1,71 @@
+# Runtime Run Settlement V2设计
+
+## 1. 定位
+
+Run Settlement V2负责把“执行表面已经停止”收敛为Runtime可持久验证的Run终态。它不接受调用方传入Outcome，也不把Harness Claim、Observation、Receipt或领域组件自报成功直接提升为Run终态。
+
+唯一权威时序是：持久Run与Settlement Plan → Run进入stopping → 冻结Run Effect集合 → 复读Claim Association、Execution Inspection、Effect Settlement和领域Participant → 建立不可变Closure Attempt → Runtime派生Decision → 同一Run Fact Owner原子提交Decision与terminal Run → 独立推进Termination Progress与持久Termination Report。
+
+## 2. Plan、扩展与Owner
+
+`RunSettlementPlanFactV2`在任何Run内dispatch前与Run原子创建。Plan固定Run identity、稳定Execution Subject、Binding与Policy语义、Claim模式以及全部Requirement。
+
+Runtime保留八个治理类别，且每类必须恰好出现一次并使用固定barrier：execution truth、effects、remote continuations、domain commits、budget属于`run_completion`；cleanup、remote residual、provider retention属于`termination_report`。自定义Requirement使用严格namespaced ID、Kind、Schema和Capability，可以由多个组件以相同Kind、不同Requirement ID同时参与，Runtime不硬编码6+1组件枚举。
+
+Participant只来自Plan与current BindingSet中的精确Owner assignment。自定义组件可以拥有自己的领域Fact/Inspect/CAS，但不能自授Binding、Policy、Trust、Review、Budget、Dispatch或Runtime Outcome，也不能改写其他Owner事实。
+
+## 3. 长Run与Effect集合
+
+Run Effect通过`CreateEffectForRunV2`在同一Effect Fact Owner内原子完成Effect write-ahead与Run索引登记。索引按完整tenant/scope/run identity分区，采用append-only分段链；单段有界，长期Run可跨段保存至少10,000个Effect引用，不依赖扩大单slice上限。
+
+Run进入stopping后拒绝新Effect创建、Permit Issue/Begin及执行点触达。`FreezeRunEffectSetV2`只接受exact stopping Run revision，冻结root revision、watermark、segment/effect count、head digest与完整分页链。Closure和Commit前都会重新读取完整EffectSet；同revision换任一字段、分页断链或漏项均fail closed。
+
+分区内`RunEffectGovernanceAdapterV2`把原子登记的Run Effect接入P0.2 Gateway。Permit的Intent、Fence、payload schema/revision、Conflict Domain、Provider、Enforcement、Authority、Review、Budget、Policy、CurrentScope与Idempotency必须逐字段一致；同Permit identity同内容幂等，换内容Conflict。旧裸全局Effect入口仅保留legacy/test。
+
+## 4. 独立Inspect与Evidence
+
+`ExecutionSettlementInspectionV2`由受绑定Execution Inspector主动读取，绑定稳定Runtime session、endpoint、Run、Scope/Instance epoch、Binding、source epoch/sequence、payload与exact Evidence。Evidence payload使用排除Ledger ref的无环subject digest覆盖Inspection ID/revision/truth及全部治理坐标，causation再次绑定该subject；同payload/correlation下另一Inspection或另一truth不能复用。Provider native session只是Observation，不能替换Runtime稳定session。
+
+P0.4 Claim Association若存在，Gateway会重新验证其结构和exact Ledger Record关系；ClaimKind从不选择Outcome。Claim缺失只有在Plan选择`optional_by_policy`且精确Policy当前允许时才可继续，`required`模式不可省略。
+
+每个非`operation_not_required` Participant必须至少引用一条exact Evidence。Evidence必须绑定Run分区、ExecutionScope、Owner Binding、TrustClass、EventKind、Schema、payload、correlation以及Participant ID/revision派生的causation。`operation_not_required`只能引用Plan中的显式Policy，不以空Evidence或组件未安装推导。
+
+## 5. Outcome与正交终止维度
+
+Runtime只理解封闭通用Disposition。Execution truth为completed/cancelled/failed且所有`run_completion`要求confirmed或显式not_required时，分别派生Completed/Cancelled/Failed。
+
+unknown、confirmed_failed、confirmed_not_applied分别读取独立的UnknownMode、FailureMode、NotAppliedMode。字段缺省一律block。只有精确Policy允许时，execution truth未知可派生Indeterminate，execution已知但外部/effect/domain维度未闭合可派生NeedsReconciliation。confirmed_lost必须由受绑定Inspector证明，并由精确Policy允许，不能从超时、NotFound、进程死亡或缺Claim推导。
+
+Run terminal后，cleanup、remote residual、provider retention继续通过`RunTerminationProgressFactV2`正交推进。Progress是可持久Inspect和交付的interim termination snapshot：永久unknown时保留未知、residual、冲突域占用和下一Inspect责任；重复读取不会制造revision假增长。失败和not_applied保持可见，unknown时Report明确Incomplete/NotReady。`RunTerminationReportV2`只在全部维度闭合后成为create-once最终证书，时间来自最后Progress水位，不随读取墙钟变化，也不改写immutable Outcome。
+
+Completed只表示Runtime治理下的execution closure完成，不表示Task、Goal、Artifact、Memory、Tool或其他领域业务成功。
+
+## 6. 恢复与Closure Attempt
+
+Plan、EffectSet和Requirement集合在当前Run内不可变；Binding、Policy、Participant和Execution Inspection的current水位可能因24×7续租推进。Closure因此采用append-only attempt链和单current pointer：旧attempt永久保留，新attempt只能在Run stopping且尚无Decision时通过CAS成为current。Decision只绑定current attempt；旧attempt迟到Commit拒绝，并发reconciler只线性化一个current pointer。
+
+Create、Freeze、Commit、Progress和Report回包丢失后一律Inspect。Decision与terminal Run由同一Fact Owner原子提交；Fact Owner会从Plan、Closure中的full Execution Inspection、Claim、EffectSet和Participant refs重新验证Decision provenance并派生Outcome，持有raw Port不能替换这些字段。Report同样由Fact Owner从terminal Run、Decision和Progress重建后逐摘要比对。若只看见原子事实一边则视为Owner破坏合同并fail closed。第一份terminal Decision不可修改，迟到Evidence、Claim和Settlement只能进入Ledger或Termination Progress。
+
+## 7. Foundation与P0.6边界
+
+`RunLifecycleGovernancePortV3.CreatePendingRunV3`只允许创建pending Run、Settlement Plan和空Effect Index，绝不在Provider派发前伪造running或StartedAt。Run的稳定identity不包含status/StartedAt；只有governed start Operation已经由独立Settlement证明后，`RunStartGovernancePortV3`才将Run与不可变`RunStartConfirmationFactV3`原子提交。Confirm与Inspect都返回`RunStartConfirmationEnvelopeV3`，其中精确保存Operation digest、Admission/Permit/Delegation/Prepared/Enforcement/Observation/Settlement水位、running revision和StartedAt；相同Run与StartedAt不能由另一个attempt冒充恢复。
+
+`RunLifecycleGovernancePortV3`提供BeginStop、StopAndSettle、Inspect、Termination Reconcile/Inspect，调用方不能传Outcome。Run terminal以后每个Close/Fence/Release/Lease/Cleanup动作仍必须是独立termination Operation；Progress永久unknown时只Inspect，不重派，Report只在全部显式termination requirement闭合后生成。
+
+Operation V3公共合同已经提供Effect Admission、Permit、Prepare、持久Enforcement、ExecutePrepared、Inspect、Observation和Settlement入口。Application Step Journal与Harness governed bridge仍需按这些公共Port完成最终组合接线；未完成组合门禁前，不宣称Runtime到Harness外部动作全链闭合。
+
+## 8. 当前不做
+
+- 不选择生产数据库、RPC、进程拓扑、Scheduler、签名算法或SLA；
+- 不让组件、Harness Claim或Application调用方提交Outcome；
+- 不让Foundation、kernel、control或fakes成为6+1组件依赖；
+- 不把fake/conformance候选宣称为production backend、durability或SLA；
+- 不修改Harness或6+1领域实现。
+
+## 9. Plan Admission与历史认证
+
+`RunSettlementPlanAdmissionPortV3`由宿主可信装配面持有，不是组件或普通Application业务代码的入口。它复读current BindingSet及每个Binding Fact、唯一宿主certifier、Runtime baseline policy和每个member的显式`RunSettlementDeclaration`，要求八个Runtime reserved category与全部自定义Requirement形成exact aggregate；缺声明、重复/额外Requirement、Owner/Policy/Capability/Schema漂移均fail closed。
+
+Certification是create-once事实，绑定Run/scope/Plan、BindingSet semantic/current水位、baseline、declarations、唯一certifier与最短TTL。`CreatePendingRunV3`只接受并原子持久Run+Plan+Certification Association；首次创建前要求current认证，写成功回包丢失后则按历史Association与immutable Certification Fact恢复，即使认证TTL随后过期也不把既有Run抹成未认证。历史认证只证明Run来源，不授予后续dispatch资格；Issue/Begin/Provider执行点仍复读全部current治理事实。
+
+Start、Claim V3、BeginStop、Settlement与Termination Reconcile在任何权威写入前都先验证certified bundle及历史Association。legacy V2裸Run只能用于restricted/test，不能通过V3入口升级、追加Claim或污染终止事实。

@@ -1,0 +1,11 @@
+# Application Run Coordinator V3与终态恢复闭合
+
+时间：2026-07-15 04:25（Asia/Shanghai）
+
+Application新增`RunCoordinatorV3`与持久`RunCoordinationFactV3`。恢复水位按create_planned、pending、start_planned、running、claim_planned、claim_associated、stop_planned、stopping、terminal_cleanup、termination_closed单调推进；每一步先持久Application事实，再调用Runtime公共Port，回包丢失只Inspect。
+
+Run进入running必须基于同一Workflow Step的exact settled start Attempt与Runtime `RunStartConfirmation`，调用方不能提交StartedAt或Outcome。terminal Claim只按精确Candidate/source coordinates进入Runtime Evidence Association，required/optional由不可变Runtime Settlement Plan和唯一Settlement Owner判定；Application不解释ClaimKind，也不生成ExecutionOutcome。
+
+Run终态由Runtime独立复读Execution、Effect、Claim Policy与Participant后派生。unknown Participant或未闭合Cleanup使Application停在`terminal_cleanup`；只有显式Inspect/Reconcile取得新的Runtime权威Envelope后才进入`termination_closed`。Plan过期后，已存在的write-ahead事实和已创建Run可按Inspect恢复；Runtime仍为NotFound时fail closed，禁止新建或重派。
+
+定向验收已覆盖300轮重复、race 20轮、四阶段各64路并发、每个CAS/Runtime回包丢失、exact Start Confirmation、TTL、畸形Inspect、sidecar换包和深拷贝反例，并通过Vet与diff-check。当前`TrustedRunAssemblerPortV3`、Lifecycle/Claim/Fact实现均为公共合同或测试替身，没有选择生产Backend、RPC、Scheduler、可信Plan Assembler或SLA；因此6+1开发边界已可用，但不代表生产部署完成。

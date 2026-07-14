@@ -8,12 +8,13 @@
 首次/二次/第三次live复审发现问题
 -> 全部修正并通过独立最终文件复审
 -> 恢复“具备正式Plan用户审核条件”
--> Runtime V1 Plan仍是待用户审核候选
--> 12项技术/后端/指标决策仍待用户确认
--> Plan获批且用户明确授权后才允许实现
+-> 用户授权组件中立Runtime公共合同与最小可运行基座
+-> Go公共合同、Activation容灾、Foundation闭环、Binding/Effect/Review/Evidence V2与Port门禁已落地
+-> 其余技术/后端/指标决策继续按阶段确认
+-> Harness及其他组件内部实现继续冻结
 ```
 
-因此当前仍不授权Runtime实现。
+因此当前已完成明确授权的组件中立最小基座，不授权生产后端、外部集成或相邻组件内部实现。
 
 ## 2. 文本合同门槛
 
@@ -27,6 +28,7 @@
 - [x] 统一Effect、BudgetAuthorityPort、Receipt和UnknownOutcome；
 - [x] Command线性化、安全支配和CAP fail-closed；
 - [x] Write-ahead Evidence、Restricted Evidence和Projection；
+- [x] Evidence Ledger V2单主、独立Source Policy、原子cursor+Record、Tombstone与V2 Run Claim精确关联；
 - [x] Checkpoint统一Effect水位、Cache安全分区与读/命中治理；
 - [x] Extension供应链和Observer权限；
 - [x] Artifact/Memory正式提交；
@@ -49,11 +51,13 @@
 
 - [x] Runtime Plan已按最终复审设计重新生成；
 - [x] 独立审核确认设计文本、图、矩阵和Plan无实质冲突；
-- [ ] 用户确认Plan范围、产物和未决选项；
-- [ ] 用户明确授权实现；
-- [ ] 代码位置、技术职责、首个后端和真实集成范围获得确认。
+- [x] 用户确认并授权组件中立公共合同与最小基座；
+- [x] 基座代码位置为`ExecutionRuntime/runtime`，技术语言为Go；
+- [x] 用户授权补齐公共合同、最小可运行基座、fake端口和逐组件完整闭环验收框架；
+- [x] Timeline/Checkpoint/Restore、组件Registry、单Run和Foundation Coordinator通过自动化验收；
+- [ ] 其余进程、Transport、事实存储、首个后端和真实集成范围获得确认。
 
-在用户确认Plan、明确授权实现并确认实现选项前，不得创建Runtime真实实现目录。
+首个组件中立实现目录已经依授权创建。任何未确认的生产后端、外部集成、Harness或相邻组件实现仍不得创建。
 
 ## 5. 虚假承诺禁止清单
 

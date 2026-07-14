@@ -1,0 +1,9 @@
+# Application Submission与Outbox Journal首切面完成
+
+时间：2026-07-15 01:26（Asia/Shanghai）
+
+Application首切面已落地：不可变Command Payload/Workflow Plan、namespaced自定义Step DAG、Submission与Journal Fact Port、Facade和Outbox Dispatcher。Outbox只在Journal持久后标记dispatched；unknown required能力fail closed，unknown optional保留Opaque Payload并显式skipped。
+
+已覆盖Submission/Command/Journal/Outbox回包丢失、exact Inspect、依赖DAG、深拷贝隔离、100路并发单Journal与race/vet。当前仍不产生Operation Permit，也未接Provider；下一粗粒度事件是Runtime Operation Governance Gateway稳定后完成Prepare→Enforcement→ExecutePrepared→Inspect/Settlement接线。
+
+同一阶段后续收口增加了完整ExecutionScope分区、Step Kind到Provider Capability精确绑定、有界Journal恢复列表，以及显式Policy/TTL的Worker Claim。Claim回包丢失可Inspect，未过期租约阻止其他Worker，过期接管提升epoch并Fence旧Worker；这些仅解决Application调度所有权，不授予Effect或Provider权限。

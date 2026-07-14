@@ -1,0 +1,49 @@
+# Application Coordinator设计入口
+
+## 定位
+
+Application层是用户/API、Runtime Control Plane、Harness与6+1组件之间的可恢复编排层。它只拥有工作流提交、Outbox交接和Step Journal，不拥有Runtime状态、组件领域结论、Effect授权或Provider结果。
+
+## 已冻结边界
+
+- 用户提交先形成不可变`CommandPayloadFactV2 + WorkflowPlanV2`，再由Runtime `CommandFactPort.AcceptCommand`原子接纳Command、Desired State和Outbox；
+- Outbox的`dispatched=true`只表示已经交给持久`WorkflowJournalV2`，不表示Provider调用、领域提交或任务成功；
+- Step Kind必须是namespaced值，通过`StepCatalogV2`发现；Coordinator不对continuity/tool/memory/sandbox/review/context/Harness做switch；
+- governed Step Descriptor必须绑定唯一namespaced Provider Capability，并以revision/digest/TTL进入Workflow Plan；同一个自定义Kind不能在计划交接时换绑另一能力、版本或过期描述符；
+- 未知required Step fail closed；只有Catalog权威返回`unknown capability`时，optional Step才保留原Opaque Payload并记为显式`skipped`。Catalog超时/不可用保持可恢复，不能伪装成组件不存在；
+- 显式`skipped`的optional Step按no-op满足依赖；它不产生领域成功、Effect或Settlement，但也不会让后续required Step永久等待；
+- 外部动作先由唯一Domain Owner原子提交exact Domain Reservation，再统一进入Runtime Operation Effect→Governance Gateway→Delegation→Provider Prepare→持久Enforcement→ExecutePrepared→Inspect/Settlement；Application禁止裸调Fact Store的Begin；
+- Domain Reservation绑定rev1 Attempt、Intent、Subject、Session与Candidate；历史过期Fact可Inspect用于恢复，但任何Runtime mutation前必须复读当前Reservation和Binding currentness，过期或漂移关闭；
+- `UnknownOutcome`只进入Inspect，不能重派；每个跨Owner步骤先写Journal，再调用，再按exact Fact Inspect恢复；
+- 当前V2保留`indeterminate/blocked`读模型但禁止无Policy Fact的新跃迁；未知结果持续留在`waiting_inspect`，直到对应Owner提交精确Settlement；
+- Application只读取并编排Runtime/领域Fact，不直接写Kernel事实，也不把Receipt/Observation升级成权威结果。
+- governed Step完成时必须保留原write-ahead Effect ref并附Settlement；不能用终态CAS洗掉执行历史。
+- Submission、Journal、恢复列表与Worker Claim均按完整`ExecutionScope`分区；Claim是显式Policy和TTL约束的调度租约，不是Effect或Provider执行权。
+
+## 自定义组件扩展
+
+自定义组件注册namespaced Step Kind、版本合同、Schema和执行类别。计划中的Provider Binding、Payload Schema、Authority、Operation Subject和后续Permit必须逐层精确绑定。新增第八、第九组件不修改Application状态机；未知required能力仍关闭执行。
+
+## 当前实现切面
+
+- `ExecutionRuntime/application/contract`：Submission、Workflow DAG、Step Journal公共合同；
+- `ports`：Submission/Journal Fact Port、Step Catalog与有界恢复列表/Worker Claim Port；
+- `fakes`：线程安全CAS测试Fact Store，不声明生产持久性或SLA；
+- `FacadeV2`：Submission→Command acceptance，回包丢失只做exact Inspect；
+- `OutboxDispatcherV2`：Journal先于Outbox dispatched，支持重启与并发幂等恢复；
+- `WorkflowJournalRecoveryPortV2`：完整Scope分区、有界列举、CAS认领、过期接管与丢回包Inspect；
+- `conformance`：自定义Step Kind/Schema/Capability的公共testkit；报告永远不授予Binding、dispatch或Commit资格；
+- `GovernedOperationCoordinatorV3`：Attempt、Domain Reservation和Journal write-ahead后，依次编排Runtime Admission、Permit、Begin、Delegation、Prepare/Enforcement、Execute/Inspect、Observation/Unknown与Settlement；
+- `OperationDomainRouterV3`：按精确Step Kind、Descriptor和Domain Adapter Binding解析唯一领域Owner，不内置6+1或自定义模块分支；
+- `RuntimeBindingCurrentnessAdapterV3`：只读验证Runtime Provider Binding投影并缩短为最多30秒的Application授权；不绑定、不续租、不提升权限；
+- `OperationDomainStatePortV3`：领域Owner持久吸收prepared→observed|unknown→settled，回包不确定只Inspect；Observation与Provider Receipt都不能直接完成Step或领域Commit；
+- `CheckOperationDomainStatePortV3`：复用同一黑盒合同验证幂等、并发线性化、exact Inspect和换链拒绝，报告不授予生产、Binding、dispatch或Commit资格；
+- `RunCoordinatorV3`：持久保存Application Run恢复水位，经`TrustedRunAssemblerPortV3`、Runtime Lifecycle/Start/certified Claim V3公共Port编排pending Run、exact Plan Certification/Start Confirmation、Claim Evidence Association、Settlement与Termination Reconcile；
+- Create、Lifecycle、Start与Claim必须保留同一Plan Certification Association；CAS成功回值和恢复Inspect只能接受exact值或严格append-only successor，并发Sibling不得被误判为回退；
+- Run Claim required/optional由不可变Runtime Settlement Plan和唯一Settlement Owner判定；Application只摄取精确Association，不解释ClaimKind、不生成Outcome；
+- terminal Run仍可有未闭合Cleanup；unknown Participant保持`terminal_cleanup`，只有显式Inspect/Reconcile得到新的Runtime权威Envelope后才能进入`termination_closed`；
+- 可执行import-boundary门禁：Application生产代码只可依赖Runtime `core/ports`，不得导入Runtime Owner、Kernel、Foundation、fake或Harness内部包。
+
+## 明确非产物
+
+当前不选择数据库、消息队列、RPC、Scheduler、进程拓扑、可信Plan Assembler或默认SLA；fake/conformance通过不产生生产认证、Binding或dispatch资格。公共合同已经允许6+1和后续自定义组件开发，但不代表生产部署完成。

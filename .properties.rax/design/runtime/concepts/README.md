@@ -109,7 +109,11 @@ expires_at
 ## 6. Run与Session
 
 - V1每个Instance最多一个活跃Run；新Run遇到活跃Run返回`run_conflict`，不隐式排队；
-- Run Record由Runtime拥有；
+- Run Record由Runtime拥有，并通过线性化`RunFactPort`持久化；进程内Registry不能作为24×7事实源；
+- Run的创建、停止与终态使用revision CAS；写入成功但回包丢失时必须先Inspect，不能盲目创建第二个Run或覆盖终态；
+- 相同终态结算可以按已持久事实幂等返回，不同终态Claim发生冲突时第一份线性化结果保持不变；
+- Harness Completion Event必须先验证Opaque Payload摘要、Instance epoch和source sequence，再幂等写入Evidence并关联不可变`RunCompletionClaim`；同一source sequence换内容产生`evidence_conflict`；
+- Claim摄取不改变Run状态和`ExecutionOutcome`。只有完成独立Execution Inspect、必需Effect结算与Fence核对后，Runtime才能CAS提交终态；
 - Harness拥有Interaction Loop和Run内Session State；
 - V1不承诺跨Run或跨Instance Session恢复；
 - Harness的completed/end只形成`HarnessCompletionClaim`；

@@ -1,0 +1,11 @@
+# Harness Governed Session与Candidate持久切面完成
+
+时间：2026-07-15 01:32（Asia/Shanghai）
+
+Harness已新增Governed V2首切面：完整Scope Endpoint、持久Session CAS、不可变Model Candidate、Action/Input continuation和可恢复Candidate准备器。Create/CAS回包丢失只按exact Fact Inspect；100路并发只线性化一次；同一自定义Component可提供多个能力，但Harness与Model exact Capability不得复用。
+
+普通与race定向测试通过。当前尚未接Runtime Operation Governance Provider协议，因此Candidate仍不产生Effect/Permit，也不会调用真实Model；下一事件是Runtime公共Gateway/Delegation稳定后接Host relay、Data Provider和独立Model Effect。
+
+后续收口已把Runtime公开的`GovernedExecutionAttemptRefsV2`纳入Session状态矩阵：缺少Admission/Permit/Delegation/Prepared/Enforcement不能进入model in-flight，缺少同attempt Provider Observation+Evidence不能进入action/input或非取消terminal。该约束封住了裸Session CAS伪造模型执行与完成Claim的结构性入口，但不把Harness Claim升级为Runtime Outcome。
+
+宿主`GovernedRelayV2`也已接入Runtime公共Provider协议。它不产生Enforcement或Observation事实；Prepare/Execute回包丢失时只调用一次Data Plane本地Inspect，无法证明时返回indeterminate，测试确认Provider调用计数始终为一次。

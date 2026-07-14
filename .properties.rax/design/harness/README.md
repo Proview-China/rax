@@ -2,8 +2,10 @@
 
 ## 1. 状态
 
-- 当前阶段：Runtime-facing合同已按独立反审修正，Harness内部设计仍需后续单独审核；
-- 实现授权：无；
+- 当前阶段：Harness公共合同与组件中立最小骨架已完成实现和验收；
+- 当前接线：Application V3持久Domain Adapter与公共Run Claim→Settlement/Termination协调边界已闭合；Claim不升级为Outcome，生产Provider/Backend仍未选择；
+- 实现授权：配置交接、Run内Kernel、窄依赖Port、Runtime ExecutionPort Adapter、fake与完整闭环测试；
+- 明确不授权：具体官方/第三方Harness生产实现、真实模型调用、真实Tool/MCP、生产进程拓扑和持久后端；
 - 核心原则：每条Harness Route必须满足或明确降级于同一外部合同，不要求内部复用同一代码。
 
 ## 2. 共用组成
@@ -39,3 +41,17 @@ Pause和Checkpoint是可选Capability；未支持时必须从API和Profile中明
 - 崩溃、迟到、Remote Continuation和清理反例；
 - 用户确认首个Harness实现范围。
 
+以上门槛已经由用户确认进入“公共合同与最小骨架”切面；具体生产Harness仍需另行确认。
+
+## 7. 当前设计资产
+
+- [配置编译与Bootstrap交接](./configuration/README.md)
+- [公共对象、Port与所有权](./contracts/README.md)
+- [Run内Kernel与Interaction Loop](./kernel/README.md)
+- [Runtime ExecutionPort接入](./runtime-integration/README.md)
+- [首切面验收门禁](./acceptance/README.md)
+
+实现与模块说明：
+
+- [Harness Go模块](../../../ExecutionRuntime/harness/README.md)
+- [Harness模块说明](../../module/harness/README.md)

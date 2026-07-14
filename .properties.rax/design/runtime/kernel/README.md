@@ -138,6 +138,21 @@ provider_data_retention_status
 8. 无法证明结果时进入unknown/indeterminate，而不是猜测成功或失败；
 9. 仅在Policy允许时退避重试，禁止叠加未知Provider重试。
 
+### 4.1 24×7逻辑监督
+
+持续运行实例的监督参数必须由部署显式给出，Runtime不内置生产SLA。每份`SupervisionRecord`绑定精确的Policy Digest；间隔、续租提前量、退避上限或失败预算变化时，旧记录必须拒绝继续执行，经过显式迁移后才能采用新策略。
+
+监督决策遵守以下顺序和不变量：
+
+1. Identity Lease到期立即Fence并停止，进入续租窗口时续租优先于普通健康检查；
+2. 普通检查按稳定身份散列分散时间，瞬时故障采用有界指数退避，避免集中唤醒和无界重试；
+3. 失败预算耗尽或状态未知时进入Quarantine，只能凭权威Inspect结果恢复；
+4. 旧Observation、旧Lease revision和迟到健康结果不能覆盖新事实；
+5. Fenced实例或已过期Identity Lease不能被迟到成功结果复活；
+6. 调用方必须先以revision CAS持久化新的监督记录，再派发决策对应的外部动作。
+
+当前切面只冻结上述纯逻辑合同和确定性测试，不选择生产Scheduler、Clock、事实后端、进程拓扑或SLA。
+
 ## 5. 重建
 
 重建创建同Lineage下新的Instance ID和更高epoch，但必须先取得[ReplacementPermit](../safety/README.md)。旧Instance保持历史终态，不能被覆盖。若Plan Digest变化，则必须创建新Lineage。

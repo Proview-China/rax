@@ -3,12 +3,12 @@
 ## 1. 当前状态
 
 - 模块：`runtime`；
-- 阶段：仓库Runtime设计资产已通过独立文件复审，恢复“具备正式Plan用户审核条件”；
+- 阶段：仓库Runtime设计资产已通过独立文件复审；P0.1 Binding、P0.2 Effect治理、P0.3 Review Verdict与P0.4 Evidence Ledger V2已完成；
 - 最近更新：2026-07-14；
 - 已成立：对话中的修正合同已经通过概念反审；
-- 尚未成立：Runtime V1 Plan尚未获得用户批准，12项技术、后端与验收指标决策仍未确认；
-- 当前授权：允许用户正式审核Runtime V1 Plan候选；
-- 禁止事项：没有实现授权，不得创建Runtime实现目录、选择生产后端、接入账号或运行外部集成。
+- 已获得授权：在`ExecutionRuntime/runtime`使用Go落地公共合同、Runtime Kernel、Foundation、fake Port、测试与说明资产；
+- 尚未成立：其余技术、后端、拓扑与验收指标决策仍未确认；Harness及其他组件内部实现尚未授权；
+- 禁止事项：不得选择生产后端、接入账号、运行外部集成，或提前实现Harness、Context/Cache、Tool/MCP、审批链及其他相邻组件。
 
 ## 2. 核心定位
 
@@ -44,9 +44,13 @@ Runtime治理执行，不干涉AI内部认知。它不得读取隐藏Chain-of-Th
 - [Admission、Activation与Binding Saga](./admission/README.md)
 - [Fence、Secret、Sandbox与安全替换](./safety/README.md)
 - [统一Effect、Budget、远程状态与正式提交](./effects/README.md)
+- [Effect治理V2与最终派发门禁](./effect-governance-v2/README.md)
+- [Review Verdict V2与条件审核门禁](./review-v2/README.md)
+- [Evidence Ledger V2、Timeline单主与Run Claim精确关联](./evidence-ledger-v2/README.md)
 - [事件、事实可信度与Write-ahead Evidence](./evidence/README.md)
 - [Checkpoint、恢复与Cache安全分区](./continuity/README.md)
 - [Runtime端口与组件合同](./contracts/README.md)
+- [公共合同与最小可运行基座](./foundation/README.md)
 - [扩展体系与供应链](./extensions/README.md)
 - [Application Facade、REPL、API与SDK](./interfaces/README.md)
 - [Profile、Model Route与Runtime交接](./profile-assembly/README.md)
@@ -73,7 +77,7 @@ Runtime治理执行，不干涉AI内部认知。它不得读取隐藏Chain-of-Th
 
 ## 7. 当前明确不做
 
-- 不决定语言、目录、进程拓扑、RPC、数据库或生产SLA；
+- 不决定后续语言扩展、进程拓扑、RPC、数据库或生产SLA；
 - 不选择Docker、Kubernetes、Firecracker或其他首个真实Sandbox后端；
 - 不设计多Identity副本、并发Run、跨Run Session或跨集群迁移；
 - 不允许跨租户、跨Authority或跨Harness隐式缓存复用；
@@ -82,4 +86,6 @@ Runtime治理执行，不干涉AI内部认知。它不得读取隐藏Chain-of-Th
 
 ## 8. 复审规则
 
-本轮设计资产已经独立审核线程逐文件检查通过。该结论只恢复Plan用户审核资格，不等于Plan获批，也不自动授权实现。
+本轮设计资产已经独立审核线程逐文件检查通过。2026-07-14用户进一步授权并完成组件中立的Runtime公共合同与最小基座；该授权不扩展到生产后端、外部集成或相邻组件内部实现。
+
+后续执行底座专项入口还包括：[Run Settlement V2](./run-settlement-v2/README.md)、[Operation与Execution治理V3](./operation-governance-v3/README.md)。两者提供Application/Harness接线所需的versioned公共Port，但不代表Application组合闭环、生产Backend或6+1解锁已经完成。

@@ -1,0 +1,11 @@
+# Application Operation V3与自定义Domain接线完成
+
+时间：2026-07-15 03:55（Asia/Shanghai）
+
+Application已完成组件中立的`GovernedOperationCoordinatorV3`。每个外部动作先持久Attempt与Workflow Journal，再按Runtime公共Port推进Admission、Permit、Begin、Delegation、Prepare/Enforcement、Execute或Inspect、Observation/Unknown及Settlement；任一不确定回包只Inspect，不能盲目重派，也不能用Provider Receipt或Observation直接完成Step。
+
+新增`OperationDomainRouterV3 + OperationDomainStatePortV3`。内置组件和未来用户自定义组件都以精确namespaced Step Kind、冻结Descriptor和Domain Adapter Binding注册唯一领域Owner；Application不写6+1 switch。领域状态按prepared→observed|unknown→settled持久推进，Settlement与DomainResult必须和同一Application Attempt、Runtime Attempt、Intent及治理引用完全一致。
+
+公共Conformance覆盖正常与unknown分支、幂等回放、64路并发单事实线性化、exact Inspect和换链伪造拒绝；报告固定不授予生产、Binding、dispatch或Commit资格。两个不同namespaced自定义模块已通过同一Coordinator，真实Harness Model Turn Domain Adapter也通过observed→settled及pre-prepared unknown→failed两条跨模块黑盒闭环。
+
+Application生产包的可执行导入门禁已固定为只依赖Runtime `core/ports`，禁止Runtime Owner、Kernel、Foundation、fake和Harness内部实现进入生产依赖。当前仍不选择生产数据库、消息队列、RPC、Scheduler、Provider或SLA；Run创建、Claim摄取、Run Settlement和终止协调由后续独立Run Coordinator事件记录。
