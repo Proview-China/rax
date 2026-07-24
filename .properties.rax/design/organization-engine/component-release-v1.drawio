@@ -1,0 +1,18 @@
+<mxfile host="app.diagrams.net" modified="2026-07-18T02:18:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="organization-component-release-v1" name="Organization Component Release V1">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" page="1" pageWidth="1169" pageHeight="827">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="owner" value="Organization Facts + SQLite Current Owner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="120" width="230" height="80" as="geometry"/></mxCell>
+        <mxCell id="release" value="ComponentReleaseV1&#xa;reference / standalone / production" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="350" y="120" width="230" height="80" as="geometry"/></mxCell>
+        <mxCell id="review" value="Human Multi-Sign Review variant&#xa;required Organization capability" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="660" y="120" width="240" height="80" as="geometry"/></mxCell>
+        <mxCell id="host" value="Assembler / Binding / SystemReady&#xa;fail closed if exact current absent" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="970" y="120" width="220" height="80" as="geometry"/></mxCell>
+        <mxCell id="note" value="Automatic Review profile: Organization optional&#xa;Human Multi-Sign profile: Organization hard required" style="shape=note;whiteSpace=wrap;html=1;" vertex="1" parent="1"><mxGeometry x="390" y="300" width="410" height="90" as="geometry"/></mxCell>
+        <mxCell id="e1" edge="1" parent="1" source="owner" target="release"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" edge="1" parent="1" source="release" target="review"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" edge="1" parent="1" source="review" target="host"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

@@ -267,6 +267,10 @@ func newOperationFixtureV3(t *testing.T) *operationFixtureV3 {
 }
 
 func newOperationFixtureForRunV3(t *testing.T, runID core.AgentRunID, scopeOverride *core.ExecutionScope) *operationFixtureV3 {
+	return newOperationFixtureForRunAndKindV3(t, runID, scopeOverride, "")
+}
+
+func newOperationFixtureForRunAndKindV3(t *testing.T, runID core.AgentRunID, scopeOverride *core.ExecutionScope, effectKindOverride ports.EffectKindV2) *operationFixtureV3 {
 	t.Helper()
 	now := time.Unix(310_000, 0)
 	scope := core.ExecutionScope{
@@ -296,8 +300,15 @@ func newOperationFixtureForRunV3(t *testing.T, runID core.AgentRunID, scopeOverr
 		subject.RunID = runID
 		effectKind = ports.OperationEffectKindExecutionStartV3
 	}
+	if effectKindOverride != "" {
+		effectKind = effectKindOverride
+	}
 	subjectDigest, _ := subject.DigestV3()
-	provider := providerBindingV3("custom/provider", "custom/execute")
+	providerCapability := ports.CapabilityNameV2("custom/execute")
+	if effectKindOverride != "" {
+		providerCapability = ports.CapabilityNameV2(effectKindOverride)
+	}
+	provider := providerBindingV3("custom/provider", providerCapability)
 	manifestDigest := provider.ManifestDigest
 	intent := ports.OperationEffectIntentV3{
 		ContractVersion:   ports.OperationEffectContractVersionV3,

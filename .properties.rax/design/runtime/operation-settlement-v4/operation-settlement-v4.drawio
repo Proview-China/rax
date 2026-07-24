@@ -1,0 +1,64 @@
+<mxfile host="app.diagrams.net" modified="2026-07-16T07:56:53.000+08:00" agent="Codex" version="24.7.17" type="device">
+  <diagram id="operation-settlement-v4" name="Operation Settlement V4">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1600" pageHeight="1000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="title" value="Operation Settlement V4：Evidence消费到Runtime唯一终态" style="text;html=1;strokeColor=none;fillColor=none;align=center;verticalAlign=middle;fontSize=22;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="310" y="20" width="980" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="evidence-owner" value="&lt;b&gt;Evidence Owner&lt;/b&gt;&lt;br&gt;Issue → InspectCurrent → Handoff → Provider → Consume&lt;br&gt;原子：Record + chain + cursor + consumed_current + association" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="420" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="prepare" value="prepare EvidenceBindingV4&lt;br&gt;Consumption + issued/final Qualification&lt;br&gt;Record + Candidate digest + Handoff&lt;br&gt;Attempt + 4.1 phase + full Scope digest" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="570" y="90" width="380" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="execute" value="execute EvidenceBindingV4&lt;br&gt;Consumption + issued/final Qualification&lt;br&gt;Record + Candidate digest + Handoff&lt;br&gt;Attempt + 4.1 phase + full Scope digest" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="570" y="270" width="380" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="domain-owner" value="&lt;b&gt;DomainResult Owner&lt;/b&gt;&lt;br&gt;exact authoritative Fact&lt;br&gt;kind-routed current Reader&lt;br&gt;Receipt / Observation 不可替代" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="60" y="330" width="420" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="gateway" value="&lt;b&gt;Runtime Settlement Governance Gateway V4&lt;/b&gt;&lt;br&gt;复读Effect revision / immutable owner / shared guard&lt;br&gt;精确比较prepare + execute + DomainResult + full Scope&lt;br&gt;历史Permit/Policy过期不阻止truthful settlement" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="1050" y="150" width="450" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="runtime-owner" value="&lt;b&gt;Runtime Effect / Settlement Owner&lt;/b&gt;&lt;br&gt;一次原子Commit四对象&lt;br&gt;shared guard = (TenantID, EffectID)&lt;br&gt;V3-first / V4-first 对称；跨Tenant独立" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14" vertex="1" parent="1">
+          <mxGeometry x="1050" y="390" width="450" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="v3" value="既有Settlement V3 CAS&lt;br&gt;公共合同/digest不变&lt;br&gt;同Owner锁内占用同一shared guard&lt;br&gt;不同ID/OperationDigest也不能绕过" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666" vertex="1" parent="1">
+          <mxGeometry x="590" y="510" width="330" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="recovery" value="恢复与历史读取&lt;br&gt;Evidence consumed_current + Settlement absent&lt;br&gt;→ exact Inspect → 同canonical Commit&lt;br&gt;历史四对象按Settlement ID；不借current索引" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00" vertex="1" parent="1">
+          <mxGeometry x="60" y="520" width="420" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="nogos" value="NO-GO：late/observation；V2 type-pun；phase缺失/交换；schema+digest冒充Domain Fact；V3/V4双终态；sidecar；跨Owner伪原子" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#b85450;fontColor=#9b0000;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="300" y="720" width="1000" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-evidence-prepare" value="consumed_current exact refs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1" edge="1" parent="1" source="evidence-owner" target="prepare">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-evidence-execute" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1" edge="1" parent="1" source="evidence-owner" target="execute">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-prepare-gateway" value="exact current reread" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1" edge="1" parent="1" source="prepare" target="gateway">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-execute-gateway" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1" edge="1" parent="1" source="execute" target="gateway">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-domain-gateway" value="authoritative current Fact" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1" edge="1" parent="1" source="domain-owner" target="gateway">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-gateway-owner" value="sealed SubmissionV4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1" edge="1" parent="1" source="gateway" target="runtime-owner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-v3-owner" value="shared terminal guard" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1" edge="1" parent="1" source="v3" target="runtime-owner">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge-recovery-gateway" value="Inspect only" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;dashed=1" edge="1" parent="1" source="recovery" target="gateway">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

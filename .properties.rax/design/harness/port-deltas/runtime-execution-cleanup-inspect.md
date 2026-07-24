@@ -1,6 +1,8 @@
 # Port Delta：Execution关闭后的独立Cleanup Inspect
 
-状态：提交Runtime Owner评审；Harness不直接修改`ExecutionRuntime/runtime/**`。
+状态：已由live Harness `runtimeadapter.InspectCleanup`与当前Runtime合同闭合，不再是开放Port Delta；保留本文只用于历史追溯。
+
+当前裁决：Assembly V1直接复用现有独立Cleanup Inspect能力，不修改`ExecutionRuntime/runtime/**`，也不再建议新增私有兼容接口。后文是当时的缺口说明，不代表当前live状态。
 
 ## 1. 用例
 

@@ -3,12 +3,13 @@
 ## 设计状态
 
 - 模块名称：`model-invoker`
-- 当前阶段：全上游统一原语层Code Review已闭环；LLM、Harness、外围、Realtime、本地与Relay已进入可机器校验的联合Surface矩阵
-- 最近更新：2026-07-14
-- 进入计划阶段：第一、第二阶段于2026-07-10获授权；执行并集Runtime于2026-07-13获授权并完成
+- 当前阶段：P4 assembly candidate已完成Owner-owned release/readiness/conformance reference implementation；固定`reference_only`且`production_eligible=false`
+- 最近更新：2026-07-18
+- 进入计划阶段：第一、第二阶段于2026-07-10获授权；执行并集Runtime于2026-07-13获授权并完成；Tool Call Projection Delta于2026-07-16获授权并完成reference implementation
 - 代码实现：统一 Go内核、十四个 Runtime Provider、波次 A上游基础、B完整协议层、C动态订阅控制面、D云托管、E1全部路线，以及`union/profile/effect/execution`与六条代表Route Adapter均已离线验收，位置为 `ExecutionRuntime/model-invoker/`
 - 当前候选：默认16条订阅Route为`implemented_offline + callable=false + blocked_by_host_trust`；只有可信宿主激活后才可调用
 - 后续边界：E2、Sidecar、第三方首批名单、真实 API与生产评审仍需新的设计和单独授权
+- 当前设计候选：`PreparedModelInvocation / PreDispatch Gate V1`的Owner-local合同及P4声明式候选已落盘；11项production P0仍全部显式缺失，因此只可供Assembler结构验证，不宣称production root、Provider readiness或调用授权存在
 
 ## 目标
 
@@ -75,6 +76,14 @@ Provider Native API
 
 ## 设计资产
 
+- [P4 Production Release / Readiness / Factory Candidate V1](./p4-production-release-readiness-factory-candidate-v1.md)
+- [P4实施计划与门禁真值](../../plan/model-invoker/p4-production-release-readiness-factory-candidate-v1.md)
+- [PreparedModelInvocation / PreDispatch Gate V1](./prepared-model-invocation-pre-dispatch-gate-v1.md)
+- [PreparedModelInvocation / PreDispatch Gate V1测试矩阵](./prepared-model-invocation-pre-dispatch-gate-v1-test-matrix.md)
+- [PreparedModelInvocation / PreDispatch Gate V1实施计划](../../plan/model-invoker/prepared-model-invocation-pre-dispatch-gate-v1.md)
+- [ToolCall Projection发布与Exact Reader V1设计Delta](./tool-call-observation-projection-publish-reader-v1.md)
+- [ToolCall Projection发布与Exact Reader V1测试矩阵](./tool-call-observation-projection-publish-reader-v1-test-matrix.md)
+- [Tool Call候选观测与公共投影v1](./tool-call-candidate-observation-v1.md)
 - [全上游统一原语层Code Review（2026-07-14）](./upstream-primitive-code-review-20260714.md)
 - [外围上游能力官方研究（2026-07-14）](./upstream-peripheral-capability-research-20260714.md)
 - [外围能力并集与本地上游设计v1](./peripheral-union-and-local-upstream-v1.md)

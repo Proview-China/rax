@@ -1,0 +1,25 @@
+<mxfile host="app.diagrams.net" modified="2026-07-17T23:17:00+08:00" agent="Codex" version="24.7.17">
+  <diagram id="agent-assembler-v1" name="Agent Assembler V1">
+    <mxGraphModel dx="1400" dy="900" grid="1" gridSize="10" page="1" pageScale="1" pageWidth="1169" pageHeight="827">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="definition" value="sealed AgentDefinitionV1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="40" y="100" width="190" height="60" as="geometry"/></mxCell>
+        <mxCell id="facts" value="ResolutionFactsSnapshotV1&#xa;exact current" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="220" width="190" height="70" as="geometry"/></mxCell>
+        <mxCell id="catalog" value="ComponentRelease Catalog&#xa;Owner-published 6+1 + custom" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="40" y="350" width="190" height="80" as="geometry"/></mxCell>
+        <mxCell id="assembler" value="Agent Assembler&#xa;resolve version/capability/DAG/owner/locality/residual" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="330" y="210" width="260" height="110" as="geometry"/></mxCell>
+        <mxCell id="plan" value="ResolvedAgentPlanV1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="700" y="80" width="200" height="60" as="geometry"/></mxCell>
+        <mxCell id="binding" value="Runtime BindingPlanV2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="700" y="210" width="200" height="60" as="geometry"/></mxCell>
+        <mxCell id="assembly" value="Harness AssemblyInputV1&#xa;十个 exact plan refs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="700" y="340" width="200" height="70" as="geometry"/></mxCell>
+        <mxCell id="compiler" value="Harness Compiler&#xa;Generation / Manifest / Graph / Handoff" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="970" y="335" width="180" height="80" as="geometry"/></mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="definition" target="assembler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="facts" target="assembler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="catalog" target="assembler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="assembler" target="plan"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="assembler" target="binding"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="assembler" target="assembly"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="assembly" target="compiler"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

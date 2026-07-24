@@ -13,11 +13,12 @@ Runtime是Praxis全局执行治理基座。它把不可变`ResolvedAgentPlan`对
 | `ExecutionRuntime/runtime/admission` | Activation Journal、Recovery Planner和Identity Lease原子激活合同 |
 | `ExecutionRuntime/runtime/kernel` | Instance Aggregate、持久化Run Journal、Completion Claim证据摄取、revision线性化、迟到Observation隔离和显式Policy监督决策 |
 | `ExecutionRuntime/runtime/ports` | Harness及所有相邻组件的版本化接入合同 |
+| `ExecutionRuntime/runtime/releasecandidate` | reference-only Release/Readiness/Conformance与descriptor-only Factory；详见[说明](./component-release-v1.md) |
 | `ExecutionRuntime/runtime/foundation` | 组件中立的最小Activate/Run/Checkpoint/Restore/Stop协调器 |
 | `ExecutionRuntime/runtime/fakes` | 事实、Execution、Sandbox、Evidence和Checkpoint的确定性内存实现 |
 | `ExecutionRuntime/runtime/tests` | 合同、非法状态、并发、容灾、Effect、Port与完整闭环反例 |
 
-当前专项入口：[Binding V2](./binding-v2.md)、[Effect治理V2](./effect-governance-v2.md)、[Review Verdict V2](./review-v2.md)、[Evidence Ledger V2](./evidence-ledger-v2.md)、[Run Settlement V2](./run-settlement-v2.md)、[Operation与Execution治理V3](./operation-governance-v3.md)。
+当前专项入口：[Binding V2](./binding-v2.md)、[Generation-Binding Association V1](./generation-binding-association-v1.md)、[Effect治理V2](./effect-governance-v2.md)、[Review Verdict V2](./review-v2.md)、[Evidence Ledger V2](./evidence-ledger-v2.md)、[Evidence Subject Current V1](./evidence-subject-current-v1.md)、[Run Settlement V2](./run-settlement-v2.md)、[Operation与Execution治理V3](./operation-governance-v3.md)、[Operation Settlement V4](./operation-settlement-v4.md)、[G6A Action Matrix/Router V1](./g6a-action-matrix-router-v1.md)、[Controlled Operation Provider V2](./controlled-operation-provider-v2.md)、[Checkpoint-first Governance V2](./checkpoint-first-governance-v2.md)、[Model Pre-Dispatch Assembly Current V1](./model-predispatch-assembly-current-v1.md)。
 
 ## 3. 输入与输出
 
@@ -52,7 +53,27 @@ go vet ./...
 5. `OperationGovernancePortV3`、Execution Delegation/Observation/Settlement公共入口已经冻结，但Application Step Journal与Harness Provider governed bridge仍需完成最终组合接线；
 6. `ApplicationCommandFactPortV2`位于`runtime/ports`，Application只允许导入`runtime/core`和`runtime/ports`；`control`别名仅为legacy/restricted迁移；
 7. 尚未与现有Model Invoker形成生产接线，也未决定数据库、RPC、进程拓扑、真实Sandbox、生产Checkpoint后端和SLA。
+8. Operation Settlement V4已闭合Evidence V3 prepare/execute强类型关联、V3/V4共享terminal guard、历史四对象闭包与lost-reply/staged failure恢复；reference store与Conformance不声明生产持久化或SLA。
+9. Checkpoint-first V2已提供Runtime-owned Attempt+Barrier、EffectCut、Finalization Closure、Consistency/Finalize、历史/当前终态Inspect、Evidence V1与Settlement V5 reference纵切；Restore、真实Participant/Continuity/Sandbox Adapter及生产后端仍保持unsupported。
 
-## 7. 下一入口
+## 7. G6A隔离切面
 
-下一入口是完成Application Step Journal、Command Outbox消费与Harness governed bridge组合门禁。只有组合闭环和允许导入/版本矩阵发布后才可解锁6+1；领域组件仍只能依赖`runtime/core`与`runtime/ports`。
+G6A Action matrix/router已完成Runtime最小实现与隔离fixture验证：只接受唯一Run内Tool Action矩阵，五维Owner-current Router无损路由，Provider前复读execute Enforcement、Evidence Handoff与Tool Owner Boundary current proof。当前仍无production composition root/backend/SLA，不启用Capability、Context Refresh、Continuation或Turn推进。
+
+## 8. Controlled Operation Provider V2
+
+Controlled Operation Provider V2已完成Runtime纵向切面与第三轮独立代码审计。它在真实Provider不可逆入口前复读Route、Prepared、execute Enforcement、Evidence、Boundary与七个Binding current闭包；以稳定Entry key线性化单次逻辑admission，并在lost reply或并发progressed state下只Inspect原Entry。当前仍只有reference store、fake transport与Conformance，无production composition root/backend、持久性、availability、SLA或物理exactly-once声明。
+
+## 9. Checkpoint-first Governance V2
+
+Checkpoint-first V2已通过第三次独立代码终审（P0/P1/P2=0）。Runtime唯一拥有Attempt/Barrier、EffectCut与终态Commit线性化；成功路径原子提交Consistency+closed Barrier，非成功路径原子提交Runtime派生终态+closed Barrier。Diagnostics/Residuals/ManifestSeal/Participant DomainResult仍归各语义Owner，Runtime只持typed ref并复读current。Evidence V1 Issue不推进cursor，Consumption复读真实Ledger Record，只有`consumed_current`可进入Settlement V5；EffectCut V2对缺exact Dispatch Attempt证明的V5 terminal永久fail closed。当前只提供reference fake与public Conformance，Provider调用数为0，Restore与production root/backend/SLA均未实现。
+
+## 10. Generation-Binding Association只读面
+
+`GenerationBindingAssociationCurrentReaderV1`已从既有Governance Port加法抽取并通过最终独立代码短审（P0/P1/P2=0）。只读消费者仅能Inspect Runtime权威Association Fact；Governance通过兼容嵌入保留原有Associate+Inspect方法集，既有对象、digest、Store和Gateway均未改变。该Reader不授Binding、Activation、Permit、Provider或production资格。
+
+`OperationSettlementCurrentReaderV5`已完成最小Go实现与Owner门禁，并通过第二次独立代码短审YES（P0/P1/P2=0/0/0），详见[模块说明](./operation-settlement-current-reader-v5.md)。它只暴露current Inspect，Governance兼容嵌入后仍保持原六方法；Gateway对request Operation/Effect与returned Bundle执行exact交叉。该Reader不授Settle、Fact Owner或production backend/root资格。
+
+## 12. Model Pre-Dispatch Assembly Current V1
+
+Runtime neutral DTO、Registry exact Reader、Assembly Current Reader、Validate/canonical/digest、public Conformance与import-boundary测试已完成，并通过双独立代码审计YES（P0/P1/P2=0/0/0）及全门。Runtime只拥有Go nominal与只读合同；Harness仍唯一拥有publisher/CAS/current index和Assembly语义，Model/Harness/Tool适配与system/production composition root尚未解锁。详见[模块说明](./model-predispatch-assembly-current-v1.md)。

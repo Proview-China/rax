@@ -19,6 +19,7 @@
 - 波次 F未发现 Sidecar触发证据；G第三方首批名单与 H真实烟测按当前授权延期；统一离线总验收已通过，第三阶段计划已转为陈旧计划；
 - Route Policy/Audit候选：调用时 evidence、订阅 entitlement、禁止自动 PAYG和Route审计已完成；它依赖预构造 Registry/Invoker，不是完整 Gateway；
 - Route Gateway候选：`routegateway`已组合运行绑定、类型化秘密解析、十八个内建工厂、可信订阅授权、单飞/轮换/Lease生命周期、入池前Provider/Closer/Endpoint门禁和Route级Resolve/Capabilities/Invoke/Stream；
+- Review受治理模型调用V1：已实现Provider中立`GovernedModelInvocationV1`、Prepared Commit Gate/Current/ACK在Provider实际点的双重复读、create-once/CAS/精确历史、unknown inspect-only，以及Model Owner单节点SQLite WAL持久Repository；尚无Review Context生产Adapter和宿主composition root，旧`Invoke/Stream`保持兼容但不属于受治理生产路径；
 - 宿主激活合同：`catalog.ApplyActivationPlan`与`routegateway.NewHost`已提供精确RouteID、evidence/adapter pin、原子启用/禁用、完整失败报告与默认fail-closed构造；
 - 十家P0模型门禁：所有直连P0 Route已改为官方exact static集合，未知模型在Authorization/Binding/Secret/Factory前拒绝；
 - 上游调用最终候选A→F及信任闭合：39×20默认语义矩阵、16条host-blocked订阅Route、39条Provider缓存事实和最终离线总验收均已完成；
@@ -49,6 +50,7 @@
 | `effect` | 文件状态/hash/diff、严格结构化输出、Tool Call、进程和Computer Use的真实Effect/Verification观察 |
 | `execution` | Request/Plan封装、Adapter Registry、EventLedger、审批/取消/Reconcile/Verify/Project与唯一终态所有权 |
 | `execution/direct` | 复用RouteGateway的Direct模型调用、流式事件和caller-hosted工具continuation；ToolPolicy与未知工具fail closed |
+| `storage/sqlite` | Model Owner单节点SQLite WAL `GovernedModelInvocationV1` Repository：append-only history、current/highest CAS、逻辑attempt唯一guard、restart exact Inspect；不声明HA、远程持久性或宿主root |
 | `execution/harness` | 受控进程、JSONL/JSON-RPC/ACP，以及Codex、Claude、Gemini、current Kimi、Qwen官方Harness合同 |
 | `provider/openai` | OpenAI配置、SDK transport、Capabilities与两种协议方言 |
 | `provider/anthropic` | Anthropic配置、SDK transport、Capabilities与方言验证/错误分类 |

@@ -2,9 +2,9 @@
 
 ## 1. 状态
 
-- 当前阶段：总体架构设计继续推进；Runtime设计资产通过独立文件复审，Plan候选进入用户审核阶段；
-- 当前重点：`runtime`；
-- 当前授权：允许用户正式审核Runtime Plan候选；不允许Runtime代码实现或真实运行；
+- 当前阶段：总体架构设计继续推进；Runtime设计资产通过独立文件复审，公共合同与组件中立最小基座已完成；
+- 当前重点：`harness`公共骨架已经接入`runtime`，下一步按用户选择逐个接入真实组件；
+- 当前授权：Runtime与Harness公共合同、Kernel、Adapter、fake Port、测试和说明资产已实现；不允许生产后端、具体Harness、真实外部集成或相邻组件内部实现；
 - 最近更新：2026-07-14。
 
 本目录描述 Praxis 的项目级总体架构。它只负责把设计域、模块关系和推进顺序组织成索引，不替代各模块自己的 `design/<模块名>/` 设计事实源。
@@ -56,15 +56,16 @@
 | 模块 | 当前状态 | 说明 |
 |---|---|---|
 | `model-invoker` | 已有离线实现候选 | Runtime未来挂载的模型执行依赖之一，不是Runtime本身 |
-| `runtime` | 设计资产通过独立文件复审；Plan候选待用户审核 | 无循环激活、状态、Fence/Intent所有权、统一Effect/Cache/Budget/API/Checkpoint、图和反例已闭合；实现门禁仍关闭 |
+| `runtime` | 公共合同与最小可运行基座已实现 | Activation容灾、监督Policy、Timeline/Checkpoint/Restore、装配门禁、Foundation闭环和版本化Port已落地；生产门禁继续关闭 |
+| `harness` | 公共合同与最小可运行骨架已实现 | 不可变Bootstrap、单Run交互循环、Action Gateway和Runtime ExecutionPort接线已落地；具体生产Harness继续关闭 |
 | 其他设计域 | 设计入口草案 | 仅固定初步职责和边界，等待逐模块共同设计 |
 
 Runtime 的当前设计事实源见 [runtime设计入口](../../design/runtime/README.md)。
 
 ## 6. 当前推进顺序
 
-1. 用户正式审核Runtime V1 Plan候选及其中集中列出的12项决策；
-2. 若用户审核发现设计缺口，回到设计事实源修正并重新复审；
-3. Plan获批后，才决定真实代码位置、技术选型和首个后端；
-4. 用户另行明确实现授权后，才允许创建实现目录；
-5. 实现阶段用fake/stub、合同测试和故障注入证明Runtime不依赖其他引擎内部实现。
+1. Runtime组件中立公共合同、Kernel、线性化事实和最小Foundation闭环已经完成；
+2. 保留现有`model-invoker`，未来只通过版本化Port和获批Adapter接入；
+3. 具体Harness、Context Engine（含Cache）、工具链和审批链按用户后续指导依次设计与实现；
+4. 每个组件先完成所有权、Port、Effect、Evidence和失败合同，再进入内部实现；
+5. 未确认的数据库、Transport、进程拓扑、真实Sandbox和外部集成保持禁用。

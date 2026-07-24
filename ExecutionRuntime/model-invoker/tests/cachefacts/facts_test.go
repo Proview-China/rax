@@ -14,7 +14,7 @@ import (
 )
 
 func TestGeneratedProviderCacheFactsMatchCatalogAndCheckedInAsset(t *testing.T) {
-	routeCatalog, err := catalog.NewDefault(time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC))
+	routeCatalog, err := catalog.NewDefault(time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,7 +39,7 @@ func TestGeneratedProviderCacheFactsMatchCatalogAndCheckedInAsset(t *testing.T) 
 }
 
 func TestOnlyXAIResponsesExposesStrictCacheKeyTransport(t *testing.T) {
-	routeCatalog, err := catalog.NewDefault(time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC))
+	routeCatalog, err := catalog.NewDefault(time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestOnlyXAIResponsesExposesStrictCacheKeyTransport(t *testing.T) {
 }
 
 func TestCacheFactsNeverClaimPolicyOwnership(t *testing.T) {
-	routeCatalog, err := catalog.NewDefault(time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC))
+	routeCatalog, err := catalog.NewDefault(time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC))
 	if err != nil {
 		t.Fatal(err)
 	}

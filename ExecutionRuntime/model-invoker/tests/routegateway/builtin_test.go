@@ -12,7 +12,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/upstream"
 )
 
-var gatewayNow = time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
+var gatewayNow = time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC)
 
 func TestEveryCallableRouteHasARealBuiltinConstructionPath(t *testing.T) {
 	routeCatalog, err := catalog.NewDefault(gatewayNow)

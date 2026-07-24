@@ -1,5 +1,13 @@
 # 模型调用器模块说明
 
+P4 production release/readiness/factory assembly candidate已落盘于`ExecutionRuntime/model-invoker/releasecandidate/`：它产出Assembler可读的声明式`ComponentReleaseV1`、canonical readiness和conformance报告，并在发布lost-reply时通过exact read恢复或拒绝漂移。该候选硬编码为`reference_only`且`production_eligible=false`；Provider配置、内存Repository、owner-local测试和fixture均不计为production证据。Route/Profile/Registry/Provider current、durable ACK、Harness部署关联、真实dispatch/cleanup及deployment certification等11项P0未关闭，故production仍为NO-GO。
+
+PreparedModelInvocation/PreDispatchGate V1的M0/M1 reference implementation及主审P1返修已经落盘：Historical Fact/Ref、Current Projection/Ref、ACK/AckRef、五字段SurfaceBindingRef、非权威Dispatch Receipt、strict canonical codec、Runtime Registry Exact Reader注入、Historical/Current原子双索引Repository与线程安全内存Store均已实现。Repository lost-reply只允许同sealed输入恢复一次，第二次结果独立决定最终错误分类；public Ensure在调用Repository前拒绝nil/canceled context并将typed-nil归一为Invalid，Exact Reader在读锁内和解锁后复查context。64并发同identity异content、stored wire篡改及clone污染反例已通过。该切片已获两次独立短审`YES(P0=0/P1=0/P2=0)`；当前仅解锁Harness M2，Model M2-M5、Tool和production root继续NO-GO，且仍不包含生产持久化driver、composition root或SLA。
+
+Tool Call Projection单方法原子Ensure Repository、create-once Publisher、完整Ref Exact Reader、线程安全内存reference store与direct ensure-before-emit屏障已经实现；split Store A/B Publisher+Reader不能注入Direct，typed-nil在Backend触达前拒绝，下游仍只获得Reader。详见[模块说明](./tool-call-candidate-observation-v1.md)。该能力仍只是reference implementation/test fixture，不包含生产持久化driver、Continuity Adapter、production root、Retention SLA或跨进程exactly-once。
+
+Tool Call完整候选批次、公共Union exact投影及Gateway读取边界见[Tool Call候选观测与公共投影v1模块说明](./tool-call-candidate-observation-v1.md)。该Projection是Provider Observation，不是PendingAction、ActionCandidate或执行授权。
+
 第三方中转兼容的边界、组成和首轮真实结果见[第三方中转站兼容模块说明 v1](./third-party-relay-compat-v1.md)。该路线使用独立`third-party-relay`身份和显式Factory，不放宽任何官方Provider Endpoint门禁。
 
 ## 1. 模块作用
@@ -20,10 +28,13 @@
 |---|---|---|
 | 设计 | `.properties.rax/design/model-invoker/` | 架构、统一语义 v1、RouteID门面、缓存传输边界和 Provider调查 |
 | 计划 | `.properties.rax/plan/model-invoker/` | 各阶段陈旧计划及已完成的上游调用与统一封装 v1计划 |
+| P4 assembly candidate | `ExecutionRuntime/model-invoker/releasecandidate/`、`tests/releasecandidate/` | 声明式release/readiness/conformance、11项production P0 fail-closed、lost-reply exact恢复与import边界；非production |
+| Tool Call候选观测v1 | [tool-call-candidate-observation-v1.md](tool-call-candidate-observation-v1.md) | 完整Observation、公共Projection、exact source/ref、原子发布和非权威兼容事件 |
 | 执行并集 Runtime v1 | [execution-semantic-union-runtime-v1.md](execution-semantic-union-runtime-v1.md) | 五个顶层原语、Intent/Mechanism/Effect、Profile 编译、事件账本、Direct/Harness、Effect observer、测试与真实联调边界 |
 | 执行并集第二轮 Review | [Review v2 计划](../../plan/model-invoker/execution-semantic-union-review-hardening-v2.md) / [完成快照](../../memory/model-invoker/20260713-115300-执行语义并集第二轮Review与测试加固完成.md) | P0/P1 合同修复、单元/并发/故障矩阵、五路生产 Adapter 离线集成与 P2 边界 |
 | 全上游原语层Review闭环 | [模块说明](./upstream-primitive-review-closure-v1.md) | 780条LLM能力行、206条Surface行、Realtime Invoker、外围流与结果身份闭合 |
 | Go module | `ExecutionRuntime/model-invoker/` | 统一内核、十四个 Runtime Provider、上游控制面与 RouteID调用门面 |
+| Prepared Invocation M0/M1 | `ExecutionRuntime/model-invoker/prepared_model_invocation_{v1,repository_v1}.go`、`tests/preparedinvocation/` | 准备事实、current/ACK/Receipt canonical、Runtime Registry exact pin、原子reference Store、lost-reply与并发反例；未接生产root |
 | 外围并集 Runtime | `ExecutionRuntime/model-invoker/{operation,resource,job,realtime}/` | 媒体、Embedding/Rerank、Files/Stores、Video/Batch Job与双向Session四类生命周期 |
 | 外围官方Spec | `ExecutionRuntime/model-invoker/operation/specs/` | OpenAI、Anthropic、Gemini、xAI、Kimi、MiniMax、Z.AI、MiMo、Qwen、Ollama、llama.cpp与显式自建能力描述 |
 | Gemini文件上传 | `ExecutionRuntime/model-invoker/operation/geminiupload/` | 官方resumable两阶段上传、同源一次性URL门禁和资源归一化 |

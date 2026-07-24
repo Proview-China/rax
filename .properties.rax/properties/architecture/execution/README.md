@@ -8,7 +8,7 @@
 
 | 模块 | 职责 | 当前阶段 |
 |---|---|---|
-| [`runtime`](../../../design/runtime/README.md) | 实例接纳、状态机、协调、挂载、事件和控制 | 设计资产通过独立文件复审；Plan候选待用户审核；无实现授权 |
+| [`runtime`](../../../design/runtime/README.md) | 实例接纳、状态机、协调、挂载、事件和控制 | 公共合同、Activation容灾、组件装配门禁与最小完整闭环已通过普通/Race/Vet验证 |
 | [`sandbox`](../../../design/sandbox/README.md) | 隔离环境、资源租约、网络/文件/进程边界和集群供给 | 设计骨架 |
 
 Scheduler暂作为Runtime Control Plane的内部设计部分研究；只有职责和规模证明需要独立模块时，才单独立项。
@@ -60,10 +60,10 @@ ResolvedAgentPlan
 - 分区时读取可降级为stale projection，但推进、授权、续租和新Effect无法访问唯一线性化事实源时一律fail closed；
 - Runtime只权威决定ExecutionOutcome，不代替Review、Artifact、Task或Goal的结果所有者。
 
-## 6. 待用户审核的实现选项
+## 6. 后续仍待审核的实现选项
 
 - 单实例Runtime Kernel与多实例Control Plane的进程边界；
-- Runtime真实代码位置、语言边界、协议、数据库和部署拓扑；
+- 语言扩展边界、协议、数据库和部署拓扑；
 - 首个Sandbox/Harness/Provider后端及其Conformance目标；
 - Checkpoint各Provider可贡献的状态范围与恢复支持等级；
 - 调度器是否在V1出现，以及V1仅保留哪些最小Placement字段。

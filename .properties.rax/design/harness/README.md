@@ -4,7 +4,9 @@
 
 - 当前阶段：Harness公共合同与组件中立最小骨架已完成实现和验收；
 - 当前接线：Application V3持久Domain Adapter与公共Run Claim→Settlement/Termination协调边界已闭合；Claim不升级为Outcome，生产Provider/Backend仍未选择；
-- 实现授权：配置交接、Run内Kernel、窄依赖Port、Runtime ExecutionPort Adapter、fake与完整闭环测试；
+- 当前设计主线：Harness Assembly P1/P2/P3a与Generation-Binding接线已有live资产；PendingAction Reader、Harness Route V2第八独立短审、G6A Identity第二独立设计短审、[Owner-current exact输入Port Delta](./port-deltas/committed-pending-action-owner-current-inputs-v2.md)设计终审及对应V3/V4实现最终独立代码审计均为`YES(P0/P1/P2=0)`；
+- 当前启用门：H-ID-P0/P1/P2/P4与Harness P3 Assembler/InputCurrent Reader已完成并通过最终独立代码审计；system G6A/G6B/production composition root继续`NO-GO`，Tool Consumer/P4与system fixture尚未实现；
+- 当前Surface M2与Harness concrete Gate：`A2+B1+C2` Owner-current、Runtime neutral Current Reader、Model公开`Commit + InspectExactAck` Gate及同实例ACK create-once Repository均已达到`owner-local implementation_software_test_yes`并通过对应独立代码审计；该结论不证明Model actual-point全路径no-bypass，也不解锁Tool V2 Consumer、system G6A、Capability或production root；
 - 明确不授权：具体官方/第三方Harness生产实现、真实模型调用、真实Tool/MCP、生产进程拓扑和持久后端；
 - 核心原则：每条Harness Route必须满足或明确降级于同一外部合同，不要求内部复用同一代码。
 
@@ -45,6 +47,15 @@ Pause和Checkpoint是可选Capability；未支持时必须从API和Profile中明
 
 ## 7. 当前设计资产
 
+- [Harness Component Release V1（reference-only；production P0显式保留）](./component-release-v1.md)
+- [Harness Assembly公用接线总设计](./assembly/README.md)
+- [Model PreDispatch Assembly Owner-current A2+B1+C2裁决](./port-deltas/model-predispatch-assembly-owner-current-v1.md)
+- [Model PreDispatch actual-point inventory Port Delta](./port-deltas/model-predispatch-actual-point-inventory-v1.md)
+- [G6B Context Turn Refresh公共合同漂移Port Delta](./port-deltas/context-turn-refresh-g6b-v1.md)
+- [单Call Action Gateway冻结边界](./assembly/README.md#61-单call-action-gateway冻结边界)
+- [Action Gateway 4.1验收门](./assembly/acceptance.md#41-action-gateway分阶段实现门)
+- [Action Gateway前置：OperationScope Evidence V3](../runtime/operation-scope-evidence-v3/README.md#8-与action-gateway的严格顺序)
+- [Evidence V3所需Harness Turn只读Reader边界](../runtime/operation-scope-evidence-v3/README.md#54-中立applicability-current-reader与后续adapter)
 - [配置编译与Bootstrap交接](./configuration/README.md)
 - [公共对象、Port与所有权](./contracts/README.md)
 - [Run内Kernel与Interaction Loop](./kernel/README.md)

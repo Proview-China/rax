@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	cloudCheckedAt  = time.Date(2026, 7, 10, 17, 0, 0, 0, time.UTC)
+	cloudCheckedAt  = time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC)
 	cloudValidUntil = cloudCheckedAt.Add(7 * 24 * time.Hour)
 )
 

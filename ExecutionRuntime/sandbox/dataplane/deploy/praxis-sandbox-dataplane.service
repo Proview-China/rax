@@ -1,0 +1,32 @@
+[Unit]
+Description=Praxis Sandbox Rust Data Plane
+After=containerd.service
+Requires=containerd.service
+
+[Service]
+Type=simple
+User=praxis-sandbox
+Group=praxis-sandbox
+ExecStart=/usr/local/libexec/praxis-sandbox-dataplane /etc/praxis/sandbox-dataplane.json
+Restart=on-failure
+RestartSec=2s
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+PrivateNetwork=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=no
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RemoveIPC=yes
+ReadWritePaths=/run/praxis /var/lib/praxis/sandbox
+
+[Install]
+WantedBy=multi-user.target

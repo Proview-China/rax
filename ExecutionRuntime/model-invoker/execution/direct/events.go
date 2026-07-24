@@ -20,6 +20,21 @@ func modelDraft(kind string, sourceSequence uint64, payload *union.ModelEvent) u
 	}
 }
 
+func toolCallObservationDraft(projection modelinvoker.ToolCallCandidateObservationProjectionV1) (union.UnifiedExecutionEvent, error) {
+	payload, err := json.Marshal(projection)
+	if err != nil {
+		return union.UnifiedExecutionEvent{}, err
+	}
+	event := union.UnifiedExecutionEvent{
+		Header: union.EventHeader{
+			SourceSequence: projection.Ref.Source.SourceSequence, Origin: union.EventOriginProvider, Family: union.EventFamilyModel,
+			Visibility: union.VisibilityAuditOnly, SecurityClassification: union.SecurityInternal,
+		},
+		Model: &union.ModelEvent{Kind: modelinvoker.ToolCallCandidateObservationModelEventKindV1, Payload: payload},
+	}
+	return event, nil
+}
+
 func diagnosticDraft(kind, code string, sourceSequence uint64, payload json.RawMessage) union.UnifiedExecutionEvent {
 	return union.UnifiedExecutionEvent{
 		Header: union.EventHeader{
@@ -103,9 +118,20 @@ func attemptStatusForExecution(status union.ExecutionStatus) union.AttemptStatus
 	}
 }
 
-func responseEvents(response modelinvoker.Response, nextSequence func() uint64) ([]union.UnifiedExecutionEvent, map[string]modelinvoker.FunctionCall, bool) {
-	events := []union.UnifiedExecutionEvent{modelDraft("model_step_started", nextSequence(), &union.ModelEvent{Kind: "model_step_started"})}
+func responseEvents(response modelinvoker.Response, projection *modelinvoker.ToolCallCandidateObservationProjectionV1, stepStartedSequence uint64, nextSequence func() uint64) ([]union.UnifiedExecutionEvent, map[string]modelinvoker.FunctionCall, bool, error) {
+	if stepStartedSequence == 0 {
+		stepStartedSequence = nextSequence()
+	}
+	events := []union.UnifiedExecutionEvent{modelDraft("model_step_started", stepStartedSequence, &union.ModelEvent{Kind: "model_step_started"})}
+	if projection != nil {
+		event, err := toolCallObservationDraft(*projection)
+		if err != nil {
+			return nil, nil, true, err
+		}
+		events = append(events, event)
+	}
 	pending := make(map[string]modelinvoker.FunctionCall)
+	callOrdinal := uint32(0)
 	for _, output := range response.Output {
 		switch output.Type {
 		case modelinvoker.OutputItemText:
@@ -121,8 +147,9 @@ func responseEvents(response modelinvoker.Response, nextSequence func() uint64) 
 				call := *output.FunctionCall
 				call.Arguments = append(json.RawMessage(nil), call.Arguments...)
 				pending[call.ID] = call
-				payload, _ := json.Marshal(map[string]any{"call_id": call.ID, "name": call.Name, "arguments": json.RawMessage(call.Arguments)})
+				payload := compatibleToolCallPayload(call, callOrdinal, projection)
 				events = append(events, modelDraft("model_tool_call", nextSequence(), &union.ModelEvent{Kind: "model_tool_call", ActionID: union.ActionID(call.ID), Payload: payload}))
+				callOrdinal++
 			}
 		}
 	}
@@ -134,7 +161,39 @@ func responseEvents(response modelinvoker.Response, nextSequence func() uint64) 
 	if terminal {
 		events = append(events, terminalCandidate(responseStatus(response.Status), string(response.StopReason), nextSequence(), union.SideEffectNone))
 	}
-	return events, pending, terminal
+	return events, pending, terminal, nil
+}
+
+func compatibleToolCallPayload(call modelinvoker.FunctionCall, ordinal uint32, projection *modelinvoker.ToolCallCandidateObservationProjectionV1) json.RawMessage {
+	payload := map[string]any{"call_id": call.ID, "name": call.Name, "arguments": json.RawMessage(call.Arguments)}
+	if projection != nil {
+		payload["authority"] = modelinvoker.ToolCallCompatibilityAuthorityV1
+		payload["gateway_authoritative"] = false
+		payload["observation_ref"] = projection.Ref
+		payload["ordinal"] = ordinal
+	}
+	encoded, _ := json.Marshal(payload)
+	return encoded
+}
+
+// validateResponseToolCallSequence runs before responseEvents builds its
+// call-ID map. This prevents duplicate provider identities from being silently
+// collapsed by map assignment.
+func validateResponseToolCallSequence(response modelinvoker.Response) error {
+	seen := make(map[string]struct{})
+	for _, output := range response.Output {
+		if output.Type != modelinvoker.OutputItemFunctionCall {
+			continue
+		}
+		if output.FunctionCall == nil || output.FunctionCall.ID == "" {
+			return fmt.Errorf("%w: provider tool call identity is missing", ErrProtocolTerminal)
+		}
+		if _, duplicate := seen[output.FunctionCall.ID]; duplicate {
+			return fmt.Errorf("%w: provider repeated a tool call identity", ErrProtocolTerminal)
+		}
+		seen[output.FunctionCall.ID] = struct{}{}
+	}
+	return nil
 }
 
 func streamEventDraft(event modelinvoker.StreamEvent, nextSequence func() uint64) ([]union.UnifiedExecutionEvent, map[string]modelinvoker.FunctionCall, bool) {

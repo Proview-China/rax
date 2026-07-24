@@ -1,0 +1,73 @@
+<mxfile host="app.diagrams.net" modified="2026-07-16T08:04:00.000+08:00" agent="Codex" version="24.7.17" type="device">
+  <diagram id="harness-action-gateway-v1" name="N=1 Action Gateway V1">
+    <mxGraphModel dx="1440" dy="900" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1800" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="lane-model" value="Model Invoker / Model-turn Settlement Owner" style="swimlane;horizontal=0;startSize=34;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="2280" height="160" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane-runtime" value="Runtime Evidence / Governance / Settlement" style="swimlane;horizontal=0;startSize=34;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="190" width="2280" height="260" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane-harness" value="Harness Run-local Session / PendingAction / Continuation CAS" style="swimlane;horizontal=0;startSize=34;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="460" width="2280" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane-tool" value="Tool Owner" style="swimlane;horizontal=0;startSize=34;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="650" width="2280" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane-context" value="Context Owner: Refresh / DomainResult / ApplySettlement / Generation CAS / S2" style="swimlane;horizontal=0;startSize=34;fillColor=#fce5cd;strokeColor=#d79b00;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="840" width="2280" height="180" as="geometry"/>
+        </mxCell>
+        <mxCell id="lane-app" value="Application-owned narrow Ports / neutral DTO; Owner Adapters; G6A test fixture injection" style="swimlane;horizontal=0;startSize=34;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="1030" width="2280" height="250" as="geometry"/>
+        </mxCell>
+        <mxCell id="m1" value="Model public read-only Projection Reader (future)&#xa;full ObservationRef exact re-read&#xa;Calls exactly 1 before Application Request" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="70" y="65" width="230" height="80" as="geometry"/></mxCell>
+        <mxCell id="m2" value="SettledTurnResultV2\naction_required" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="390" y="75" width="180" height="60" as="geometry"/></mxCell>
+        <mxCell id="r1" value="Run Evidence V2\nAppend / Inspect" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="240" y="240" width="170" height="60" as="geometry"/></mxCell>
+        <mxCell id="r2" value="Model Settlement V3" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="520" y="240" width="160" height="60" as="geometry"/></mxCell>
+        <mxCell id="h1" value="PendingAction CAS\nwaiting_action" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="650" y="515" width="170" height="60" as="geometry"/></mxCell>
+        <mxCell id="h-source" value="CommittedPendingActionReaderV1&#xa;S1/S2 + full Session digest&#xa;distinct Session/Turn source coordinates only&#xa;TTL &lt;= 30s; no public applicability ref" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="850" y="555" width="310" height="75" as="geometry"/></mxCell>
+        <mxCell id="r-applicability" value="Runtime G6A nominal router&#xa;exact Kind / ID / Revision / Digest mapping&#xa;public ApplicabilityFactRefV3&#xa;no new Runtime Fact" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="720" y="345" width="360" height="85" as="geometry"/></mxCell>
+        <mxCell id="h-binding" value="CommittedPendingActionApplicabilityBindingV1&#xa;stable Subject + Session/Turn coordinates + digest&#xa;no observation time; fresh clock per Inspect" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;dashed=1;" vertex="1" parent="1"><mxGeometry x="1190" y="470" width="420" height="65" as="geometry"/></mxCell>
+        <mxCell id="h-current-reader" value="Harness runtimeadapter&#xa;exact ref lookup -> stable Subject&#xa;fresh Request -> re-read S1/S2&#xa;fresh verify checked &lt;= now &lt; expires" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="1640" y="545" width="390" height="85" as="geometry"/></mxCell>
+        <mxCell id="t1" value="ActionCandidate\n+ Reservation" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="810" y="705" width="170" height="60" as="geometry"/></mxCell>
+        <mxCell id="r3" value="Dispatch V4 / Begin\nEnforcement 4.1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="990" y="240" width="180" height="60" as="geometry"/></mxCell>
+        <mxCell id="r4" value="Evidence V3\nprepare + execute" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="1210" y="240" width="180" height="60" as="geometry"/></mxCell>
+        <mxCell id="t2" value="DomainResultFact" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="1390" y="705" width="160" height="60" as="geometry"/></mxCell>
+        <mxCell id="r5" value="Settlement V4 Inspection\ntyped refs + Association Inspect" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="1540" y="240" width="210" height="60" as="geometry"/></mxCell>
+        <mxCell id="t3" value="ApplySettlement\nToolResult" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="1710" y="705" width="170" height="60" as="geometry"/></mxCell>
+        <mxCell id="c1" value="ContextTurnRefreshPortV1\nS1 -> freeze -> pending DomainResult\nS2 -> local atomic ApplySettlement + Generation CAS -> new Frame\nzero Runtime Settlement" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fce5cd;strokeColor=#d79b00;" vertex="1" parent="1"><mxGeometry x="1880" y="885" width="290" height="80" as="geometry"/></mxCell>
+        <mxCell id="h2" value="Continuation CAS\nnew exact Frame / turn + 1" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="2110" y="515" width="190" height="60" as="geometry"/></mxCell>
+        <mxCell id="app-port" value="Application Owner&#xa;narrow Ports + neutral DTO&#xa;no Owner imports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="120" y="1080" width="260" height="70" as="geometry"/></mxCell>
+        <mxCell id="owner-adapters" value="Owner-module Adapters&#xa;Tool in tool-mcp / Context in context-engine&#xa;Continuation in harness&#xa;may import Application contract/ports only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="450" y="1070" width="410" height="90" as="geometry"/></mxCell>
+        <mxCell id="host-root" value="G6A / G6B test-only composition&#xa;G6B only after G6A PASS; manual public Port injection&#xa;no capability / production continuation / turn progress" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="930" y="1080" width="300" height="70" as="geometry"/></mxCell>
+        <mxCell id="assembly-injection" value="Harness Assembly&#xa;validate/assemble injected interfaces only&#xa;no Tool/Context implementation imports" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="1300" y="1070" width="360" height="90" as="geometry"/></mxCell>
+        <mxCell id="production-root-residual" value="Production enablement residual&#xa;absent; not required for Owner-local or G6B test fixture&#xa;after full G6B: Host Owner real wiring + conformance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;dashed=1;" vertex="1" parent="1"><mxGeometry x="1690" y="1070" width="500" height="90" as="geometry"/></mxCell>
+        <mxCell id="no-go" value="NO-GO: infer Model Projection from PendingAction/event/compat; Model Reader failure then dispatch; reversible source ID; global mutable Binding registry; runtime registration; unknown ref/missing or drifted Binding; Binding in Application DTO/FactPort; Reader returns public ref; nominal source rewrite; N&gt;1; P3b" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="260" y="1190" width="1780" height="55" as="geometry"/></mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="m1" target="r1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="r1" target="m2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="m2" target="r2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="r2" target="h1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="h1" target="t1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="t1" target="r3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="r3" target="r4"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="r4" target="t2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="t2" target="r5"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="r5" target="t3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="t3" target="c1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="c1" target="h2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=block;" edge="1" parent="1" source="h1" target="h-source"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=block;" edge="1" parent="1" source="h-source" target="r-applicability"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=block;" edge="1" parent="1" source="r-applicability" target="h-current-reader"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="a4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=block;" edge="1" parent="1" source="h-current-reader" target="r3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=block;" edge="1" parent="1" source="h-source" target="h-binding"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="b2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=block;" edge="1" parent="1" source="h-binding" target="h-current-reader"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="owner-adapters" target="app-port"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="host-root" target="app-port"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="host-root" target="assembly-injection"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="d4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;dashed=1;endArrow=block;" edge="1" parent="1" source="host-root" target="h-binding"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

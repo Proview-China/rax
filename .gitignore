@@ -4,3 +4,5 @@
 #obsidian配置文件
 /Praxis白皮书/.obsidian
 
+# Rust build artifacts
+**/target/

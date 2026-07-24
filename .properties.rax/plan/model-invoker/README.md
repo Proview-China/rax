@@ -1,5 +1,13 @@
 # 模型调用器计划索引
 
+> 最新P4候选计划：[Production Release / Readiness / Factory Candidate V1](./p4-production-release-readiness-factory-candidate-v1.md)。Owner-owned声明、canonical readiness、conformance及lost-reply exact recovery已完成；target ordinary100/race20、vet、gofmt、import、diff均通过。候选固定为`reference_only + production_eligible=false`，11项production P0未关闭；full ordinary/race当前只被既有Catalog官方证据wall-clock过期门禁阻断，不伪造全绿。
+
+> 当前已接受切片：[PreparedModelInvocation / PreDispatch Gate V1](./prepared-model-invocation-pre-dispatch-gate-v1.md)。Model M0/M1主审P1返修已获两次独立短审`YES(P0=0/P1=0/P2=0)`，并通过target100、race20、full ordinary/race/vet、gofmt、diff与import/type-identity门禁。当前仅解锁Harness M2；Model M2-M5、Tool、production root及生产Repository/composition root/SLA仍为NO-GO、未授权、未实现。
+
+> 最新完成计划：[ToolCall Projection发布与Exact Reader V1](./tool-call-observation-projection-publish-reader-v1.md)。reference implementation已落地为单方法原子Ensure Repository、Model-owned canonical producer helper、内存Store/Conformance与ensure-before-emit屏障；Publisher/Reader仅保留兼容写口/下游窄读口，不参与Direct恢复。计划保留为“陈旧计划（已完成）”，仍不宣称生产Backend、Continuity Adapter或composition root存在。
+
+> 最新完成计划：[Tool Call候选观测与公共投影v1](./tool-call-candidate-observation-v1.md)。sync/stream整批原子Projection、exact source/ref、Response ID绑定、严格重复键拒绝和失败零投影均已完成；计划保留为“陈旧计划（已完成）”。
+
 > 最近完成Review计划：[全上游统一原语层Code Review v1](./upstream-primitive-code-review-v1.md)。780条LLM能力行与206条Harness/Operation/Realtime/Local/Relay Surface行已形成联合机器证明；Realtime Invoker、结果身份与外围流生命周期缺口已修复。
 
 > 最近完成计划：[外围能力并集与本地上游实施计划 v1](./peripheral-union-and-local-upstream-v1.md)。`operation/resource/job/realtime`、官方spec、Gemini resumable upload、本地/企业自建兼容面、低成本中转外围探针、最终离线门禁和资产同步均已完成；计划保留为“陈旧计划（已完成）”。

@@ -1,70 +1,83 @@
-# Agent Definition 设计骨架
+# Agent Definition V1
 
-## 设计状态
+## 1. 当前裁决
 
-- 当前阶段：设计草案。
-- 实现授权：无；本文件不授权创建代码、计划或运行时资产。
-- 当前共识：身份持久、实例可替换、Run 短暂。
-- 模块原则：本模块独立设计，不能被 Runtime 或装配器内部化。
+- 状态：设计已确认；P1-P4 owner-local/reference 实现候选已落地并完成本轮返修，等待独立终审。生产持久 Backend 与 trusted extension validator 尚未落地。
+- 首版目标：用一份声明式配置表达一个完整 Agent，并把 6+1、Harness、Application、Runtime 的需求一次钉死。
+- 作者格式：YAML；进入系统后的唯一语义格式：严格 JSON 对象树。
+- 本模块只拥有“Agent 想要什么”，不解析组件、不创建实例、不启动任何执行。
 
-## 作用
+当前代码尚不能通过简单配置直接构建完整 Agent：现有 Harness 接受的是程序化 `AssemblyInputV1`，Runtime 旧 `ResolvedAgentPlan` 又不足以表达完整装配。V1 设计补的是最上游声明合同，不把已有局部能力伪装成生产可用整体。
 
-`AgentDefinition` 是一个 Agent 的声明式、可版本化设计事实。
-它描述 Agent 应由哪些能力、约束和责任组合而成，但不代表任何实例已经运行。
-它使设计内容可以被校验、审计、装配和重复实例化。
+## 2. 对象分层
 
-## 输入
+```text
+用户 YAML
+  -> AgentDefinitionSourceV1       仅表示通过严格解析的作者输入
+  -> AgentDefinitionV1             Definition Owner 封存的权威声明
+  -> AgentDefinitionRefV1          下游只携 exact ref
+  -> Agent Assembler               唯一解析者
+```
 
-- 用户确认的 Agent 目标、职责、位置、责任与职权架构。
-- Harness、模型调用 Profile、上下文、工具、MCP、记忆和知识引用。
-- 审核、管理、外部干预和沙箱需求的策略引用。
-- 组件版本约束、兼容性要求与资源边界。
+作者不能提供或覆盖 `Digest`、Owner 时间、审批事实和解析证据；这些字段由对应 Owner 生成。可信 Secret 字段只能使用引用。opaque extension 只做明显 secret/path 粗筛，unknown optional 始终视为 untrusted，不能以黑名单通过证明“不含秘密”。
 
-## 输出
+## 3. 6+1 首版能力集合
 
-- 带版本、标识和来源信息的 `AgentDefinition`。
-- 可供装配前校验的组件引用与约束集合。
-- 面向审计的定义摘要、变更理由与内容摘要值。
-- 定义无效时的结构化诊断，不产生半成品实例。
+以下能力均为首版必需项，最终系统验收时必须处于 `production`，不能以 fake、owner-local、standalone 或 reference 实现代替：
 
-## 明确拥有
+| 能力域 | Definition 表达 | 最终生产硬门 |
+|---|---|---|
+| continuity | checkpoint、restore、timeline 策略引用 | 可持久化事实、独立 Inspect、恢复不伪造外部回滚 |
+| tool + MCP | tool surface、MCP、credential、effect 策略引用 | 双门治理、actual-point enforcement、unknown 只 Inspect |
+| memory + knowledge | retrieve、candidate、commit、forget 策略引用 | 正式提交由领域 Owner CAS，外发先 Effect |
+| sandbox | isolation、placement、resource、network 策略引用 | Runtime Activation 前存在生产 Environment Provider |
+| review | automatic、human、TTL、policy 引用 | Verdict exact 绑定 candidate/intent/scope/authority |
+| context + cache | source、partition、prompt、refresh 策略引用 | Context Owner 产 exact Frame，cache 命中重新鉴权 |
+| Harness | execution stack、model profile、route 引用 | 只拥有 Run 内 Session/Event，不拥有 Runtime Outcome |
 
-- Agent 声明结构、字段语义和版本规则。
-- 长期 `AgentIdentity` 的引用方式，而非身份存储实现。
-- 组件需求、能力约束和责任边界的表达方法。
-- 定义级来源、作者、审批状态与变更可追溯性。
+## 4. Owner 边界
 
-## 明确不拥有
+Agent Definition 拥有：
 
-- 不拥有模型行为、提示词含义或 AI 的认知语义。
-- 不解析和下载组件，不选择实际执行节点。
-- 不创建 `AgentInstance`、`AgentRun` 或 `SandboxLease`。
-- 不保存密钥、长期记忆正文或正式业务资产。
-- 不替代审核、管理、调度、沙箱和 Runtime 引擎。
+- 字段、版本、canonical、摘要和 immutable revision 语义；
+- AgentIdentity、Profile、策略、组件需求和秘密引用的表达；
+- 来源、审批引用、有效窗口和变更原因；
+- 严格解析与结构化诊断。
 
-## 与 Runtime 的关系
+Agent Definition 不拥有：
 
-Runtime 不应直接猜测或改写 `AgentDefinition`。
-定义先由 Agent Assembler 解析为不可变 `ResolvedAgentPlan`，再交给 Runtime。
-Runtime 只执行已批准计划的生命周期，不得静默篡改 AI 语义或责任边界。
-持久身份属于定义引用的控制域；可替换实例与短暂 Run 属于 Runtime 执行域。
+- Component Manifest、Component Release 或 Binding 事实；
+- Prompt、Memory、Review、Sandbox、Tool 等领域事实正文；
+- Secret 值、Provider 句柄、网络连接、文件系统路径注入；
+- Instance、Run、Lease、Permit、Settlement 或 ExecutionOutcome；
+- 任何组件的生产构造器和生命周期。
 
-## 依赖
+## 5. YAML 到严格语义树
 
-- 各独立模块提供稳定的能力描述、版本和兼容性合同。
-- 组织与权限系统提供身份、职责、职权和责任的可引用对象。
-- Schema、签名与资产注册机制提供校验和可追溯能力。
+V1 YAML 仅是作者体验层。解析器必须在零外部副作用阶段完成：
 
-## 待共同决定
+- 拒绝重复键、未知字段、非字符串键和多文档尾随内容；
+- 拒绝 merge key `<<`、anchor、alias、自定义 tag；
+- 拒绝浮点、NaN、Infinity、隐式 timestamp 和实现相关 scalar；
+- 只允许 null、boolean、受范围限制的整数、字符串、数组、对象；
+- 数组是否是集合逐字段冻结；集合稳定排序、去重，顺序数组保持原序；
+- `nil` 与空数组是否等价逐字段定义，不使用语言默认值猜测；
+- 转成严格 JSON 语义树后再按 Runtime canonical 规则摘要。
 
-- Definition 的最小必填字段、分层扩展、版本不可变与升级迁移方法。
-- 职责、权限、策略是内联还是只允许引用。
-- 定义审批、撤销与兼容性失效的状态模型。
+详细字段见 [contract-v1.md](contract-v1.md)，验收见 [acceptance.md](acceptance.md)，架构图见 [architecture.drawio](architecture.drawio)。
 
-## 进入计划阶段的门槛
+## 6. 与下游的关系
 
-- [ ] 字段模型、标识模型与版本模型获得共同确认。
-- [ ] 所有组件引用均有明确接口所有者和失败语义。
-- [ ] Definition、Identity、Instance、Run 的边界形成正式设计图。
-- [ ] 非法定义、缺失依赖和版本冲突的验收标准明确。
-- [ ] 明确最终产物、测试范围和迁移风险，并获得用户授权。
+- Agent Assembler 只接受 sealed `AgentDefinitionV1`，不能直接接受 YAML。
+- Runtime 不读取、解释或迁移 Definition，只消费已冻结的装配产物。
+- Harness 不读取 Definition，只接收由 Assembler 生成的 `AssemblyInputV1`。
+- agent-host 可调用 Definition Decoder，但不能修改字段或补签事实。
+- 自定义组件使用 namespaced kind/capability/schema/extension；Definition 不增加硬编码 switch。
+
+## 7. 进入 Plan 的门
+
+- [x] 用户确认字段、YAML 子集和版本策略；
+- [x] 用户确认首版 6+1 全部为生产硬门；
+- [x] Agent Assembler 的 `ResolvedAgentPlanV1` 与 Component Release Catalog 同时确认；
+- [x] agent-host 唯一 Composition Root 同时确认；
+- [x] 黑白盒、故障、并发与自定义组件验收边界确认。

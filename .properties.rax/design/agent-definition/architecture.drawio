@@ -1,0 +1,20 @@
+<mxfile host="app.diagrams.net" modified="2026-07-17T23:17:00+08:00" agent="Codex" version="24.7.17">
+  <diagram id="agent-definition-v1" name="AgentDefinition V1">
+    <mxGraphModel dx="1200" dy="800" grid="1" gridSize="10" page="1" pageScale="1" pageWidth="1169" pageHeight="827">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="yaml" value="用户 YAML&#xa;安全子集" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="40" y="250" width="150" height="70" as="geometry"/></mxCell>
+        <mxCell id="decoder" value="Strict Decoder&#xa;拒绝 merge/alias/tag/重复键" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="240" y="240" width="210" height="90" as="geometry"/></mxCell>
+        <mxCell id="source" value="AgentDefinitionSourceV1&#xa;严格 JSON 语义树" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="500" y="240" width="190" height="90" as="geometry"/></mxCell>
+        <mxCell id="owner" value="Definition Owner&#xa;Validate / create-once / Seal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="740" y="240" width="190" height="90" as="geometry"/></mxCell>
+        <mxCell id="sealed" value="AgentDefinitionV1&#xa;+ exact Ref" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="980" y="250" width="150" height="70" as="geometry"/></mxCell>
+        <mxCell id="boundary" value="零外部副作用；无 secret value；不启动 Runtime/Harness/Provider" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="280" y="390" width="650" height="60" as="geometry"/></mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="yaml" target="decoder"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="decoder" target="source"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="source" target="owner"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="owner" target="sealed"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

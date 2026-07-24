@@ -21,6 +21,12 @@ type Backend interface {
 	OpenStream(context.Context, modelinvoker.RouteCall) (ModelStream, error)
 }
 
+// GovernedBackendV1 is additive. A Backend that does not implement it remains
+// valid for legacy direct Invoke/Stream but cannot execute a governed binding.
+type GovernedBackendV1 interface {
+	modelinvoker.GovernedModelInvocationPortV1
+}
+
 type RouteGatewayBackend struct {
 	Gateway *routegateway.Gateway
 }
@@ -45,3 +51,19 @@ func (backend RouteGatewayBackend) OpenStream(ctx context.Context, call modelinv
 	}
 	return backend.Gateway.Stream(ctx, call)
 }
+
+func (backend RouteGatewayBackend) StartOrInspectGovernedModelInvocationV1(ctx context.Context, command modelinvoker.GovernedModelInvocationCommandV1) (modelinvoker.GovernedModelInvocationResultV1, error) {
+	if backend.Gateway == nil {
+		return modelinvoker.GovernedModelInvocationResultV1{}, fmt.Errorf("%w: route gateway is nil", ErrInvalidConfig)
+	}
+	return backend.Gateway.StartOrInspectGovernedModelInvocationV1(ctx, command)
+}
+
+func (backend RouteGatewayBackend) InspectExactModelInvocationV1(ctx context.Context, ref modelinvoker.GovernedModelInvocationRefV1) (modelinvoker.GovernedModelInvocationResultV1, error) {
+	if backend.Gateway == nil {
+		return modelinvoker.GovernedModelInvocationResultV1{}, fmt.Errorf("%w: route gateway is nil", ErrInvalidConfig)
+	}
+	return backend.Gateway.InspectExactModelInvocationV1(ctx, ref)
+}
+
+var _ GovernedBackendV1 = RouteGatewayBackend{}

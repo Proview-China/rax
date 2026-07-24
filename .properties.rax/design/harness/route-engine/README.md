@@ -1,5 +1,7 @@
 # Harness Route绑定与公共引擎接线
 
+> 状态：已废止的早期草案。该草案把本地Loop与Runtime Adapter组合误作主接线路线，无法覆盖定稿要求的Slot、HookFace、Assembly SDK与三段装配链。不得据此实现；后继设计见[Harness Assembly公用接线总设计](../assembly/README.md)。
+
 ## 1. 状态与目标
 
 本切面在已经验收的Harness公共合同、Run内Kernel和Runtime Adapter之上增量落地，不重写既有合同，也不选择具体Codex、Claude、ACP或第三方生产Route。

@@ -14,15 +14,44 @@ import (
 // tests and conformance fixtures. It makes no production durability or SLA
 // claim and is not an Application governance gateway.
 type OperationEffectStoreV3 struct {
-	mu                       sync.Mutex
-	clock                    func() time.Time
-	effects                  map[string]map[core.EffectIntentID]control.OperationEffectFactV3
-	permits                  map[string]map[string]control.OperationDispatchPermitFactV3
-	loseNextCreateReply      bool
-	loseNextCASReply         bool
-	loseNextIssueReply       bool
-	loseNextBeginReply       bool
-	loseNextEnforcementReply bool
+	mu                         sync.Mutex
+	clock                      func() time.Time
+	effects                    map[string]map[core.EffectIntentID]control.OperationEffectFactV3
+	permits                    map[string]map[string]control.OperationDispatchPermitFactV3
+	permitsV4                  map[string]map[string]control.OperationDispatchPermitFactV4
+	permitsV5                  map[string]map[string]control.OperationDispatchPermitFactV5
+	enforcementV4              map[string]map[string]ports.OperationDispatchEnforcementJournalV4
+	enforcementV5              map[string]map[string]ports.OperationDispatchEnforcementJournalV5
+	settlementsV4              map[string]map[string]ports.OperationSettlementCommitBundleV4
+	settlementsV4ByEffect      map[string]ports.OperationSettlementCommitBundleV4
+	settlementsV4ByID          map[string]ports.OperationSettlementCommitBundleV4
+	settlementsV5ByID          map[string]ports.OperationCheckpointRestoreSettlementCommitBundleV5
+	settlementsV5ByEffect      map[string]ports.OperationCheckpointRestoreSettlementCommitBundleV5
+	terminalEffectsV5          map[string]ports.OperationCheckpointRestoreEffectTerminalV5
+	settlementTerminalGuards   map[string]operationSettlementTerminalGuardOwner
+	reviewAuthorizationsV4     ports.OperationReviewAuthorizationFactPortV4
+	reviewAuthorizationsV5     ports.OperationReviewAuthorizationGovernancePortV5
+	issueV4CommitCount         uint64
+	beginV4CommitCount         uint64
+	issueV5CommitCount         uint64
+	beginV5CommitCount         uint64
+	loseNextCreateReply        bool
+	loseNextCASReply           bool
+	loseNextIssueReply         bool
+	loseNextBeginReply         bool
+	loseNextIssueV5Reply       bool
+	loseNextBeginV5Reply       bool
+	loseNextEnforcementReply   bool
+	loseNextEnforcementV4Reply bool
+	loseNextEnforcementV5Reply bool
+	enforcementV4CommitCount   uint64
+	enforcementV5CommitCount   uint64
+	settlementV4CommitCount    uint64
+	loseNextSettlementV4Reply  bool
+	failNextSettlementV4Stage  int
+	settlementV5CommitCount    uint64
+	loseNextSettlementV5Reply  bool
+	failNextSettlementV5Stage  int
 }
 
 func NewOperationEffectStoreV3(clock func() time.Time) *OperationEffectStoreV3 {
@@ -30,10 +59,39 @@ func NewOperationEffectStoreV3(clock func() time.Time) *OperationEffectStoreV3 {
 		clock = time.Now
 	}
 	return &OperationEffectStoreV3{
-		clock:   clock,
-		effects: map[string]map[core.EffectIntentID]control.OperationEffectFactV3{},
-		permits: map[string]map[string]control.OperationDispatchPermitFactV3{},
+		clock:                    clock,
+		effects:                  map[string]map[core.EffectIntentID]control.OperationEffectFactV3{},
+		permits:                  map[string]map[string]control.OperationDispatchPermitFactV3{},
+		permitsV4:                map[string]map[string]control.OperationDispatchPermitFactV4{},
+		permitsV5:                map[string]map[string]control.OperationDispatchPermitFactV5{},
+		enforcementV4:            map[string]map[string]ports.OperationDispatchEnforcementJournalV4{},
+		enforcementV5:            map[string]map[string]ports.OperationDispatchEnforcementJournalV5{},
+		settlementsV4:            map[string]map[string]ports.OperationSettlementCommitBundleV4{},
+		settlementsV4ByEffect:    map[string]ports.OperationSettlementCommitBundleV4{},
+		settlementsV4ByID:        map[string]ports.OperationSettlementCommitBundleV4{},
+		settlementsV5ByID:        map[string]ports.OperationCheckpointRestoreSettlementCommitBundleV5{},
+		settlementsV5ByEffect:    map[string]ports.OperationCheckpointRestoreSettlementCommitBundleV5{},
+		terminalEffectsV5:        map[string]ports.OperationCheckpointRestoreEffectTerminalV5{},
+		settlementTerminalGuards: map[string]operationSettlementTerminalGuardOwner{},
 	}
+}
+
+func (s *OperationEffectStoreV3) BindOperationReviewAuthorizationFactsV4(facts ports.OperationReviewAuthorizationFactPortV4) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reviewAuthorizationsV4 = facts
+}
+
+func (s *OperationEffectStoreV3) IssueV4CommitCount() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.issueV4CommitCount
+}
+
+func (s *OperationEffectStoreV3) BeginV4CommitCount() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.beginV4CommitCount
 }
 
 func (s *OperationEffectStoreV3) LoseNextCreateReply() {
@@ -64,6 +122,18 @@ func (s *OperationEffectStoreV3) LoseNextEnforcementReply() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.loseNextEnforcementReply = true
+}
+
+func (s *OperationEffectStoreV3) LoseNextEnforcementV4Reply() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.loseNextEnforcementV4Reply = true
+}
+
+func (s *OperationEffectStoreV3) EnforcementV4CommitCount() uint64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.enforcementV4CommitCount
 }
 
 func operationKeyV3(subject ports.OperationSubjectV3) (string, error) {
@@ -155,6 +225,14 @@ func (s *OperationEffectStoreV3) CompareAndSwapOperationEffectV3(ctx context.Con
 		transition.DispatchReceiptMatched = transition.PermitBegun && operationDispatchReceiptMatchesV3(*request.Next.DispatchReceipt, permit)
 	}
 	if request.Next.Settlement != nil {
+		tenantID := current.Intent.Operation.ExecutionScope.Identity.TenantID
+		guardKey := operationSettlementGuardKeyV4(tenantID, current.Intent.ID)
+		if _, exists := s.settlementsV4ByID[operationSettlementIDKeyV4(tenantID, request.Next.Settlement.ID)]; exists {
+			return control.OperationEffectFactV3{}, core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "settlement ID already belongs to V4")
+		}
+		if _, exists := s.settlementTerminalGuards[guardKey]; exists {
+			return control.OperationEffectFactV3{}, core.NewError(core.ErrorConflict, core.ReasonEffectStateConflict, "shared terminal guard already occupies this operation Effect")
+		}
 		for _, owner := range current.Intent.Owners {
 			if owner.Role == ports.OwnerSettlement && owner == request.Next.Settlement.Owner {
 				transition.SettlementOwnerMatched = true
@@ -163,6 +241,18 @@ func (s *OperationEffectStoreV3) CompareAndSwapOperationEffectV3(ctx context.Con
 	}
 	if err := control.ValidateOperationEffectTransitionV3(current, request.Next, transition, now); err != nil {
 		return control.OperationEffectFactV3{}, err
+	}
+	if request.Next.Settlement != nil {
+		tenantID := current.Intent.Operation.ExecutionScope.Identity.TenantID
+		operationDigest, digestErr := current.Intent.Operation.DigestV3()
+		if digestErr != nil {
+			return control.OperationEffectFactV3{}, digestErr
+		}
+		s.settlementTerminalGuards[operationSettlementGuardKeyV4(tenantID, current.Intent.ID)] = operationSettlementTerminalGuardOwner{
+			Version:         operationSettlementTerminalVersionV3,
+			SettlementID:    request.Next.Settlement.ID,
+			OperationDigest: operationDigest,
+		}
 	}
 	s.effects[key][request.Next.Intent.ID] = cloneOperationEffectFactV3(request.Next)
 	if s.loseNextCASReply {
@@ -191,6 +281,9 @@ func (s *OperationEffectStoreV3) IssueOperationDispatchPermitV3(ctx context.Cont
 	now := s.clock()
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if _, exists := s.permitsV4[key][request.Permit.ID]; exists {
+		return control.IssueOperationPermitResultV3{}, core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "operation Permit ID already belongs to V4")
+	}
 	if existing, ok := s.permits[key][request.Permit.ID]; ok {
 		if existing.PermitDigest == permitDigest && existing.Fence == request.Fence {
 			return control.IssueOperationPermitResultV3{Effect: cloneOperationEffectFactV3(s.effects[key][request.EffectID]), Permit: cloneOperationPermitFactV3(existing)}, nil
@@ -287,6 +380,264 @@ func (s *OperationEffectStoreV3) BeginOperationDispatchV3(ctx context.Context, r
 	return cloneOperationPermitFactV3(permit), nil
 }
 
+func (s *OperationEffectStoreV3) IssueOperationDispatchPermitV4(ctx context.Context, request control.IssueOperationPermitRequestV4) (control.IssueOperationPermitResultV4, error) {
+	if err := contextError(ctx); err != nil {
+		return control.IssueOperationPermitResultV4{}, err
+	}
+	if err := request.Permit.Validate(); err != nil {
+		return control.IssueOperationPermitResultV4{}, err
+	}
+	now := s.clock()
+	storedAuthorization, err := s.inspectReviewAuthorizationV4(ctx, request.Permit.Admission.Authorization, now)
+	if err != nil {
+		return control.IssueOperationPermitResultV4{}, err
+	}
+	if request.ReviewAuthorization.RefV4() != storedAuthorization.RefV4() || request.ReviewAuthorization.Digest != storedAuthorization.Digest {
+		return control.IssueOperationPermitResultV4{}, core.NewError(core.ErrorConflict, core.ReasonReviewVerdictStale, "V4 Issue supplied another Review Authorization Fact")
+	}
+	if err := request.Permit.ValidateAgainstAuthorization(storedAuthorization, request.Fence, now); err != nil {
+		return control.IssueOperationPermitResultV4{}, err
+	}
+	key, err := operationKeyV3(request.Operation)
+	if err != nil {
+		return control.IssueOperationPermitResultV4{}, err
+	}
+	fenceDigest, err := ports.DigestOperationExecutionFenceV3(request.Fence, request.Operation)
+	if err != nil {
+		return control.IssueOperationPermitResultV4{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	legacy := request.Permit.LegacyPermit
+	if !ports.SameOperationSubjectV3(request.Operation, legacy.Operation) || request.EffectID != legacy.IntentID {
+		return control.IssueOperationPermitResultV4{}, core.NewError(core.ErrorConflict, core.ReasonDispatchPermitInvalid, "V4 Issue request does not bind the Permit operation and Effect")
+	}
+	if _, exists := s.permits[key][legacy.ID]; exists {
+		return control.IssueOperationPermitResultV4{}, core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "operation Permit ID already belongs to V3")
+	}
+	if existing, exists := s.permitsV4[key][legacy.ID]; exists {
+		existingFenceDigest, _ := ports.DigestOperationExecutionFenceV3(existing.Fence, request.Operation)
+		effect, effectExists := s.effects[key][request.EffectID]
+		if existing.PermitDigest == request.Permit.Digest && existingFenceDigest == fenceDigest && existing.Permit.Admission.Authorization == request.Permit.Admission.Authorization && effectExists && effect.State == control.OperationEffectDispatchIntentV3 && effect.Revision == existing.EffectFactRevision && effect.DispatchPermitID == legacy.ID && effect.DispatchPermitDigest == existing.PermitDigest && request.ExpectedEffectRevision < effect.Revision && effect.Revision-request.ExpectedEffectRevision == 1 {
+			return control.IssueOperationPermitResultV4{Effect: cloneOperationEffectFactV3(effect), Permit: cloneOperationPermitFactV4(existing)}, nil
+		}
+		return control.IssueOperationPermitResultV4{}, core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "V4 operation Permit ID binds different content")
+	}
+	effect, exists := s.effects[key][request.EffectID]
+	if !exists {
+		return control.IssueOperationPermitResultV4{}, core.NewError(core.ErrorNotFound, core.ReasonEffectIntentMissing, "V4 operation Effect not found")
+	}
+	if effect.State != control.OperationEffectAcceptedV3 || effect.Revision != request.ExpectedEffectRevision {
+		return control.IssueOperationPermitResultV4{}, core.NewError(core.ErrorConflict, core.ReasonRevisionConflict, "V4 operation Effect is not accepted at expected revision")
+	}
+	intentDigest, _ := effect.Intent.DigestV3()
+	if legacy.IntentID != effect.Intent.ID || legacy.IntentRevision != effect.Intent.Revision || legacy.IntentDigest != intentDigest || !ports.SameOperationSubjectV3(legacy.Operation, effect.Intent.Operation) || legacy.PayloadSchema != effect.Intent.Payload.Schema || legacy.PayloadDigest != effect.Intent.Payload.ContentDigest || legacy.PayloadRevision != effect.Intent.PayloadRevision || legacy.ConflictDomain != effect.Intent.ConflictDomain || legacy.Provider != effect.Intent.Provider || legacy.EnforcementPoint != effect.Intent.Provider || legacy.Authority != effect.Intent.Authority || legacy.Review != effect.Intent.Review || legacy.Budget != effect.Intent.Budget || legacy.Policy != effect.Intent.Policy || legacy.Idempotency != effect.Intent.Idempotency || legacy.FenceDigest != fenceDigest || request.Permit.Admission.Admission.FactRevision != effect.Revision || now.IsZero() || !now.Before(time.Unix(0, legacy.ExpiresUnixNano)) {
+		return control.IssueOperationPermitResultV4{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonDispatchPermitInvalid, "V4 Permit does not bind exact Effect, admission and Fence")
+	}
+	nextEffect := cloneOperationEffectFactV3(effect)
+	nextEffect.State = control.OperationEffectDispatchIntentV3
+	nextEffect.Revision++
+	nextEffect.DispatchPermitID = legacy.ID
+	nextEffect.DispatchPermitDigest = request.Permit.Digest
+	nextEffect.UpdatedUnixNano = now.UnixNano()
+	permitFact, err := ports.SealOperationDispatchRecordV4(ports.OperationDispatchRecordV4{
+		Permit: request.Permit, PermitDigest: request.Permit.Digest, Fence: request.Fence,
+		State: ports.OperationPermitIssuedV4, Revision: 1, EffectFactRevision: nextEffect.Revision,
+	})
+	if err != nil {
+		return control.IssueOperationPermitResultV4{}, err
+	}
+	if err := nextEffect.Validate(); err != nil {
+		return control.IssueOperationPermitResultV4{}, err
+	}
+	if s.permitsV4[key] == nil {
+		s.permitsV4[key] = map[string]control.OperationDispatchPermitFactV4{}
+	}
+	s.effects[key][request.EffectID] = cloneOperationEffectFactV3(nextEffect)
+	s.permitsV4[key][legacy.ID] = cloneOperationPermitFactV4(permitFact)
+	s.issueV4CommitCount++
+	if s.loseNextIssueReply {
+		s.loseNextIssueReply = false
+		return control.IssueOperationPermitResultV4{}, core.NewError(core.ErrorUnavailable, core.ReasonEvidenceUnavailable, "injected V4 operation Permit issue reply loss")
+	}
+	return control.IssueOperationPermitResultV4{Effect: cloneOperationEffectFactV3(nextEffect), Permit: cloneOperationPermitFactV4(permitFact)}, nil
+}
+
+func (s *OperationEffectStoreV3) InspectOperationDispatchPermitV4(ctx context.Context, subject ports.OperationSubjectV3, permitID string) (control.OperationDispatchPermitFactV4, error) {
+	if err := contextError(ctx); err != nil {
+		return control.OperationDispatchPermitFactV4{}, err
+	}
+	key, err := operationKeyV3(subject)
+	if err != nil {
+		return control.OperationDispatchPermitFactV4{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fact, exists := s.permitsV4[key][permitID]
+	if !exists {
+		return control.OperationDispatchPermitFactV4{}, core.NewError(core.ErrorNotFound, core.ReasonDispatchPermitInvalid, "V4 operation Permit not found")
+	}
+	return cloneOperationPermitFactV4(fact), nil
+}
+
+func (s *OperationEffectStoreV3) BeginOperationDispatchV4(ctx context.Context, request control.BeginOperationDispatchRequestV4) (control.OperationDispatchPermitFactV4, error) {
+	if err := contextError(ctx); err != nil {
+		return control.OperationDispatchPermitFactV4{}, err
+	}
+	now := s.clock()
+	if _, err := s.inspectReviewAuthorizationV4(ctx, request.ReviewAuthorization, now); err != nil {
+		return control.OperationDispatchPermitFactV4{}, err
+	}
+	key, err := operationKeyV3(request.Operation)
+	if err != nil {
+		return control.OperationDispatchPermitFactV4{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	permit, exists := s.permitsV4[key][request.PermitID]
+	if !exists {
+		return control.OperationDispatchPermitFactV4{}, core.NewError(core.ErrorNotFound, core.ReasonDispatchPermitInvalid, "V4 operation Permit not found")
+	}
+	effect, effectExists := s.effects[key][request.EffectID]
+	if permit.State == ports.OperationPermitBegunV4 {
+		if effectExists && ports.SameOperationSubjectV3(request.Operation, permit.Permit.LegacyPermit.Operation) && permit.Permit.LegacyPermit.IntentID == request.EffectID && effect.Revision == request.ExpectedEffectRevision && permit.Revision == request.ExpectedPermitFactRevision+1 && permit.Permit.Admission.Digest == request.AdmissionDigest && permit.Permit.Admission.Authorization == request.ReviewAuthorization {
+			return cloneOperationPermitFactV4(permit), nil
+		}
+		return control.OperationDispatchPermitFactV4{}, core.NewError(core.ErrorConflict, core.ReasonDispatchPermitConsumed, "begun V4 Permit replay changed exact watermarks")
+	}
+	if permit.State != ports.OperationPermitIssuedV4 || permit.Revision != request.ExpectedPermitFactRevision || !effectExists || !ports.SameOperationSubjectV3(request.Operation, permit.Permit.LegacyPermit.Operation) || permit.Permit.LegacyPermit.IntentID != request.EffectID || effect.State != control.OperationEffectDispatchIntentV3 || effect.Revision != request.ExpectedEffectRevision || effect.DispatchPermitID != request.PermitID || effect.DispatchPermitDigest != permit.PermitDigest || permit.Permit.Admission.Digest != request.AdmissionDigest || permit.Permit.Admission.Authorization != request.ReviewAuthorization || !now.Before(time.Unix(0, permit.Permit.LegacyPermit.ExpiresUnixNano)) {
+		return control.OperationDispatchPermitFactV4{}, core.NewError(core.ErrorConflict, core.ReasonDispatchPermitConsumed, "V4 operation Permit cannot begin at expected watermarks")
+	}
+	permit.State = ports.OperationPermitBegunV4
+	permit.Revision++
+	permit.BegunUnixNano = now.UnixNano()
+	permit, err = ports.SealOperationDispatchRecordV4(permit)
+	if err != nil {
+		return control.OperationDispatchPermitFactV4{}, err
+	}
+	s.permitsV4[key][request.PermitID] = cloneOperationPermitFactV4(permit)
+	s.beginV4CommitCount++
+	if s.loseNextBeginReply {
+		s.loseNextBeginReply = false
+		return control.OperationDispatchPermitFactV4{}, core.NewError(core.ErrorUnavailable, core.ReasonEvidenceUnavailable, "injected V4 operation Begin reply loss")
+	}
+	return cloneOperationPermitFactV4(permit), nil
+}
+
+func (s *OperationEffectStoreV3) AppendOperationDispatchEnforcementV4(ctx context.Context, request control.AppendOperationDispatchEnforcementRequestV4) (ports.OperationDispatchEnforcementJournalV4, error) {
+	if err := contextError(ctx); err != nil {
+		return ports.OperationDispatchEnforcementJournalV4{}, err
+	}
+	if err := request.Receipt.Validate(); err != nil {
+		return ports.OperationDispatchEnforcementJournalV4{}, err
+	}
+	key, err := operationKeyV3(request.Operation)
+	if err != nil {
+		return ports.OperationDispatchEnforcementJournalV4{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	permit, permitExists := s.permitsV4[key][request.PermitID]
+	effect, effectExists := s.effects[key][request.EffectID]
+	if !permitExists || !effectExists || permit.State != ports.OperationPermitBegunV4 || !ports.SameOperationSubjectV3(request.Operation, permit.Permit.LegacyPermit.Operation) || permit.Permit.LegacyPermit.IntentID != request.EffectID || effect.DispatchPermitID != request.PermitID || effect.DispatchPermitDigest != permit.PermitDigest {
+		return ports.OperationDispatchEnforcementJournalV4{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonDispatchPermitInvalid, "enforcement Effect Owner requires the exact begun V4 Permit")
+	}
+	receipt := request.Receipt
+	legacy := permit.Permit.LegacyPermit
+	if receipt.PermitID != legacy.ID || receipt.PermitFactRevision != permit.Revision || receipt.PermitDigest != permit.PermitDigest || receipt.AdmissionDigest != permit.Permit.Admission.Digest || receipt.ReviewAuthorization != permit.Permit.Admission.Authorization || receipt.EffectID != request.EffectID || receipt.IntentRevision != legacy.IntentRevision || receipt.IntentDigest != legacy.IntentDigest || receipt.AttemptID != legacy.AttemptID || receipt.Verifier != legacy.EnforcementPoint || !ports.SameOperationSubjectV3(receipt.Operation, request.Operation) || receipt.ValidatedUnixNano < permit.BegunUnixNano || receipt.ValidatedUnixNano >= legacy.ExpiresUnixNano {
+		return ports.OperationDispatchEnforcementJournalV4{}, core.NewError(core.ErrorConflict, core.ReasonDispatchPermitInvalid, "enforcement receipt changed exact Permit, Effect, attempt or verifier")
+	}
+	if s.enforcementV4[key] == nil {
+		s.enforcementV4[key] = map[string]ports.OperationDispatchEnforcementJournalV4{}
+	}
+	current, exists := s.enforcementV4[key][request.PermitID]
+	if exists {
+		stored := current.Prepare
+		if receipt.Phase == ports.OperationDispatchEnforcementExecuteV4 {
+			stored = current.Execute
+		}
+		if stored != nil {
+			if stored.Digest == receipt.Digest {
+				return cloneOperationDispatchEnforcementJournalV4(current), nil
+			}
+			return ports.OperationDispatchEnforcementJournalV4{}, core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "enforcement phase slot already binds different content")
+		}
+	}
+	var next ports.OperationDispatchEnforcementJournalV4
+	switch receipt.Phase {
+	case ports.OperationDispatchEnforcementPrepareV4:
+		if exists || request.ExpectedJournalRevision != 0 {
+			return ports.OperationDispatchEnforcementJournalV4{}, core.NewError(core.ErrorConflict, core.ReasonRevisionConflict, "prepare enforcement journal already exists or expected revision drifted")
+		}
+		next, err = ports.SealOperationDispatchEnforcementJournalV4(ports.OperationDispatchEnforcementJournalV4{
+			OperationDigest: receipt.OperationDigest, EffectID: receipt.EffectID, PermitID: receipt.PermitID,
+			AttemptID: receipt.AttemptID, SandboxAttempt: receipt.SandboxAttempt, Revision: 1, Prepare: &receipt, UpdatedUnixNano: receipt.ValidatedUnixNano,
+		})
+	case ports.OperationDispatchEnforcementExecuteV4:
+		if !exists || current.Revision != 1 || request.ExpectedJournalRevision != 1 || current.Prepare == nil || receipt.Prepare == nil {
+			return ports.OperationDispatchEnforcementJournalV4{}, core.NewError(core.ErrorConflict, core.ReasonRevisionConflict, "execute enforcement requires the exact prepare-only journal")
+		}
+		prepareRef, refErr := current.Prepare.RefV4(1)
+		if refErr != nil || *receipt.Prepare != prepareRef {
+			return ports.OperationDispatchEnforcementJournalV4{}, core.NewError(core.ErrorConflict, core.ReasonDispatchPermitInvalid, "execute enforcement changed the prepare phase ref")
+		}
+		next = cloneOperationDispatchEnforcementJournalV4(current)
+		next.Revision = 2
+		next.Execute = &receipt
+		next.UpdatedUnixNano = receipt.ValidatedUnixNano
+		next, err = ports.SealOperationDispatchEnforcementJournalV4(next)
+	default:
+		err = core.NewError(core.ErrorInvalidArgument, core.ReasonDispatchPermitInvalid, "enforcement phase is invalid")
+	}
+	if err != nil {
+		return ports.OperationDispatchEnforcementJournalV4{}, err
+	}
+	s.enforcementV4[key][request.PermitID] = cloneOperationDispatchEnforcementJournalV4(next)
+	s.enforcementV4CommitCount++
+	if s.loseNextEnforcementV4Reply {
+		s.loseNextEnforcementV4Reply = false
+		return ports.OperationDispatchEnforcementJournalV4{}, core.NewError(core.ErrorUnavailable, core.ReasonEvidenceUnavailable, "injected V4.1 enforcement append reply loss")
+	}
+	return cloneOperationDispatchEnforcementJournalV4(next), nil
+}
+
+func (s *OperationEffectStoreV3) InspectOperationDispatchEnforcementV4(ctx context.Context, subject ports.OperationSubjectV3, effectID core.EffectIntentID, permitID string) (ports.OperationDispatchEnforcementJournalV4, error) {
+	if err := contextError(ctx); err != nil {
+		return ports.OperationDispatchEnforcementJournalV4{}, err
+	}
+	key, err := operationKeyV3(subject)
+	if err != nil {
+		return ports.OperationDispatchEnforcementJournalV4{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	journal, exists := s.enforcementV4[key][permitID]
+	if !exists || journal.EffectID != effectID {
+		return ports.OperationDispatchEnforcementJournalV4{}, core.NewError(core.ErrorNotFound, core.ReasonDispatchPermitInvalid, "V4.1 enforcement journal not found")
+	}
+	return cloneOperationDispatchEnforcementJournalV4(journal), nil
+}
+
+func (s *OperationEffectStoreV3) inspectReviewAuthorizationV4(ctx context.Context, ref ports.OperationReviewAuthorizationRefV4, now time.Time) (ports.OperationReviewAuthorizationFactV4, error) {
+	s.mu.Lock()
+	facts := s.reviewAuthorizationsV4
+	s.mu.Unlock()
+	if facts == nil {
+		return ports.OperationReviewAuthorizationFactV4{}, core.NewError(core.ErrorInvalidArgument, core.ReasonComponentMissing, "V4 Effect Owner requires the Review Authorization Fact reader")
+	}
+	fact, err := facts.InspectOperationReviewAuthorizationV4(ctx, ref.ID)
+	if err != nil {
+		return ports.OperationReviewAuthorizationFactV4{}, err
+	}
+	if err := fact.Validate(); err != nil {
+		return ports.OperationReviewAuthorizationFactV4{}, err
+	}
+	if fact.RefV4() != ref || fact.State != ports.OperationReviewAuthorizationActiveV4 || now.IsZero() || !now.Before(time.Unix(0, fact.ExpiresUnixNano)) {
+		return ports.OperationReviewAuthorizationFactV4{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonReviewVerdictStale, "V4 Effect Owner observed stale Review Authorization")
+	}
+	return fact, nil
+}
+
 func (s *OperationEffectStoreV3) RecordOperationEnforcementV3(ctx context.Context, request control.RecordOperationEnforcementRequestV3) (control.OperationDispatchPermitFactV3, error) {
 	if err := contextError(ctx); err != nil {
 		return control.OperationDispatchPermitFactV3{}, err
@@ -380,6 +731,83 @@ func cloneOperationPermitFactV3(fact control.OperationDispatchPermitFactV3) cont
 		fact.Enforcement = &value
 	}
 	return fact
+}
+
+func cloneOperationPermitFactV4(fact control.OperationDispatchPermitFactV4) control.OperationDispatchPermitFactV4 {
+	if lease := fact.Permit.LegacyPermit.Operation.ExecutionScope.SandboxLease; lease != nil {
+		value := *lease
+		fact.Permit.LegacyPermit.Operation.ExecutionScope.SandboxLease = &value
+	}
+	if lease := fact.Fence.Scope.SandboxLease; lease != nil {
+		value := *lease
+		fact.Fence.Scope.SandboxLease = &value
+	}
+	if fact.Permit.LegacyPermit.ReviewAuthorization.Satisfaction != nil {
+		value := *fact.Permit.LegacyPermit.ReviewAuthorization.Satisfaction
+		fact.Permit.LegacyPermit.ReviewAuthorization.Satisfaction = &value
+	}
+	if fact.Enforcement != nil {
+		value := *fact.Enforcement
+		fact.Enforcement = &value
+	}
+	return fact
+}
+
+func cloneOperationDispatchEnforcementJournalV4(journal ports.OperationDispatchEnforcementJournalV4) ports.OperationDispatchEnforcementJournalV4 {
+	if journal.Prepare != nil {
+		value := cloneOperationDispatchEnforcementReceiptV4(*journal.Prepare)
+		journal.Prepare = &value
+	}
+	if journal.Execute != nil {
+		value := cloneOperationDispatchEnforcementReceiptV4(*journal.Execute)
+		journal.Execute = &value
+	}
+	return journal
+}
+
+func cloneOperationDispatchEnforcementReceiptV4(receipt ports.OperationDispatchEnforcementPhaseReceiptV4) ports.OperationDispatchEnforcementPhaseReceiptV4 {
+	if lease := receipt.Operation.ExecutionScope.SandboxLease; lease != nil {
+		value := *lease
+		receipt.Operation.ExecutionScope.SandboxLease = &value
+	}
+	if lease := receipt.Sandbox.Operation.ExecutionScope.SandboxLease; lease != nil {
+		value := *lease
+		receipt.Sandbox.Operation.ExecutionScope.SandboxLease = &value
+	}
+	if receipt.CheckpointSandbox != nil {
+		value := *receipt.CheckpointSandbox
+		if lease := value.Operation.ExecutionScope.SandboxLease; lease != nil {
+			copyLease := *lease
+			value.Operation.ExecutionScope.SandboxLease = &copyLease
+		}
+		if value.ChangeSet != nil {
+			copyRef := *value.ChangeSet
+			value.ChangeSet = &copyRef
+		}
+		if value.PrepareEnforcement != nil {
+			copyRef := *value.PrepareEnforcement
+			value.PrepareEnforcement = &copyRef
+		}
+		if value.PreparedAttempt != nil {
+			copyRef := *value.PreparedAttempt
+			value.PreparedAttempt = &copyRef
+		}
+		if value.Reservation.PreviousPhase != nil {
+			copyRef := *value.Reservation.PreviousPhase
+			value.Reservation.PreviousPhase = &copyRef
+		}
+		value.Watermarks = append([]ports.CheckpointRestoreDispatchWatermarkV1{}, value.Watermarks...)
+		receipt.CheckpointSandbox = &value
+	}
+	if receipt.Prepare != nil {
+		value := *receipt.Prepare
+		receipt.Prepare = &value
+	}
+	if receipt.PreparedAttempt != nil {
+		value := *receipt.PreparedAttempt
+		receipt.PreparedAttempt = &value
+	}
+	return receipt
 }
 
 // ExecutionDelegationStoreV2 is a create-once/CAS in-memory Fact Owner for

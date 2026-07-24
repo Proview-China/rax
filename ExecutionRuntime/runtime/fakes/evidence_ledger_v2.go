@@ -27,6 +27,11 @@ type EvidenceLedgerStoreV2 struct {
 	lastSequence           map[core.Digest]uint64
 	lastDigest             map[core.Digest]core.Digest
 	tombstones             map[string]ports.EvidenceTombstoneFactV2
+	evidenceSubjectHistory map[string]map[core.Revision]ports.EvidenceSubjectCurrentProjectionV1
+	evidenceSubjectCurrent map[core.Digest]ports.EvidenceSubjectCurrentIndexRefV1
+	evidenceSubjectCommits map[string]ports.EvidenceSubjectMutationCommitV1
+	loseNextSubjectReply   bool
+	failSubjectPublishAt   int
 	loseNextCreateReply    bool
 	loseNextCASReply       bool
 	loseNextAppendReply    bool
@@ -37,7 +42,7 @@ func NewEvidenceLedgerStoreV2(clock func() time.Time) *EvidenceLedgerStoreV2 {
 	if clock == nil {
 		clock = time.Now
 	}
-	return &EvidenceLedgerStoreV2{clock: clock, sources: map[string]ports.EvidenceSourceRegistrationFactV2{}, sourceEpochs: map[string]string{}, records: map[core.Digest]map[uint64]ports.EvidenceLedgerRecordV2{}, bySource: map[string]ports.EvidenceLedgerRecordV2{}, byEvent: map[string]ports.EvidenceLedgerRecordV2{}, lastSequence: map[core.Digest]uint64{}, lastDigest: map[core.Digest]core.Digest{}, tombstones: map[string]ports.EvidenceTombstoneFactV2{}}
+	return &EvidenceLedgerStoreV2{clock: clock, sources: map[string]ports.EvidenceSourceRegistrationFactV2{}, sourceEpochs: map[string]string{}, records: map[core.Digest]map[uint64]ports.EvidenceLedgerRecordV2{}, bySource: map[string]ports.EvidenceLedgerRecordV2{}, byEvent: map[string]ports.EvidenceLedgerRecordV2{}, lastSequence: map[core.Digest]uint64{}, lastDigest: map[core.Digest]core.Digest{}, tombstones: map[string]ports.EvidenceTombstoneFactV2{}, evidenceSubjectHistory: map[string]map[core.Revision]ports.EvidenceSubjectCurrentProjectionV1{}, evidenceSubjectCurrent: map[core.Digest]ports.EvidenceSubjectCurrentIndexRefV1{}, evidenceSubjectCommits: map[string]ports.EvidenceSubjectMutationCommitV1{}}
 }
 
 func (s *EvidenceLedgerStoreV2) LoseNextCreateReply() {
@@ -59,6 +64,18 @@ func (s *EvidenceLedgerStoreV2) LoseNextTombstoneReply() {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.loseNextTombstoneReply = true
+}
+
+func (s *EvidenceLedgerStoreV2) LoseNextEvidenceSubjectReplyV1() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.loseNextSubjectReply = true
+}
+
+func (s *EvidenceLedgerStoreV2) FailNextEvidenceSubjectPublishAtV1(stage int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.failSubjectPublishAt = stage
 }
 
 func (s *EvidenceLedgerStoreV2) CreateSource(ctx context.Context, fact ports.EvidenceSourceRegistrationFactV2) (ports.EvidenceSourceRegistrationFactV2, error) {
@@ -324,6 +341,149 @@ func (s *EvidenceLedgerStoreV2) InspectTombstone(ctx context.Context, ref ports.
 		return ports.EvidenceTombstoneFactV2{}, core.NewError(core.ErrorConflict, core.ReasonEvidenceConflict, "tombstone record digest conflicts")
 	}
 	return cloneEvidenceV2(fact), nil
+}
+
+func (s *EvidenceLedgerStoreV2) InspectEvidenceSubjectRecordRegistrationCurrentV1(ctx context.Context, request ports.EvidenceSubjectRecordRegistrationCurrentRequestV1) (ports.EvidenceSubjectRecordRegistrationCurrentResultV1, error) {
+	if err := contextError(ctx); err != nil {
+		return ports.EvidenceSubjectRecordRegistrationCurrentResultV1{}, err
+	}
+	if err := request.Validate(); err != nil {
+		return ports.EvidenceSubjectRecordRegistrationCurrentResultV1{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record, ok := s.bySource[evidenceSourceKeyV2(request.Subject.Source)]
+	if !ok {
+		return ports.EvidenceSubjectRecordRegistrationCurrentResultV1{}, core.NewError(core.ErrorNotFound, core.ReasonEvidenceUnavailable, "Evidence subject source record not found")
+	}
+	if record.Ref != request.Subject.Record {
+		return ports.EvidenceSubjectRecordRegistrationCurrentResultV1{}, core.NewError(core.ErrorConflict, core.ReasonEvidenceConflict, "Evidence subject source record changed identity")
+	}
+	registration, ok := s.sources[request.Subject.Source.RegistrationID]
+	if !ok {
+		return ports.EvidenceSubjectRecordRegistrationCurrentResultV1{}, core.NewError(core.ErrorNotFound, core.ReasonEvidenceSourceMissing, "Evidence subject source Registration not found")
+	}
+	now := s.clock()
+	if now.IsZero() || registration.State != ports.EvidenceSourceActive || !now.Before(time.Unix(0, registration.ExpiresUnixNano)) {
+		return ports.EvidenceSubjectRecordRegistrationCurrentResultV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonEvidenceSourceStale, "Evidence subject source Registration is not current")
+	}
+	result, err := ports.SealEvidenceSubjectRecordRegistrationCurrentResultV1(ports.EvidenceSubjectRecordRegistrationCurrentResultV1{ContractVersion: ports.EvidenceSubjectCurrentContractVersionV1, Subject: request.Subject, Record: cloneEvidenceV2(record), Registration: cloneEvidenceV2(registration), CheckedUnixNano: registration.UpdatedUnixNano, ExpiresUnixNano: registration.ExpiresUnixNano})
+	if err != nil {
+		return ports.EvidenceSubjectRecordRegistrationCurrentResultV1{}, err
+	}
+	return result, result.Validate(now)
+}
+
+func (s *EvidenceLedgerStoreV2) InspectEvidenceSubjectProjectionFactV1(ctx context.Context, ref ports.EvidenceSubjectProjectionRefV1) (ports.EvidenceSubjectCurrentProjectionV1, error) {
+	if err := contextError(ctx); err != nil {
+		return ports.EvidenceSubjectCurrentProjectionV1{}, err
+	}
+	if err := ref.Validate(); err != nil {
+		return ports.EvidenceSubjectCurrentProjectionV1{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	projection, ok := s.evidenceSubjectHistory[ref.ProjectionID][ref.Revision]
+	if !ok {
+		return ports.EvidenceSubjectCurrentProjectionV1{}, core.NewError(core.ErrorNotFound, core.ReasonEvidenceUnavailable, "Evidence subject historical Projection not found")
+	}
+	if projection.Ref != ref {
+		return ports.EvidenceSubjectCurrentProjectionV1{}, core.NewError(core.ErrorConflict, core.ReasonEvidenceConflict, "Evidence subject historical Projection ref drifted")
+	}
+	return cloneEvidenceV2(projection), nil
+}
+
+func (s *EvidenceLedgerStoreV2) InspectEvidenceSubjectCurrentIndexV1(ctx context.Context, subjectDigest core.Digest) (ports.EvidenceSubjectCurrentIndexRefV1, error) {
+	if err := contextError(ctx); err != nil {
+		return ports.EvidenceSubjectCurrentIndexRefV1{}, err
+	}
+	if err := subjectDigest.Validate(); err != nil {
+		return ports.EvidenceSubjectCurrentIndexRefV1{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	index, ok := s.evidenceSubjectCurrent[subjectDigest]
+	if !ok {
+		return ports.EvidenceSubjectCurrentIndexRefV1{}, core.NewError(core.ErrorNotFound, core.ReasonEvidenceUnavailable, "Evidence subject Current Index not found")
+	}
+	return cloneEvidenceV2(index), nil
+}
+
+func (s *EvidenceLedgerStoreV2) InspectEvidenceSubjectMutationV1(ctx context.Context, key ports.EvidenceSubjectMutationKeyV1) (ports.EvidenceSubjectMutationCommitV1, error) {
+	if err := contextError(ctx); err != nil {
+		return ports.EvidenceSubjectMutationCommitV1{}, err
+	}
+	if err := key.Validate(); err != nil {
+		return ports.EvidenceSubjectMutationCommitV1{}, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	commit, ok := s.evidenceSubjectCommits[key.MutationID]
+	if !ok {
+		return ports.EvidenceSubjectMutationCommitV1{}, core.NewError(core.ErrorNotFound, core.ReasonEvidenceUnavailable, "Evidence subject Mutation Commit not found")
+	}
+	if commit.Key.StableKeyDigest != key.StableKeyDigest || commit.Key.RequestDigest != key.RequestDigest {
+		return ports.EvidenceSubjectMutationCommitV1{}, core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "Evidence subject Mutation key already binds different content")
+	}
+	return cloneEvidenceV2(commit), nil
+}
+
+func (s *EvidenceLedgerStoreV2) PublishEvidenceSubjectMutationV1(ctx context.Context, commit ports.EvidenceSubjectMutationCommitV1, projection ports.EvidenceSubjectCurrentProjectionV1, index ports.EvidenceSubjectCurrentIndexRefV1) (ports.EvidenceSubjectMutationCommitV1, error) {
+	if err := contextError(ctx); err != nil {
+		return ports.EvidenceSubjectMutationCommitV1{}, err
+	}
+	if err := commit.Validate(); err != nil {
+		return ports.EvidenceSubjectMutationCommitV1{}, err
+	}
+	if err := projection.Validate(); err != nil {
+		return ports.EvidenceSubjectMutationCommitV1{}, err
+	}
+	if err := index.Validate(); err != nil {
+		return ports.EvidenceSubjectMutationCommitV1{}, err
+	}
+	if commit.NewProjection != projection.Ref || commit.NewIndex != index || index.CurrentProjection != projection.Ref {
+		return ports.EvidenceSubjectMutationCommitV1{}, core.NewError(core.ErrorConflict, core.ReasonEvidenceConflict, "Evidence subject atomic bundle relationships drifted")
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.evidenceSubjectCommits[commit.Key.MutationID]; ok {
+		if existing.CommitDigest == commit.CommitDigest {
+			return cloneEvidenceV2(existing), nil
+		}
+		return ports.EvidenceSubjectMutationCommitV1{}, core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "Evidence subject Mutation ID already binds different content")
+	}
+	current, exists := s.evidenceSubjectCurrent[index.SubjectKeyDigest]
+	if !exists {
+		if commit.ExpectedPreviousIndex != nil || commit.ExpectedPreviousProjection != nil || index.Revision != 1 || index.PreviousProjection != nil || projection.Ref.Revision != 1 || projection.PreviousProjection != nil {
+			return ports.EvidenceSubjectMutationCommitV1{}, core.NewError(core.ErrorConflict, core.ReasonRevisionConflict, "Evidence subject first publish shape is invalid")
+		}
+	} else {
+		if commit.ExpectedPreviousIndex == nil || commit.ExpectedPreviousProjection == nil || current != *commit.ExpectedPreviousIndex || current.CurrentProjection != *commit.ExpectedPreviousProjection || index.Revision != current.Revision+1 || projection.Ref.Revision != current.Revision+1 || index.PreviousProjection == nil || *index.PreviousProjection != current.CurrentProjection || projection.PreviousProjection == nil || *projection.PreviousProjection != current.CurrentProjection {
+			return ports.EvidenceSubjectMutationCommitV1{}, core.NewError(core.ErrorConflict, core.ReasonRevisionConflict, "Evidence subject publish lost exact CAS or history")
+		}
+	}
+	if history := s.evidenceSubjectHistory[projection.Ref.ProjectionID]; history != nil {
+		if existing, ok := history[projection.Ref.Revision]; ok && existing.ProjectionDigest != projection.ProjectionDigest {
+			return ports.EvidenceSubjectMutationCommitV1{}, core.NewError(core.ErrorConflict, core.ReasonEvidenceConflict, "Evidence subject immutable Projection history conflicts")
+		}
+	}
+	if s.failSubjectPublishAt > 0 {
+		s.failSubjectPublishAt = 0
+		return ports.EvidenceSubjectMutationCommitV1{}, core.NewError(core.ErrorUnavailable, core.ReasonEvidenceUnavailable, "injected staged Evidence subject publish failure")
+	}
+	// The four objects publish under the Evidence Owner's existing lock. No
+	// partial map mutation is performed before every validation succeeds.
+	if s.evidenceSubjectHistory[projection.Ref.ProjectionID] == nil {
+		s.evidenceSubjectHistory[projection.Ref.ProjectionID] = map[core.Revision]ports.EvidenceSubjectCurrentProjectionV1{}
+	}
+	s.evidenceSubjectHistory[projection.Ref.ProjectionID][projection.Ref.Revision] = cloneEvidenceV2(projection)
+	s.evidenceSubjectCurrent[index.SubjectKeyDigest] = cloneEvidenceV2(index)
+	s.evidenceSubjectCommits[commit.Key.MutationID] = cloneEvidenceV2(commit)
+	if s.loseNextSubjectReply {
+		s.loseNextSubjectReply = false
+		return ports.EvidenceSubjectMutationCommitV1{}, core.NewError(core.ErrorUnavailable, core.ReasonEvidenceUnavailable, "injected Evidence subject publish reply loss")
+	}
+	return cloneEvidenceV2(commit), nil
 }
 
 func evidenceSourceKeyV2(key ports.EvidenceSourceKeyV2) string {

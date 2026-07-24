@@ -1,0 +1,28 @@
+<?xml version="1.0"?>
+<mxfile host="app.diagrams.net" modified="2026-07-16T09:46:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="application-g6a-v2" name="Application G6A V2 P0 repair">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="session" value="Harness Session V4&#10;Binding V2 = Base&#x56DB;Fact refs + OwnerInputs&#x4E94;&#x9879;&#10;S1/S2 exact" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="20" y="35" width="245" height="100" as="geometry"/></mxCell>
+        <mxCell id="fact" value="Settlement Owner + Model public Readers&#10;DomainResultReaderV3.InspectExact&#10;ProjectionReaderV1.InspectExactProjectionV1&#10;full Identity + unique Call + canonical bytes&#10;historical Projection&#x65E0;TTL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="20" y="155" width="260" height="145" as="geometry"/></mxCell>
+        <mxCell id="current" value="Harness Current Reader V3&#10;CurrentV3 aggregate expiry&#10;Subject/Binding current S1/S2" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="20" y="320" width="245" height="100" as="geometry"/></mxCell>
+        <mxCell id="action" value="Application ActionCoordinateV2&#10;Scope + PendingSubject&#10;&#x5220;&#x9664;V1 Workflow/Observation/Assembly/Route/ParentFrame/Applicability&#10;&#x65E0;Authority / TTL / Request ID" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="325" y="35" width="300" height="125" as="geometry"/></mxCell>
+        <mxCell id="authority" value="Runtime Authority Owner&#10;Authority Fact exact&#x7ED1;&#x5B9A;ActionCoordinateDigest&#10;S1/S2 fresh read" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="700" y="45" width="250" height="105" as="geometry"/></mxCell>
+        <mxCell id="assembler" value="Harness-owned Application Adapter&#10;SessionV4 + Fact Identity + Model Projection + CurrentV3 + Authority&#10;S1 &#x2192; S2 &#x2192; fresh nowS2/min TTL&#10;Seal Request exactly once" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="335" y="215" width="380" height="145" as="geometry"/></mxCell>
+        <mxCell id="coord" value="Application Coordination V2&#10;CrossVersion semantic key + atomic VersionClaim&#10;Fact.ID=Request.ID / Scope exact / immutable&#10;CAS StartClaim &#x2192; waiting_inspect" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="315" y="430" width="350" height="130" as="geometry"/></mxCell>
+        <mxCell id="tool" value="Tool Binding public Port Delta BLOCKED&#10;&#x4EC5;CAS waiting_inspect exact&#x6210;&#x529F;&#x56DE;&#x5305;&#x624D;&#x4E00;&#x6B21;Execute&#10;lost/Conflict/&#x5DF2;waiting = Inspect-only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1"><mxGeometry x="730" y="435" width="250" height="120" as="geometry"/></mxCell>
+        <mxCell id="stop" value="Tool Owner original ID/rev/digest ref + Application ResultCoordinate&#10;+ current V4 Inspection + public Association exact&#10;owner-local design YES / P1-P3 Go unlocked&#10;Tool P4/P5 + system/root BLOCKED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="265" y="640" width="620" height="95" as="geometry"/></mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="session" target="assembler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="fact" target="assembler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="current" target="assembler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="action" target="authority"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="authority" target="assembler"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="assembler" target="coord"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="coord" target="tool"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;" edge="1" parent="1" source="tool" target="stop"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

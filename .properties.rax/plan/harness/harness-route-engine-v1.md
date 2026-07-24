@@ -1,6 +1,8 @@
 # Harness Route绑定与公共引擎接线v1
 
-状态：执行中（2026-07-14）。
+状态：历史草案（2026-07-14）；已被[Harness Assembly公用接线V1](./harness-assembly-v1.md)取代，禁止继续按本文件实施。
+
+取代理由：本草案把本地参考Engine和Adapter误当作公共装配首切面，缺少Agent Assembler最终输出、统一Assembly SDK/CompiledGraph、Slot/Phase合并、Binding V2映射及六组件Contribution/Run Requirement。保留本文只用于追溯，不代表当前实现授权。
 
 ## 1. 范围
 

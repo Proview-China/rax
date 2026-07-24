@@ -34,7 +34,15 @@ func TestApplicationProductionImportBoundary(t *testing.T) {
 	}
 	decoder := json.NewDecoder(strings.NewReader(string(output)))
 	const runtimePrefix = "github.com/Proview-China/rax/ExecutionRuntime/runtime/"
-	const harnessPrefix = "github.com/Proview-China/rax/ExecutionRuntime/harness"
+	forbiddenComponentPrefixes := []string{
+		"github.com/Proview-China/rax/ExecutionRuntime/harness",
+		"github.com/Proview-China/rax/ExecutionRuntime/tool-mcp",
+		"github.com/Proview-China/rax/ExecutionRuntime/context-engine",
+		"github.com/Proview-China/rax/ExecutionRuntime/model-invoker",
+	}
+	allowedComponentContracts := map[string]bool{
+		"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycontract": true,
+	}
 	allowedRuntime := map[string]bool{
 		runtimePrefix + "core":  true,
 		runtimePrefix + "ports": true,
@@ -53,8 +61,10 @@ func TestApplicationProductionImportBoundary(t *testing.T) {
 			continue
 		}
 		for _, imported := range description.Imports {
-			if strings.HasPrefix(imported, harnessPrefix) {
-				t.Errorf("production package %s imports Harness internal package %s", description.ImportPath, imported)
+			for _, prefix := range forbiddenComponentPrefixes {
+				if strings.HasPrefix(imported, prefix) && !allowedComponentContracts[imported] {
+					t.Errorf("production package %s imports component implementation package %s", description.ImportPath, imported)
+				}
 			}
 			if strings.HasPrefix(imported, runtimePrefix) && !allowedRuntime[imported] {
 				t.Errorf("production package %s imports non-public Runtime package %s", description.ImportPath, imported)

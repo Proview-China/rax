@@ -11,7 +11,7 @@
 | [`agent-definition`](../../../design/agent-definition/README.md) | 声明 Agent 需要什么 | 解析真实凭据、启动进程 |
 | [`profile-system`](../../../design/profile-system/README.md) | 解析可组合 Profile 和覆盖关系 | 绕过 Provider、组织或权限合同 |
 | [`agent-assembler`](../../../design/agent-assembler/README.md) | 解析版本、能力和依赖，生成装配计划 | 创建沙箱、运行 Harness |
-| [`harness`](../../../design/harness/README.md) | 提供可启动的 Agent 执行外壳合同 | 取代 Runtime 或其他引擎 |
+| [`harness`](../../../design/harness/README.md) | 提供可启动的Agent执行外壳合同；公共最小骨架已实现 | 取代Runtime或其他引擎 |
 
 ## 3. 核心产物
 
@@ -39,4 +39,3 @@
 - 装配结果是单文件Manifest、对象图还是两者同时提供；
 - 可选组件缺失时允许降级还是必须拒绝；
 - 装配计划签名、摘要和供应链证据方式。
-

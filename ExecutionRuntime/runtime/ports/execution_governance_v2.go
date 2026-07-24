@@ -1563,9 +1563,13 @@ func (s OperationSettlementSubmissionV3) Validate() error {
 	return nil
 }
 
-type OperationSettlementGovernancePortV3 interface {
-	SettleOperationEffectV3(context.Context, OperationEffectIntentV3, OperationSettlementSubmissionV3) (OperationSettlementRefV3, error)
+type OperationSettlementCurrentReaderV3 interface {
 	InspectOperationSettlementV3(context.Context, OperationSubjectV3, core.EffectIntentID) (OperationSettlementRefV3, error)
+}
+
+type OperationSettlementGovernancePortV3 interface {
+	OperationSettlementCurrentReaderV3
+	SettleOperationEffectV3(context.Context, OperationEffectIntentV3, OperationSettlementSubmissionV3) (OperationSettlementRefV3, error)
 }
 
 // ProviderAttemptObservationFactPortV2 is the create-once Observation owner.

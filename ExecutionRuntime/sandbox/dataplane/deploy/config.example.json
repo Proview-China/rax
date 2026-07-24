@@ -1,0 +1,47 @@
+{
+  "contract_version": "praxis.sandbox/data-plane-root/v1",
+  "dispatch_socket": "/run/praxis/sandbox-dispatch.sock",
+  "current_reader_socket": "/run/praxis/sandbox-current.sock",
+  "journal_path": "/var/lib/praxis/sandbox/provider-attempts.jsonl",
+  "checkpoint_store_path": "/var/lib/praxis/sandbox/checkpoint-store",
+  "allowed_dispatch_uid": 1000,
+  "allowed_current_reader_uid": 1000,
+  "wasmtime_capability_gateway_socket": "/run/praxis/sandbox-wasm-capability.sock",
+  "allowed_wasmtime_capability_gateway_uid": 1000,
+  "wasmtime_capability_gateway_timeout_millis": 5000,
+  "remote_connector_socket": "/run/praxis/sandbox-remote-connector.sock",
+  "allowed_remote_connector_uid": 1000,
+  "socket_mode": 432,
+  "host_workspace": {
+    "bwrap_path": "/usr/bin/bwrap",
+    "state_directory": "/var/lib/praxis/sandbox/host",
+    "runtime_readonly_paths": ["/usr", "/bin", "/lib", "/lib64"],
+    "allowed_environment_keys": ["LANG", "LC_ALL"],
+    "workspace_bindings": {},
+    "tool_bindings": {}
+  },
+  "qemu_microvm": {
+    "qemu_path": "/usr/bin/qemu-system-x86_64",
+    "qemu_digest": "sha256:replace-with-pinned-qemu-digest",
+    "state_directory": "/var/lib/praxis/sandbox/microvm",
+    "kernel_cmdline": "console=ttyS0 panic=-1 rdinit=/init",
+    "require_kvm": true,
+    "kernel_bindings": {},
+    "initramfs_bindings": {}
+  },
+  "containerd": {
+    "socket_path": "/run/containerd/containerd.sock",
+    "namespace": "praxis",
+    "runtime_name": "io.containerd.runc.v2",
+    "state_directory": "/var/lib/praxis/sandbox/containerd",
+    "rootfs_bindings": {}
+  },
+  "wasmtime_component_bindings": {},
+  "workspace_commit": {
+    "state_directory": "/var/lib/praxis/sandbox/workspace-commit",
+    "max_files": 100000,
+    "max_total_bytes": 10737418240,
+    "max_file_bytes": 1073741824,
+    "bindings": {}
+  }
+}

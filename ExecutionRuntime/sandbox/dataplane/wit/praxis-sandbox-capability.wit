@@ -1,0 +1,6 @@
+package praxis:sandbox@1.0.0;
+
+world capability {
+  import invoke: func(capability: string, request: string) -> result<string, string>;
+  export run: func() -> u32;
+}

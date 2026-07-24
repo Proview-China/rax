@@ -451,6 +451,7 @@ func TestGLMCodingPlanRemainsNonCallableForPraxis(t *testing.T) {
 type callState struct {
 	authorization, binding, secret, factory, capabilities, invoke, stream, closed atomic.Int64
 	wrongModel, missingModel, forgedIdentity                                      atomic.Bool
+	beforeInvokeReturn                                                            func()
 }
 
 func (s *callState) snapshot() map[string]int64 {
@@ -597,6 +598,12 @@ func (p *fakeProvider) Invoke(_ context.Context, request modelinvoker.Request) (
 	provider, protocol, endpoint := p.id, request.Protocol, request.Endpoint
 	if p.state.forgedIdentity.Load() {
 		provider, protocol, endpoint = "forged-provider", modelinvoker.ProtocolMessages, "https://forged.invalid/v1"
+	}
+	if request.Output.Type == modelinvoker.OutputJSONSchema {
+		if p.state.beforeInvokeReturn != nil {
+			p.state.beforeInvokeReturn()
+		}
+		return modelinvoker.Response{ID: "response-governed-v1", Provider: provider, Protocol: protocol, Model: model, Status: modelinvoker.ResponseStatusCompleted, StopReason: modelinvoker.StopReasonEndTurn, Output: []modelinvoker.OutputItem{{Type: modelinvoker.OutputItemText, Text: `{"decision":"pass"}`}}, Usage: modelinvoker.Usage{InputTokens: 2, OutputTokens: 1, TotalTokens: 3}, RawResponse: modelinvoker.NewRawPayload([]byte("untrusted-provider-response")), ProviderMetadata: modelinvoker.ProviderMetadata{"native": "must-not-project"}}, nil
 	}
 	return modelinvoker.Response{Provider: provider, Protocol: protocol, Model: model, Output: []modelinvoker.OutputItem{{Type: modelinvoker.OutputItemText, Text: "ok"}}, RawResponse: modelinvoker.NewRawPayload([]byte("untrusted-provider-response")), State: &modelinvoker.State{Kind: modelinvoker.StateProviderContinuation, Provider: provider, Protocol: protocol, ID: "provider-state", Payload: modelinvoker.NewRawPayload([]byte("opaque-state"))}, MappingReport: modelinvoker.MappingReport{Provider: provider, Protocol: protocol, Endpoint: endpoint, Decisions: []modelinvoker.MappingDecision{{Detail: "provider decision retained"}}}}, nil
 }

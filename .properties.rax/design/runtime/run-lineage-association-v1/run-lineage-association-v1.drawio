@@ -1,0 +1,23 @@
+<mxfile host="app.diagrams.net" modified="2026-07-18T17:14:38.000+08:00" agent="Codex" version="25.0.0">
+  <diagram id="run-lineage-association-v1" name="Run Lineage Association V1">
+    <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="parent" value="Parent Run V3&#xa;exact anchor + current reread" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1"><mxGeometry x="40" y="180" width="190" height="80" as="geometry"/></mxCell>
+        <mxCell id="request" value="TrustedChildRunAssemblerPortV1&#xa;parent exact + ordinary child create" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1"><mxGeometry x="280" y="50" width="250" height="80" as="geometry"/></mxCell>
+        <mxCell id="tx" value="Runtime Owner one transaction&#xa;child pending bundle + EffectIndex&#xa;+ association rev1/history/highest/current/receipt" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1"><mxGeometry x="300" y="170" width="300" height="110" as="geometry"/></mxCell>
+        <mxCell id="lifecycle" value="Existing child Run V3 lifecycle&#xa;pending → running → stopping → terminal_cleanup → closed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1"><mxGeometry x="650" y="50" width="300" height="80" as="geometry"/></mxCell>
+        <mxCell id="history" value="Append-only association history&#xa;revision +1 / full-ref current CAS / ABA highest" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1"><mxGeometry x="680" y="180" width="270" height="90" as="geometry"/></mxCell>
+        <mxCell id="reader" value="Named Store + Lifecycle + Clock + Recovery&#xa;Subject Resolve current/terminal; exact terminal history&#xa;baseline → S1 → fresh → S2 → fresh" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1"><mxGeometry x="480" y="360" width="280" height="100" as="geometry"/></mxCell>
+        <mxCell id="consumer" value="Application / Review / Agent Host&#xa;public refs only; no Runtime write authority" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1"><mxGeometry x="500" y="520" width="250" height="80" as="geometry"/></mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="request" target="tx"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="parent" target="tx"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" value="same transaction on Run revision / phase change" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="lifecycle" target="history"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="tx" target="history"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" value="exact S1/S2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="history" target="reader"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="reader" target="consumer"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

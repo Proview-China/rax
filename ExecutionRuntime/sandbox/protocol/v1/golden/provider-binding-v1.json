@@ -1,0 +1,13 @@
+{
+  "kind": "ProviderBindingV1",
+  "canonical": {
+    "binding_set_id": "bindings-1",
+    "binding_set_revision": 7,
+    "component_id": "containerd-provider",
+    "manifest_digest": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "artifact_digest": "sha256:2222222222222222222222222222222222222222222222222222222222222222",
+    "capability": "sandbox.execute",
+    "digest": ""
+  },
+  "expected_digest": "sha256:79a8ca7c11b70f7343a0c8acfbefaa6b34ee3a762514183822aba2022c4b0568"
+}

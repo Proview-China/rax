@@ -49,6 +49,20 @@ func WithSubscriptionAuthorizationResolver(resolver modelinvoker.SubscriptionAut
 	}
 }
 
+// WithGovernedModelInvocationsV1 enables the additive provider-neutral
+// governed execution surface. Legacy Invoke/Stream remain available but do not
+// gain governed or Auto Reviewer production semantics from this option.
+func WithGovernedModelInvocationsV1(dependencies GovernedModelInvocationDependenciesV1) Option {
+	return func(gateway *Gateway) error {
+		if err := dependencies.validate(); err != nil {
+			return err
+		}
+		copy := dependencies
+		gateway.governedV1 = &copy
+		return nil
+	}
+}
+
 type Gateway struct {
 	catalog                   *catalog.Catalog
 	policy                    *modelinvoker.RouteInvoker
@@ -59,6 +73,7 @@ type Gateway struct {
 	now                       func() time.Time
 	httpClient                *http.Client
 	subscriptionAuthorization modelinvoker.SubscriptionAuthorizationResolver
+	governedV1                *GovernedModelInvocationDependenciesV1
 	closeOnce                 sync.Once
 	closeErr                  error
 }
@@ -146,6 +161,10 @@ func (g *Gateway) Invoke(ctx context.Context, call modelinvoker.RouteCall) (Invo
 	if err != nil {
 		return InvokeResult{}, err
 	}
+	return g.invokePrepared(ctx, prepared)
+}
+
+func (g *Gateway) invokePrepared(ctx context.Context, prepared preparedCall) (InvokeResult, error) {
 	registry, err := modelinvoker.NewRegistry(prepared.lease.provider)
 	if err != nil {
 		releaseErr := prepared.lease.release()
@@ -219,6 +238,13 @@ func (g *Gateway) prepare(ctx context.Context, call modelinvoker.RouteCall) (pre
 	if g == nil || g.policy == nil || g.catalog == nil || g.pool == nil || g.now == nil {
 		return preparedCall{}, gatewayError(modelinvoker.ErrorInvalidRequest, "gateway_uninitialized", "route gateway is not initialized", nil)
 	}
+	return g.prepareAt(ctx, call, g.now())
+}
+
+func (g *Gateway) prepareAt(ctx context.Context, call modelinvoker.RouteCall, now time.Time) (preparedCall, error) {
+	if g == nil || g.policy == nil || g.catalog == nil || g.pool == nil || now.IsZero() {
+		return preparedCall{}, gatewayError(modelinvoker.ErrorInvalidRequest, "gateway_uninitialized", "route gateway or preparation clock is not initialized", nil)
+	}
 	if ctx == nil {
 		return preparedCall{}, gatewayError(modelinvoker.ErrorInvalidRequest, "context_nil", "context is required", nil)
 	}
@@ -249,7 +275,7 @@ func (g *Gateway) prepare(ctx context.Context, call modelinvoker.RouteCall) (pre
 		return preparedCall{}, wrapRoute(selection, gatewayError(modelinvoker.ErrorAuthentication, "secret_resolution_failed", "credential resolution failed", nil))
 	}
 	defer material.zero()
-	if err := validateSecretMaterial(entry.Route.Credential, material, g.now()); err != nil {
+	if err := validateSecretMaterial(entry.Route.Credential, material, now); err != nil {
 		return preparedCall{}, wrapRoute(selection, err)
 	}
 	factory, err := g.factories.Get(selection.AdapterID)

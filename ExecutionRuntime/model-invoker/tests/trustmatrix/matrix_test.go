@@ -18,7 +18,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/routegateway"
 )
 
-var matrixNow = time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
+var matrixNow = time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC)
 
 func TestFactoryTrustMatrixMatchesLiveRegistryCatalogAndCheckedInAssets(t *testing.T) {
 	matrix := buildMatrix(t)

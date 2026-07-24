@@ -3,8 +3,8 @@
 ## 1. 当前状态
 
 - 模块：`runtime`；
-- 阶段：仓库Runtime设计资产已通过独立文件复审；P0.1 Binding、P0.2 Effect治理、P0.3 Review Verdict与P0.4 Evidence Ledger V2已完成；
-- 最近更新：2026-07-14；
+- 阶段：OperationScope Evidence V3首切面与Operation Settlement V4 additive `4.0.0`均已完成实现、中央独立复验和最终Review YES；Generation-Binding Association additive只读Reader已完成最终独立代码短审YES（P0/P1/P2=0）；[G6A Action Matrix/Router V1](./g6a-action-matrix-router-v1/README.md)按其独立资产推进；
+- 最近更新：2026-07-16；
 - 已成立：对话中的修正合同已经通过概念反审；
 - 已获得授权：在`ExecutionRuntime/runtime`使用Go落地公共合同、Runtime Kernel、Foundation、fake Port、测试与说明资产；
 - 尚未成立：其余技术、后端、拓扑与验收指标决策仍未确认；Harness及其他组件内部实现尚未授权；
@@ -37,6 +37,7 @@ Runtime治理执行，不干涉AI内部认知。它不得读取隐藏Chain-of-Th
 
 ## 4. 设计资产
 
+- [Runtime Shared Engine Component Release V1](./component-release-v1.md)
 - [总体架构与所有权](./architecture.md)
 - [Identity、Lineage、Instance、Run与结果对象](./concepts/README.md)
 - [Runtime Kernel、三维状态与协调](./kernel/README.md)
@@ -47,6 +48,13 @@ Runtime治理执行，不干涉AI内部认知。它不得读取隐藏Chain-of-Th
 - [Effect治理V2与最终派发门禁](./effect-governance-v2/README.md)
 - [Review Verdict V2与条件审核门禁](./review-v2/README.md)
 - [Evidence Ledger V2、Timeline单主与Run Claim精确关联](./evidence-ledger-v2/README.md)
+- [OperationScope Evidence V3与pre-run来源摄取资格](./operation-scope-evidence-v3/README.md)
+- [Operation Settlement V4与Evidence V3强类型终态关联](./operation-settlement-v4/README.md)
+- [Operation Settlement V5窄Current Reader实现候选](./operation-settlement-current-reader-v5/README.md)
+- [Model Pre-Dispatch Assembly Current V1中立Port（双独立代码审计YES）](./model-predispatch-assembly-current-v1/README.md)
+- [Evidence Subject Current V1（R-CTY-06 current/readability设计候选）](./evidence-subject-current-v1/README.md)
+- [Generation-Binding Association V1只读Port Delta](./generation-binding-association-v1/port-delta.md)
+- [G6A Action Matrix/Router V1候选](./g6a-action-matrix-router-v1/README.md)
 - [事件、事实可信度与Write-ahead Evidence](./evidence/README.md)
 - [Checkpoint、恢复与Cache安全分区](./continuity/README.md)
 - [Runtime端口与组件合同](./contracts/README.md)

@@ -1,0 +1,76 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net" modified="2026-07-16T05:42:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="checkpoint-restore-v2" name="Checkpoint Restore Governance V2">
+    <mxGraphModel dx="1600" dy="1200" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="runtime" value="Runtime Checkpoint Owner" style="swimlane;horizontal=0;startSize=28;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="390" height="1220" as="geometry"/>
+        </mxCell>
+        <mxCell id="participant" value="Participant Owners" style="swimlane;horizontal=0;startSize=28;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="430" y="20" width="340" height="1220" as="geometry"/>
+        </mxCell>
+        <mxCell id="continuity" value="Continuity Owner" style="swimlane;horizontal=0;startSize=28;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="790" y="20" width="310" height="1220" as="geometry"/>
+        </mxCell>
+        <mxCell id="evidence" value="Evidence + Settlement Owners" style="swimlane;horizontal=0;startSize=28;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="20" width="390" height="1220" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="cp1" value="Atomic create-once bundle&#xa;Attempt + BarrierLease&#xa;Barrier TTL + Reconciliation deadline&#xa;derived from closable frozen Policy" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="runtime">
+          <mxGeometry x="65" y="55" width="255" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp2" value="Freeze immutable EffectCut&#xa;+ Attempt revision atomic" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="runtime">
+          <mxGeometry x="65" y="175" width="255" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="p0" value="ReservePhase create-once&#xa;prepared → commit XOR abort&#xa;failed/not_applied: no successor&#xa;unknown: Inspect/Reconcile" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="participant">
+          <mxGeometry x="45" y="275" width="240" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="g1" value="InspectCurrent Reservation&#xa;Admission → Review/Auth&#xa;Permit → Begin" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="runtime">
+          <mxGeometry x="65" y="370" width="255" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1" value="prepare + execute Enforcement&#xa;Provider Observation / Receipt" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="participant">
+          <mxGeometry x="45" y="475" width="240" height="75" as="geometry"/>
+        </mxCell>
+        <mxCell id="ev1" value="Evidence Owner&#xa;consumed_current" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="evidence">
+          <mxGeometry x="65" y="475" width="260" height="65" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2" value="Participant Owner Inspect/CAS&#xa;DomainResult Fact" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="participant">
+          <mxGeometry x="45" y="590" width="240" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="s1" value="Settlement V5 shared guard&#xa;Participant ApplySettlement" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="evidence">
+          <mxGeometry x="65" y="590" width="260" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="m1" value="ManifestFact verified_candidate&#xa;then immutable ManifestSeal" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="continuity">
+          <mxGeometry x="40" y="720" width="230" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="cp3" value="Success: reread Cut + Participants + ManifestSeal&#xa;Non-success: freeze Finalization Cut&#xa;Diagnostics Seal + Residuals Seal&#xa;→ Runtime Input Closure" style="rounded=1;whiteSpace=wrap;html=1;" vertex="1" parent="runtime">
+          <mxGeometry x="65" y="825" width="255" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="success" value="Atomic success terminal&#xa;Consistency + Attempt consistent&#xa;+ Barrier closed" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="runtime">
+          <mxGeometry x="65" y="945" width="255" height="85" as="geometry"/>
+        </mxCell>
+        <mxCell id="failure" value="Historical Attempt terminal + Barrier closed&#xa;Current Inspect rereads Closure + two Owner Seals&#xa;drift/violation/indeterminate → current invisible&#xa;historical remains audit-only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="runtime">
+          <mxGeometry x="65" y="1080" width="255" height="115" as="geometry"/>
+        </mxCell>
+        <mxCell id="restore" value="Restore shape only / POSTPONED&#xa;ValidateCurrent + Provider = unsupported&#xa;until separate joint review" style="rounded=1;whiteSpace=wrap;html=1;dashed=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="continuity">
+          <mxGeometry x="40" y="1080" width="230" height="95" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="cp1" target="cp2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="cp2" target="p0"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="p0" target="g1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="g1" target="p1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="p1" target="ev1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="ev1" target="p2"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="p2" target="s1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e8" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="s1" target="m1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e9" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="m1" target="cp3"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e10" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="cp3" target="success"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e11" value="two Owner Seals current + exact Closure" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="cp3" target="failure"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e12" value="historical input only" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;dashed=1;" edge="1" parent="1" source="success" target="restore"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

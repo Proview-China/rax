@@ -1,0 +1,9 @@
+# Runtime Operation Settlement V5窄Reader设计候选
+
+时间：2026-07-16 21:03 CST
+
+Runtime Owner完成Sandbox Checkpoint所需Operation Settlement V5只读能力盘点。Live V5 Governance、Gateway、OperationEffectStore扩展及Conformance已经具备完整current Inspect；当前缺口仅是Sandbox若依赖Governance会同时取得`SettleCheckpointPhaseV5`写能力。
+
+本次形成additive `OperationSettlementCurrentReaderV5`设计候选：只抽取既有`InspectCheckpointPhaseSettlementCurrentV5`，Governance后续采用兼容嵌入；不改任何V5对象、digest、Owner、Store、shared terminal guard或错误语义。复核同时发现Kernel Gateway当前只验证Inspection自洽，未将返回Bundle的Operation/EffectID与request exact交叉；公开Reader前必须增加该读取边界门。V3同型Reader作为可行性证据，但不自动构成V5代码授权。
+
+当前裁决为P0=2/P1=1/P2=0：两个P0分别是公开能力面未收窄、Gateway request/returned Bundle exact关系未闭合；P1是reader-only Conformance和反例尚未落地。候选等待Runtime/Sandbox联合设计Review与用户单独代码授权；本次未修改Go、Sandbox或其他Owner代码，未stage、未commit。

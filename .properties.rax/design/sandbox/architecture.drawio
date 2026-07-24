@@ -1,0 +1,24 @@
+<mxfile host="app.diagrams.net" modified="2026-07-16T05:23:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="sandbox-v2" name="Sandbox v2">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="host" value="Sandbox Controller（宿主/受信服务）&#xa;Phase Reservation + exact-current Reader&#xa;DomainResult + Apply CAS" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;" vertex="1" parent="1"><mxGeometry x="60" y="90" width="290" height="120" as="geometry"/></mxCell>
+        <mxCell id="runtime" value="Runtime + Application&#xa;Runtime owns Lease / Fence / Instance epoch&#xa;Admission → Review/Auth → Permit → Begin → Enforcement → Settlement" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=14;" vertex="1" parent="1"><mxGeometry x="60" y="300" width="310" height="120" as="geometry"/></mxCell>
+        <mxCell id="state" value="Sandbox 外 State Plane&#xa;Runtime Lease/Fence（Runtime Owner）&#xa;Sandbox Domain Fact / Residual / Cleanup" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;" vertex="1" parent="1"><mxGeometry x="450" y="70" width="300" height="130" as="geometry"/></mxCell>
+        <mxCell id="data" value="Data Plane&#xa;Enforcement Agent&#xa;实际执行点再次验证" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=14;" vertex="1" parent="1"><mxGeometry x="450" y="300" width="290" height="100" as="geometry"/></mxCell>
+        <mxCell id="remote" value="可选 Remote Sandbox Provider&#xa;只返回 Observation / Receipt&#xa;不可成为事实 Owner" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=14;" vertex="1" parent="1"><mxGeometry x="850" y="300" width="260" height="100" as="geometry"/></mxCell>
+        <mxCell id="checkpoint" value="Checkpoint/Restore: implemented&#xa;Reservation + exact current + Provider&#xa;prepared → commit XOR abort&#xa;failed → incomplete；not_applied → confirmed_not_applied&#xa;unknown → Inspect/Reconcile → indeterminate&#xa;Snapshot content + fresh Instance Restore&#xa;Runtime owns Attempt / Barrier / Cut / consistent / eligibility&#xa;Continuity only owns Manifest / RestorePlan" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;" vertex="1" parent="1"><mxGeometry x="780" y="30" width="370" height="230" as="geometry"/></mxCell>
+        <mxCell id="assembly" value="Agent Assembler / Harness 接线&#xa;CompiledGraph + namespaced Slot/Phase&#xa;Sandbox 只贡献 Observer/Filter/Gate/Port" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=14;" vertex="1" parent="1"><mxGeometry x="60" y="500" width="350" height="110" as="geometry"/></mxCell>
+        <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="runtime" target="host"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e2" value="Domain Reservation / Inspect / CAS" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="host" target="state"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e3" value="两次current复读 + 对应Enforcement后才可Dispatch" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="host" target="data"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e4" value="缺任一门：Provider = 0" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="data" target="remote"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e5" value="Barrier + Snapshot Link" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="checkpoint" target="state"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e6" value="ReservePhase → InspectCurrent → Admission → Review/Auth → Permit → Begin → Enforcement → Provider → Evidence → DomainResult → Settlement → Apply" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="checkpoint" target="host"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="e7" value="Binding V2 / Scope only" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="assembly" target="runtime"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

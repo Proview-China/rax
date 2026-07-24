@@ -1,80 +1,133 @@
-# Organization Engine 设计骨架
+# Organization Engine：Review Human Current Owner V1
 
-## 设计状态
+## 1. 冻结状态
 
-- 当前阶段：设计草案。
-- 当前授权：仅允许共同讨论和完善设计，不存在实现授权。
-- 本文件不是冻结合同，也不代表已经创建 Organization Engine 模块。
+- 最高业务输入：`tmp.document/Review.md`。
+- 用户已明确授权本最小模块，用于关闭 Review 企业多签的 Identity、Role、Delegation、Responsibility current 生产依赖。
+- 实现语言 Go 1.25；State Plane v1 为单机 SQLite WAL，明确不承诺 HA、跨节点线性一致或 SLA。
+- 本设计只冻结 Organization Owner 本地域；不建立 production composition root，不修改 Runtime Authority、Review Verdict、Harness 或 Application。
+- 声明式Component Release见 [component-release-v1.md](component-release-v1.md)：Organization Owner P0/P1代码候选与软件门已完成，等待独立代码审计；Human Multi-Sign条件依赖variant、production readiness和Host root仍未完成。
 
-## 作用
+## 2. Owner 边界
 
-Organization Engine 表达 Agent 集群中的主体、位置、职责、职权和问责关系。
-它把组织设计编译为可引用的组织快照和权限约束，但不替代 Runtime 强制执行。
-组织语义固定拆分为 Identity、Role、Responsibility、Authority、Accountability 五层。
+| 对象 | 唯一 Owner | 本模块行为 |
+|---|---|---|
+| Human Identity | Organization | immutable fact、append-only history、current full-ref CAS |
+| Role Grant / veto role | Organization | 明确授予；Responsibility 不隐式推导 Role |
+| Delegation | Organization | 明确 Delegator/Delegate/Role/Scope/TTL；撤销发布新 revision |
+| Responsibility Subject | Organization | 绑定候选作者/发起者 exact Identity，用于禁自审 |
+| Runtime Authority | Runtime/Authority Owner | 只由调用方以公开 nominal ref 另行复读；Organization 不签发 |
+| Review Panel/Vote/Verdict | Review Verdict Owner | Organization 只提供 current proof，不计票、不判定 |
 
-## 五层模型
+禁止跨域复制 Review 的 `HumanIdentityProofRefV2`、`HumanDelegationFactRefV2`、`HumanResponsibilitySubjectRefV2`。Organization 输出自己的具名 exact refs；宿主 Adapter 仅逐字段映射公开 nominal carrier。
 
-- `Identity`：稳定标识一个人、Agent、服务或受控主体，回答“是谁”。
-- `Role`：描述主体在组织拓扑中的位置和功能模板，回答“处于什么位置”。
-- `Responsibility`：描述必须完成、维护或守护的结果，回答“应负责什么”。
-- `Authority`：描述允许作用的资源、动作、范围和期限，回答“被允许做什么”。
-- `Accountability`：绑定结果归属、证据、复核和追责主体，回答“由谁承担后果”。
+## 3. 领域事实与稳定身份
 
-五层不得压缩成一个 Prompt Role，也不得仅依赖自然语言约束。
+所有事实携带 `ContractVersion/TenantID/ID/Revision/Digest/CreatedUnixNano/UpdatedUnixNano/ExpiresUnixNano/State`。Digest 使用 `praxis.organization.review-current` 域和具名 body seal。
 
-## 核心输入
+| Fact | 稳定 ID 输入 | 关键字段 |
+|---|---|---|
+| `IdentityFactV1` | Tenant + SubjectID | SubjectKind、SubjectID、DisplayHandle、State |
+| `RoleGrantFactV1` | Tenant + IdentityID + Role + ScopeDigest | Identity exact ref、Role、ScopeDigest、CanVeto、State |
+| `DelegationFactV1` | Tenant + DelegatorSubjectID + DelegateSubjectID + Role + ScopeDigest | 两侧 Identity exact ref、Role、Scope、State |
+| `ResponsibilityFactV1` | Tenant + SubjectKind + SubjectID | Author Identity exact ref、SubjectDigest、State |
 
-- `IdentityDefinition[]`：主体类型、稳定身份和生命周期引用。
-- `RoleDefinition[]`：角色模板、组织位置和关系约束。
-- `ResponsibilityDefinition[]`：目标、义务、范围和完成条件。
-- `AuthorityPolicy[]`：资源、动作、期限、委托和禁止项。
-- `AccountabilityBinding[]`：归属主体、证据要求、复核和升级路径。
-- `OrganizationAssignment[]`：五层对象之间的版本化绑定。
+规则：
 
-## 核心输出
+1. revision 首建为 1，续版严格 `+1`；同 revision 换 digest Conflict。
+2. history 只按 `(kind, tenant, ID, revision, digest)` exact 读取，永不借 current index。
+3. current index 保存 full Ref；发布在一个 Owner 原子事务内完成 history insert、highest revision 验证与 current full-ref CAS。
+4. 同 canonical lost reply 只 exact Inspect；不得重发另一个 mutation。generic NotFound 不授重投。
+5. 纯时间到期只让 `ValidateCurrent(now)` 失败，不自动发布 expired revision。
+6. terminal fact 保留在历史/current；它不能通过 active current 校验。撤销/替代必须发布新 immutable revision。
 
-- `OrganizationSnapshot`：某一时点的不可变组织关系快照。
-- `AuthorityGrantSet`：供 Runtime、工具网关和 Sandbox 验证的职权集合。
-- `AccountabilityMap`：动作、结果、责任主体和证据要求的映射。
-- `ContextProjection`：允许进入 Agent Context 的组织语义投影。
+## 4. Review Eligibility Current Projection
 
-## 本引擎拥有
+`ResolveCurrentReviewEligibilityV1` 的唯一输入是具名 source coordinate：
 
-- 五层组织概念及其版本化绑定语义。
-- 组织拓扑、上下级、协作、委托和升级关系的表达。
-- Authority 与 Responsibility 分离，不以职责自动推导职权。
+```text
+TenantID
+ReviewerSubjectID
+RequiredRoles[]
+ScopeDigest
+ResponsibilitySubjectKind + ResponsibilitySubjectID + SubjectDigest
+DelegatorSubjectID (仅委托路径)
+RequireDelegation
+Production=true
+```
 
-## 本引擎不拥有
+Owner 在一个线性化 snapshot 中解析完整 exact refs，并返回 sealed immutable `ReviewEligibilityCurrentProjectionV1`：
 
-- 不直接执行 Authority，不修改 Sandbox 或工具权限。
-- 不通过 Prompt 代替 Runtime 的硬性权限验证。
-- 不作 Review 判断，不提出 Management ControlIntent。
-- 不调用模型、工具、MCP，也不写入业务记忆。
+```text
+Identity exact Ref
+all required RoleGrant exact Refs
+optional Delegation exact Ref
+Responsibility exact Ref
+ReviewerSubjectID / DelegatorSubjectID
+RequiredRoles / ScopeDigest / Responsibility coordinate
+Current=true
+CheckedUnixNano = 本 closure 最新事实更新时间（固定，不因读取时间重封）
+ExpiresUnixNano = Identity、全部 Role、Delegation、Responsibility 的最短 TTL
+ProjectionDigest
+```
 
-## 与 Runtime 的关系
+`InspectCurrentReviewEligibilityV1(ctx, exact ProjectionRef)` 只按 exact ref 读取同一 sealed projection source，再复读 current indexes。Reader 不提供 by-name/latest 弱 Inspect。
 
-AgentDefinition引用组织定义，装配阶段解析为固定`OrganizationSnapshot`。
-Runtime 在实例化和每次敏感动作前验证有效 `AuthorityGrantSet`。
-Role 和 Responsibility 可经 Context Engine 投影给 Agent；Authority 仍由系统强制执行。
-Runtime 产生的 Effect 与证据回填 Accountability 链，但不能反向篡改历史快照。
+### S1/S2
 
-## 依赖
+```text
+baseline fresh clock (>0)
+ -> S1 owner snapshot: resolve/inspect exact Identity + all Role + optional Delegation + Responsibility
+ -> validate tenant, active state, role/scope, delegate/delegator、Responsibility identity、production self-review
+ -> seal stable projection
+ -> S2 owner snapshot: same exact refs + current full-ref indexes unchanged
+ -> fresh clock; now < baseline => ClockRegression
+ -> ValidateCurrent(now), including min TTL
+ -> deep clone result
+```
 
-- 稳定主体身份、租户边界和版本化引用合同。
-- AgentDefinition、AgentIdentity、AgentInstance和AgentRun身份模型。
-- Event、Effect、Evidence 与 Artifact 的统一关联语义。
+生产禁自审：`Responsibility.Identity.SubjectID == ReviewerSubjectID` 必须 `Forbidden`。委托只能在 `RequireDelegation=true` 时接受 current exact Delegation，且 Delegate 必须是 Reviewer，Delegator 必须匹配请求，Role/Scope 必须同时匹配；显示名和调用方布尔值不能替代证明。
 
-## 待共同决定
+## 5. Closed errors 与恢复
 
-- Identity 是长期 Agent 身份还是实例身份，二者如何关联。
-- Responsibility 的完成条件和跨 Agent 共同责任表达。
-- Authority 的继承、收窄、临时提升、撤销和过期语义。
-- 组织快照在长时间AgentRun或AgentSession中发生变化时如何处理。
+| Category | 原因 | 行为 |
+|---|---|---|
+| InvalidArgument | 空字段、未排序角色、非法时间、坏 digest | zero write |
+| NotFound | exact history 或稳定 coordinate 确实不存在 | Fail Closed |
+| Conflict | revision/digest/current CAS/tenant/scope/ABA 漂移 | zero write |
+| PreconditionFailed | terminal、TTL crossing、必需角色/委托缺失 | Fail Closed |
+| Forbidden | production 自审、delegate/delegator 不匹配 | zero write |
+| Indeterminate | ctx cancel/deadline、commit/lost reply outcome unknown | exact Inspect 原 ref；不盲重试 mutation |
+| Unavailable | 已知 SQLite/Owner 不可用 | Fail Closed |
 
-## 进入 Plan 阶段的门槛
+Reader 在 ctx 取消后不得伪造 NotFound；lost reply 恢复只允许 `context.WithoutCancel` 下 exact Inspect 原 ref。没有 expected ProjectionRef 的 Resolve unknown 只能开启新的 S1，不能宣称恢复原结果。
 
-- 冻结五层模型及其互相禁止隐式推导的不变量。
-- 冻结 OrganizationSnapshot 与 AuthorityGrantSet 的 v1 候选合同。
-- 完成组织定义到 Context、Tool、MCP、Sandbox 权限的映射表。
-- 准备越权、角色冲突、责任缺失和问责断链验收用例。
-- 获得用户对范围、产物和实施顺序的明确审核与授权。
+## 6. 持久化与 import DAG
+
+```text
+runtime/core primitives
+        ^
+organization-engine/contract <- ports <- memory / storage/sqlite
+                                      <- current <- conformance/tests
+
+Review public nominal carrier <- host adapter (未来 composition root)
+```
+
+- 生产包只依赖 Organization 公开包与 `runtime/core`；不导入 Review/Runtime ports/实现包。
+- SQLite 开启 WAL、foreign_keys、busy_timeout、`BEGIN IMMEDIATE`；schema 记录 digest，facts/history/current 分离。
+- memory 仅 reference/test backend，不宣称生产 State Plane。
+- 当前不建立 host adapter/root；这仍是 Review production 总链的集成门禁。
+
+## 7. 验收
+
+- unit：canonical、ID/digest、revision、state、TTL、deep clone。
+- whitebox：history/current/highest 同事务、staged failure zero leak、bad current 不影响 historical exact。
+- blackbox：direct reviewer、delegated reviewer、required roles、veto role、production self-review拒绝。
+- fault：ctx cancel、lost commit reply exact Inspect、S1/S2 drift、clock rollback、TTL crossing、SQLite restart/integrity。
+- concurrency：64 publishers/CAS 只产生一个 current next revision；不同 tenant 独立。
+- reusable conformance：Store 与 ReviewEligibilityCurrentReader factory suite。
+- repeat：targeted ordinary100、race20、full ordinary/race、vet、gofmt、diff/import scan。
+
+## 8. 发布结论
+
+本模块完成后只代表 Organization Owner-local production backend 可用。Review 的 Policy、Runtime Authority/Binding/Evidence/Scope、Runtime Authorization V5 与最终 composition root 仍由各自 Owner 关闭；不得据此宣称 Human multi-sign 整体 production GO。

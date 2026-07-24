@@ -17,18 +17,24 @@ import (
 type GovernedStoreV2 struct {
 	mu                             sync.Mutex
 	sessions                       map[string]contract.GovernedSessionV2
+	sessionsV3                     map[string]contract.GovernedSessionV3
+	sessionsV4                     map[string]contract.GovernedSessionV4
 	candidates                     map[string]contract.ModelTurnCandidateV2
 	reservations                   map[string]bridgecontract.ModelTurnOperationReservationFactV3
 	reservationSubjects            map[string]string
 	Clock                          func() time.Time
 	LoseNextSessionCreateReply     bool
 	LoseNextSessionCASReply        bool
+	LoseNextSessionV3CreateReply   bool
+	LoseNextSessionV3CASReply      bool
+	LoseNextSessionV4CreateReply   bool
+	LoseNextSessionV4CASReply      bool
 	LoseNextCandidateCreateReply   bool
 	LoseNextReservationCommitReply bool
 }
 
 func NewGovernedStoreV2() *GovernedStoreV2 {
-	return &GovernedStoreV2{sessions: make(map[string]contract.GovernedSessionV2), candidates: make(map[string]contract.ModelTurnCandidateV2), reservations: make(map[string]bridgecontract.ModelTurnOperationReservationFactV3), reservationSubjects: make(map[string]string), Clock: time.Now}
+	return &GovernedStoreV2{sessions: make(map[string]contract.GovernedSessionV2), sessionsV3: make(map[string]contract.GovernedSessionV3), sessionsV4: make(map[string]contract.GovernedSessionV4), candidates: make(map[string]contract.ModelTurnCandidateV2), reservations: make(map[string]bridgecontract.ModelTurnOperationReservationFactV3), reservationSubjects: make(map[string]string), Clock: time.Now}
 }
 
 var _ harnessports.SessionFactPortV2 = (*GovernedStoreV2)(nil)
@@ -105,6 +111,12 @@ func (s *GovernedStoreV2) CreateSessionV2(_ context.Context, session contract.Go
 			return cloneGovernedSessionV2(current), nil
 		}
 		return contract.GovernedSessionV2{}, core.NewError(core.ErrorConflict, core.ReasonAlreadyExists, "governed session already binds different content")
+	}
+	if _, ok := s.sessionsV3[key]; ok {
+		return contract.GovernedSessionV2{}, core.NewError(core.ErrorConflict, core.ReasonAlreadyExists, "governed V2/V3 session key is already occupied")
+	}
+	if _, ok := s.sessionsV4[key]; ok {
+		return contract.GovernedSessionV2{}, core.NewError(core.ErrorConflict, core.ReasonAlreadyExists, "governed V2/V3/V4 session key is already occupied")
 	}
 	for _, current := range s.sessions {
 		if current.Phase != contract.SessionTerminalV2 && governedScopeKeyV2(current.Run.Scope) == governedScopeKeyV2(session.Run.Scope) {

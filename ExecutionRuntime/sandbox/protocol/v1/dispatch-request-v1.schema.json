@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "praxis.sandbox/data-plane-ipc/v1/DispatchRequestV1",
+  "title": "DispatchRequestV1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version", "request_id", "phase", "effect_kind", "operation_digest",
+    "effect_id", "intent_revision", "intent_digest", "attempt_id", "tenant_id",
+    "provider_binding", "sandbox_attempt", "execution_binding", "runtime_enforcement",
+    "runtime_current_query", "runtime_current_query_digest", "requested_not_after_unix_nano",
+    "payload_schema", "payload_digest", "payload_revision", "payload", "digest"
+  ],
+  "properties": {
+    "contract_version": {"const": "praxis.sandbox/data-plane-ipc/v1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "phase": {"enum": ["prepare", "execute"]},
+    "effect_kind": {
+      "enum": [
+        "praxis.sandbox/backend-discovery", "praxis.sandbox/allocate",
+        "praxis.sandbox/activate", "praxis.sandbox/open", "praxis.sandbox/cancel",
+        "praxis.sandbox/close", "praxis.sandbox/fence", "praxis.sandbox/release",
+        "praxis.sandbox/inspect", "praxis.sandbox/cleanup",
+        "praxis.sandbox/workspace-commit"
+      ]
+    },
+    "operation_digest": {"$ref": "#/$defs/digest"},
+    "effect_id": {"type": "string", "minLength": 1},
+    "intent_revision": {"type": "integer", "minimum": 1},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "attempt_id": {"type": "string", "minLength": 1},
+    "tenant_id": {"type": "string", "minLength": 1},
+    "provider_binding": {"type": "object"},
+    "sandbox_attempt": {"type": "object"},
+    "execution_binding": {"type": "object"},
+    "runtime_enforcement": {"type": "object"},
+    "runtime_current_query": {"type": "object"},
+    "runtime_current_query_digest": {"$ref": "#/$defs/digest"},
+    "requested_not_after_unix_nano": {"type": "integer", "minimum": 1},
+    "payload_schema": {"const": "praxis.sandbox/provider-payload/v1"},
+    "payload_digest": {"$ref": "#/$defs/digest"},
+    "payload_revision": {"type": "integer", "minimum": 1},
+    "payload": {"type": "object"},
+    "digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-fA-F]{64}$"}
+  }
+}

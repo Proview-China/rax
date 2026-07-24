@@ -1,0 +1,11 @@
+# Harness PendingAction适用性当前读取切片完成
+
+时间：2026-07-16 08:20（Asia/Shanghai）
+
+Harness完成G6A范围内的Committed PendingAction只读纵向切片。Harness Owner现在以独立的Session/Turn source coordinate描述已提交PendingAction的真实来源位置；coordinate具有各自的nominal type、canonical内容和digest domain，不构造Runtime Applicability Fact，也不自行授予Evidence资格。
+
+Runtime Adapter通过构造期有限、immutable、deep-cloned且canonical-sealed的binding恢复稳定Subject；观察时间不属于binding identity。公共Applicability ref只作为四字段exact lookup key；命中后Adapter以fresh时间生成本次读取请求，重新调用Harness Reader执行S1/S2，并在返回后再次采时核对租约、Execution Scope、完整Session digest、phase、turn、PendingAction与source coordinate，再返回Runtime公共current projection。unknown、同键换内容、Reader drift、clock rollback、TTL crossing与expiry均Fail Closed；运行期没有注册、删除、替换或Store写入口。
+
+定向普通100轮、定向Race 20轮、Harness全量普通测试、全量Race和Vet均通过；并发验收覆盖64路只读和32路构造冲突。测试使用的Session Store与composition fixture仅用于确定性隔离验证，不是生产Backend、生产composition root或SLA。
+
+仍未实现Application生产协调接线、Model ToolCall Candidate Projection exact Reader、Tool/Context链、Continuation、Evidence签发、生产持久Store和生产composition root；这些能力不能由本切片或测试fixture推导。

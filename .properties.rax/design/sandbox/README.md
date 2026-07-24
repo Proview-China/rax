@@ -1,80 +1,153 @@
-# Sandbox 设计骨架
+# Sandbox v2 设计总览
 
-## 设计状态
+状态：`implemented / sandbox-owned closure complete / external production gates pending`。
 
-- 当前阶段：设计草案。
-- 当前授权：仅允许共同讨论和完善设计，不存在实现授权。
-- 本文件不是冻结合同，也不代表已经创建 Sandbox 实现模块。
-- V1已确认基线：一个AgentInstance独占一个SandboxLease，禁止活跃实例间共享。
+最高业务输入：`tmp.document/Sandbox.md`。
 
-## 作用
+## 1. 定位
 
-Sandbox 为 AgentInstance 提供可租用、可验证、可回收的隔离执行环境。
-它负责把资源、文件、网络、进程、秘密引用和执行边界落实为现实约束。
-Sandbox 是 Runtime 之下的承载底座，不是 Agent 内部能力，也不是 Harness 本身。
+Sandbox 是逻辑执行治理层：
 
-## 后端中立原则
+- Agent 是 Identity/状态/记忆；
+- Sandbox 是临时执行权与隔离边界；
+- Host、Container、MicroVM、Remote 是后端；
+- WASM 是 capability/tool 隔离载体；
+- 业务 namespace/policy domain 与计算 worker pool 分离。
 
-公共合同不得写死 Docker、Podman、进程、虚拟机、MicroVM 或远程 Worker。
-调用方声明所需隔离效果，不直接选择某个后端命令或实现细节。
+AgentInstance 进入执行态时消费 Runtime 线性化的当前 SandboxLease；Sandbox 不签发、不续期、
+不迁移该 Lease。
 
-## 核心输入
+## 2. Owner
 
-- `SandboxRequest`：Instance 身份、隔离需求、资源预算和生命周期意图。
-- `SandboxRequirement`：文件、网络、进程、设备、系统调用和持久化要求。
-- `AuthorityGrantSetRef`：Organization Engine 编译出的有效职权引用。
-- `ArtifactMountRef[]`：只读或可写资产、工作区和产物挂载要求。
-- `SecretRef[]`：由秘密管理面解析的引用，不携带明文秘密。
+| 事实 | 唯一 Owner | Sandbox 角色 |
+|---|---|---|
+| Instance/epoch、SandboxLease、Fence、Operation、Run/Outcome | Runtime | exact current 消费、提交 DomainResult ref |
+| 跨域编排与 settlement 请求 | Application Coordinator | 提供版本化 Adapter |
+| Requirement/CompiledGraph | Agent Definition/Assembler | 校验不可变需求 |
+| Authority/Review/Budget/Policy source | 各治理 Owner | 消费 revision/digest/TTL |
+| Placement、环境、Workspace、Checkpoint Participant/Compatibility/Restore domain、Cleanup/Residual | Sandbox | Inspect 后 CAS |
+| Provider local attempt | Backend Provider | 仅 Observation/Receipt |
+| actual-point enforcement | Rust Enforcer | current 复读与执行 |
+| CheckpointAttempt/Barrier/Effect Cut/consistent/restore eligibility | Runtime | Sandbox 仅绑定 exact ref |
+| Manifest/RestorePlan | Continuity | Sandbox 提供 Participant/Artifact ref |
+| Retention/Legal Hold | Retention Owner | Sandbox 只读 exact proof |
+| Snapshot terminal deleted/indeterminate | Management + Runtime governed purge | Sandbox 等待公共 sibling 合同 |
 
-## 核心输出
+## 3. 架构
 
-- `SandboxLease`：租约身份、所有者、期限、能力和状态。
-- `SandboxEndpoint`：供 Runtime 启动或连接 Harness 的受控端点。
-- `IsolationAttestation`：实际隔离后端、策略摘要和验证证据。
-- `SandboxEvent[]`：分配、启动、异常、回收和清理事件。
-- `ReleaseReport`：终止、清理、残留和不可确认状态报告。
+```text
+Runtime/Application
+    |
+    | public versioned ports
+    v
+Go Sandbox Owner Core --------> SQLite Owner State Plane
+    |
+    | strict UDS + exact current coordinates
+    v
+Rust Data Plane Enforcer
+    |
+    +--> bwrap Host Workspace
+    +--> containerd/OCI
+    +--> QEMU/KVM
+    +--> Wasmtime Component/WIT
+    `--> Remote neutral connector
+```
 
-## 本模块拥有
+Go/Rust 不使用 FFI。Rust 不写 Runtime/Sandbox 权威 Fact。Provider 名称不蕴含 isolation
+保证；每个 backend/artifact/contract 必须单独 Conformance。
 
-- SandboxLease 的分配、续期、撤销、回收和终态报告。
-- 隔离后端适配、能力协商和实际约束落实。
-- 租约内资源上限、文件边界、网络边界和进程边界。
+## 4. 治理链
 
-## 本模块不拥有
+```text
+Requirement
+  -> Placement Candidate
+  -> Reservation
+  -> InspectCurrent
+  -> Admission
+  -> Review/Auth/Budget/Scope
+  -> Permit
+  -> Begin
+  -> persisted prepare Enforcement
+  -> Provider Prepare
+  -> persisted execute Enforcement
+  -> Provider ExecutePrepared
+  -> Observation/Receipt
+  -> independent Inspect
+  -> Evidence
+  -> DomainResultFact
+  -> Runtime Settlement exact ref
+  -> Sandbox ApplySettlement CAS
+```
 
-- 不拥有 Agent 业务逻辑、Prompt、Context 或模型调用语义。
-- 不拥有 Runtime 状态机、调度目标或 Harness 执行循环。
-- 不解析明文 Credential，不自行扩大挂载、网络或设备权限。
-- 不把容器启动成功等同于 AgentInstance 已经 Ready。
+Begin 不授执行权。prepare/execute 任一 current 门失败时 Provider=0。UnknownOutcome 只
+Inspect 原 Attempt；Provider NotFound、进程死亡、超时不恢复重派权。
 
-## 与 Runtime 的关系
+## 5. Workspace、Checkpoint、Snapshot、Restore
 
-Runtime根据ResolvedAgentPlan向Sandbox请求租约，并验证返回能力是否满足要求。
-Runtime 只有在租约有效且隔离证明通过后，才可绑定并启动 Harness。
-Runtime 验证 Management 的 ControlIntent 后，调用 Sandbox 续期、冻结或释放能力。
-租约失效、后端崩溃或隔离不确定时，Runtime 必须进入失败或协调流程。
+Workspace：
 
-## V1独占租约基线
+```text
+View -> Overlay -> S1/S2 Diff -> Blob -> governed Commit -> Inspect/Settlement
+```
 
-- 映射关系为 `1 AgentInstance -> 1 active exclusive SandboxLease`。
-- 一个Instance内多个AgentRun如何使用同一租约，仍需生命周期设计决定。
+Checkpoint：
 
-## 依赖
+```text
+prepare -> commit XOR abort
+failed/not_applied -> no successor
+unknown -> Inspect/Reconcile -> prepared|failed|not_applied|indeterminate
+```
 
-- Runtime 的 AgentInstance、状态机、租约和控制结果合同。
-- Organization Engine 的 AuthorityGrantSet。
-- Artifact、Secret、网络策略、观察和 Evidence 基础设施。
+Checkpoint Provider artifact 必须由 Sandbox 独立复读，重新生成 canonical
+WorkspaceSnapshotBundle，写入 AES-256-GCM content store，再将 Snapshot Artifact
+`reserved -> available`。
 
-## 待共同决定
+Restore 必须：
 
-- 租约与AgentInstance、AgentSession、AgentRun的精确生命周期关系。
-- 工作区持久化、快照、恢复和销毁的默认策略。
-- 网络默认拒绝范围、出站代理和动态授权方式。
-- `indeterminate` 副作用和清理不完全时的处置方式。
+- exact 复读 Snapshot Fact/current/content；
+- 创建 fresh Instance、更高 epoch、新 Lease/Fence；
+- 在新 staging root 写入 canonical bundle；
+- 独立 DomainResult/Settlement/Apply；
+- 明确保留不可回滚外部 Effect 与 Residual。
 
-## 进入 Plan 阶段的门槛
+## 6. Backend capability
 
-- 冻结 SandboxRequest、SandboxLease、Attestation 和 ReleaseReport 的 v1 候选合同。
-- 确认 v1 独占租约、租约期限、续期、撤销和失联语义。
-- 冻结文件、网络、进程、资源和秘密引用的最小隔离要求。
-- 获得用户对范围、产物和实施顺序的明确审核与授权。
+| Backend | 当前强制能力 | 显式 unsupported |
+|---|---|---|
+| Host | bwrap、mount scope、default-deny network、PID identity、Fence/Cleanup | raw shell bypass |
+| Container | OCI rootfs、resource/pid/network、Inspect/Cleanup | registry/credential 供应链 |
+| MicroVM | fixed artifact digest、KVM kernel boundary、Fence/Cleanup | guest agent、block snapshot、Secret |
+| WASM | WIT imports、grant、fuel/epoch/memory | Linux workspace |
+| Remote | credential current、request/result binding、Inspect | authority ownership、vendor RPC |
+
+未提供的能力以 `unsupported/observe_only` 进入路由，不静默降级。
+
+## 7. 使用面与装配
+
+- SDK/API/CLI 只能经公共 Controller/Application Port 提交意图；
+- API 提供 async Operation、idempotency、CAS、Watch、Cancel、Inspect-only reconcile；
+- Host root 同时监督 API 与 reverse-current server，并提供 `/livez`、`/readyz`；
+- Component Release 声明 `sandbox.execution`、effectful Port、Factory、Cleanup、Owner 与
+  production readiness；
+- Harness 只消费装配后的 endpoint/scope，不持有 Backend handle，不导入 Sandbox 实现。
+
+## 8. production 外部门
+
+Sandbox 已完成可独立实现的代码闭环。以下仍由外部 Owner 关闭：
+
+1. Retention/Legal Hold exact current/no-active proof；
+2. Runtime Snapshot purge/cleanup sibling 与 Evidence/Settlement；
+3. Management CurrentIndex/Tombstone terminal DTO；
+4. Agent Host factory/provider/phase 注册；
+5. deployment attestation、Certification Fact、密钥/镜像/guest artifact 供应链；
+6. vendor Remote connector、分布式 State Plane、升级/SLA。
+
+这些门未完成前：
+
+- Snapshot capture 可用，但 terminal Artifact Owner 不标 supported；
+- release 只能 `standalone`；
+- 不自签 production、deployment 或 SLA。
+
+详细合同见 `contracts.md`、`interfaces.md`、`state-machines.md`、
+`workspace-checkpoint.md`、`workspace-restore-v1.md`、`port-delta.md` 与
+`acceptance.md`。

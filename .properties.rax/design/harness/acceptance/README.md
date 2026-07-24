@@ -1,5 +1,7 @@
 # Harness首切面验收门禁
 
+> 历史验收快照：测试数量和覆盖率仅代表当时基座，不作为Assembly V1当前完成面。新的公用接线验收见[Assembly验收设计](../assembly/acceptance.md)。
+
 ## 1. 正常闭环
 
 - 两种内部路径通过相同Manifest、Kernel与Runtime Port合同：直接完成；Action请求→Gateway结果→完成；

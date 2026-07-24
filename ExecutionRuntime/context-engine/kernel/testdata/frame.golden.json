@@ -1,0 +1,8 @@
+{
+  "manifest_digest": "sha256:45fd20de4f24eefba54ea67625bd4c9bef12410b2ee2e2ffe70e6b95bb8fdbb3",
+  "frame_digest": "sha256:566f4076a88d109ef9e8cf2bcf82bf729d54f329e6abd8123a5fe69055b7943b",
+  "stable_prefix_digest": "sha256:e36fa3c54bf10fe8e906cb160d63a080fce9784aa9e80be14704c62b95aacec0",
+  "semi_stable_digest": "sha256:fa2f63039aecccb40be38d5d3440157f56e4045b0b7274cc678b347f86ef9c09",
+  "dynamic_tail_digest": "sha256:5c10bca3a32144b60e8dae616a766641a33db133dbd34cb745354a69f3982cfb",
+  "rendered_digest": "sha256:bbcacb007f5710c7b7e39b6eff22b14d1e6f02280fe6eaedd1de57307cf7a03e"
+}

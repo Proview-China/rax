@@ -24,6 +24,7 @@
 - `ComponentRegistry + ResolvedAgentPlan`装配门禁：版本、Digest、能力TTL、依赖DAG、Required/Optional和Residual；
 - 组件中立Foundation Coordinator：Activate→Ready→Run→Checkpoint→Restore→Stop→Cleanup；
 - 两种Execution Conformance共用闭环，以及回包丢失、Ready冲突、Partial Checkpoint和不完整Cleanup故障注入；
+- Checkpoint-first V2 reference纵切：原子Attempt+Barrier、EffectCut、Participant closure、Continuity immutable Manifest Seal双读、唯一Consistency/Finalization及终态Attempt；Participant closure始终绑定collection Attempt，终态Inspect由Consistency回指该历史Attempt，禁止跨Attempt拼接和ABA；
 - 普通、Race与Vet验证。
 
 ## 目录
@@ -35,6 +36,7 @@
 | `admission` | 持久化Activation阶段、原子提交合同和确定性恢复决策 |
 | `kernel` | Instance聚合、revision线性化、Observation分类与纯函数监督决策 |
 | `ports` | 相邻组件唯一允许的Runtime-facing接入缝隙 |
+| `releasecandidate` | 固定`reference_only`的声明式Component Release、Readiness、Conformance与descriptor-only Factory |
 | `foundation` | 只依赖公共Port的最小生命周期协调器与恢复入口 |
 | `fakes` | 事实、Execution、Environment、Evidence和Checkpoint的确定性内存实现 |
 | `tests` | 对象、状态、命令、并发、epoch、Effect、Port、容灾与完整闭环反例 |

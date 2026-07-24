@@ -41,3 +41,7 @@
 - 自定义组件不得通过Descriptor、Catalog或fake自授生产/dispatch/commit资格；
 - Application不得导入Runtime foundation/kernel内部实现或任何6+1实现包。
 - 新增未知namespaced模块只能通过Descriptor+Domain Adapter+Port接入，不得要求Application增加kind switch。
+
+## Additive后续计划
+
+N=1 G6A不原地扩大本P0合同，使用独立计划：[SingleCallToolActionPortV1实施计划](./single-call-tool-action-v1.md)。该计划只增加Application窄Port、中立DTO与可恢复协调水位；G6B Context/Continuation、生产composition root及Capability启用不属于本P0完成声明。

@@ -1,0 +1,53 @@
+<mxfile host="app.diagrams.net" modified="2026-07-17T09:10:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="continuity-architecture" name="Continuity Architecture">
+    <mxGraphModel dx="1422" dy="794" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1169" pageHeight="827" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        <mxCell id="host" value="Runtime Checkpoint/Restore Fact Owner&#xa;Checkpoint: atomic Attempt + Barrier bundle&#xa;Restore: Attempt + Identity Reservation + Eligibility&#xa;No Restore Stage / Provider" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="380" y="40" width="360" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="evidence" value="Runtime Evidence Ledger V2&#xa;唯一 ledger sequence / digest chain&#xa;Evidence Governance" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="220" width="300" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="continuity" value="Continuity Controller (no execute)&#xa;Timeline Projection / Causal Graph&#xa;Artifact Relation typed S1/S2 -> immutable Fact&#xa;Content Integrity bounded S1/S2 -> diagnostic Fact&#xa;Content Delta Base/Target S1/S2 -> reference Fact&#xa;ManifestFact verified_candidate -> immutable revision 1 Seal&#xa;Fork / Rewind / Restore Plan current Adapter&#xa;Inspect / CAS / Retention" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="400" y="210" width="320" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="participants" value="Participant Owners&#xa;Harness / Sandbox / Context / Tool / Memory / Knowledge&#xa;Checkpoint Reserve / Snapshot / Phase Fact / Inspect / CAS&#xa;DomainResult -> Settlement V5 -> ApplySettlement" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="780" y="220" width="330" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="actionGateway" value="Existing G6A Action Gateway&#xa;Checkpoint phase Admission / Review / Permit / Begin&#xa;Checkpoint design frozen; cross-owner activation NO-GO&#xa;Restore Action/Stage route POSTPONED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="790" y="40" width="320" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="contextRefresh" value="Context Owner exact refs&#xa;Checkpoint Generation / Frame closure&#xa;Restore target refresh shape only / POSTPONED" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1" vertex="1" parent="1">
+          <mxGeometry x="40" y="370" width="300" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="sqlite" value="SQLite schema v9&#xa;Continuity Fact / CAS / Artifact Relation / Integrity Audit / Content Delta / Derivation Candidate / Restore+Rewind Plan / Journal&#xa;Projection / Retention Index" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="380" y="450" width="220" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="rocks" value="RocksDB&#xa;Content-addressed Chunk / Delta / Fragment&#xa;Encrypted Snapshot Blob" style="shape=cylinder3;whiteSpace=wrap;html=1;boundedLbl=1;backgroundOutline=1;fillColor=#e1d5e7;strokeColor=#9673a6" vertex="1" parent="1">
+          <mxGeometry x="630" y="450" width="230" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="remote" value="Governed Remote Object Store&#xa;encrypted object only&#xa;Receipt -> Inspect -> Settlement" style="shape=cloud;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00" vertex="1" parent="1">
+          <mxGeometry x="900" y="450" width="220" height="110" as="geometry"/>
+        </mxCell>
+        <mxCell id="clients" value="Go SDK / CLI / API&#xa;read: authorized projection&#xa;write: namespaced Application workflow" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666" vertex="1" parent="1">
+          <mxGeometry x="40" y="40" width="270" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="edge1" value="workflow / inspect" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="clients" target="host"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge2" value="Evidence ref / sequence" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="evidence" target="continuity"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge3" value="Attempt+Barrier / EffectCut refs; Inspect immutable Seal" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="host" target="continuity"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge4" value="Checkpoint Participant Reservation -> governed phase" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="host" target="actionGateway"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge5" value="Snapshot / Generation / Frame / Artifact source / Attempt / Settlement / Memory-Knowledge exact refs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="participants" target="continuity"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge6" value="Fact / CAS / Journal" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="continuity" target="sqlite"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge7" value="content ref / digest" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="continuity" target="rocks"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge8" value="write-ahead relation" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=block;endArrow=block" edge="1" parent="1" source="sqlite" target="rocks"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge9" value="Operation V3 guarded put/delete" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="host" target="remote"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge10" value="encrypted object / Inspect" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;startArrow=block;endArrow=block" edge="1" parent="1" source="rocks" target="remote"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge11" value="Checkpoint prepare/commit/abort only; Restore Provider = 0" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="actionGateway" target="participants"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge12" value="Checkpoint Generation / Frame exact refs" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="contextRefresh" target="continuity"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="edge13" value="Checkpoint current closure only" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block" edge="1" parent="1" source="actionGateway" target="contextRefresh"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
