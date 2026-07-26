@@ -46,6 +46,10 @@ CLI/API V1的A-CTY-01最小公开Submit+Inspect Gateway、Continuity Adapter、S
 
 SDK Timeline Page复验与CLI只读命令真值见[SDK Timeline Page与CLI读取闭环](../../memory/continuity/20260718-095800-SDKTimelinePage与CLI读取闭环.md)。
 
+本地SQLite Developer Preview可执行入口与Fail Closed写面真值见[Developer Preview只读可执行封包](../../memory/continuity/20260726-110500-DeveloperPreview只读可执行封包.md)。
+
+本地DB `0600`、existing owner/mode和symlink/path Fail Closed规则见[Developer Preview本地DB权限返修](../../memory/continuity/20260726-112200-DeveloperPreview本地DB权限返修.md)。
+
 Wave1 supported/unsupported exact能力闭集与production root NO-GO真值见[Wave1 Conformance exact能力闭集](../../memory/continuity/20260718-100638-Wave1ConformanceExact能力闭集.md)。
 
 Checkpoint Manifest Seal最小Runtime Delta与只读Adapter真值见[Checkpoint Manifest Seal Runtime exact Adapter闭环](../../memory/continuity/20260717-232700-CheckpointManifestSealRuntimeExactAdapter闭环.md)。
@@ -64,6 +68,7 @@ Continuity拥有Timeline投影与查询、Checkpoint Manifest/Plan领域对象�
 | `ExecutionRuntime/continuity/ports` | Backend-neutral SPI、Timeline、Checkpoint Manifest与RestorePlan Repository/Reader；不暴露Runtime raw Fact Port |
 | `ExecutionRuntime/continuity/domain` | Timeline、Content/Retention/Settlement/Manifest与RestorePlan治理；旧caller Candidate服务显式命名`ReferenceTimeline` |
 | `ExecutionRuntime/continuity/runtimeadapter` | Timeline public Readers S1/S2，以及Checkpoint完整Owner/Scope exact Seal lookup、RuntimeClosure映射、Context/Artifact digest只读投影；只依赖Runtime core/ports，不写Runtime Fact |
+| `ExecutionRuntime/continuity/cmd/continuity-reference` | 可直接构建的本地SQLite只读Developer Preview；仅Timeline/Checkpoint Inspect，不注册根CLI或治理写面 |
 | `ExecutionRuntime/continuity/storage/memory` | 线程安全reference backend；Manifest/Seal闭环；Timeline Tombstone为immutable revision-1 Fact+visibility overlay，historical Event Inspect不变；public Store不再含bulk Replace或Event mutation写口 |
 | `ExecutionRuntime/continuity/storage/sqlite` | pure-Go SQLite schema v9/additive migration、WAL/FULL/IMMEDIATE、Journal/Object/Retention、Timeline、Artifact Relation、Content Integrity Audit、Content Delta、History Derivation Candidate、Checkpoint Manifest/Seal及Restore/Rewind Plan history/current/CAS生产repository |
 | `ExecutionRuntime/continuity/applicationadapter` | 只依赖Application公开contract/ports的治理写面Adapter；要求Continuity-owned exact Domain Request Ref，不构造raw Bundle或调用Provider |
