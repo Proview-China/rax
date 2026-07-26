@@ -51,21 +51,21 @@ The public ports are category-specific. No `any` payload, untyped map or shared 
 type FragmentCachePortV1 interface {
     PutFragmentV1(context.Context, string, fragmentcache.EntryV1, int64) (fragmentcache.EntryV1, error)
     GetFragmentV1(context.Context, contract.ContextFragmentCacheKeyV1, int64) (fragmentcache.EntryV1, error)
-    InspectFragmentAttemptV1(context.Context, string) (fragmentcache.EntryV1, error)
+    InspectFragmentAttemptV1(context.Context, string, int64) (fragmentcache.EntryV1, error)
     InvalidateFragmentV1(context.Context, contract.ContextFragmentCacheKeyV1, uint64) error
 }
 
 type FrameCachePortV1 interface {
     PutFrameV1(context.Context, string, framecache.EntryV1, int64) (framecache.EntryV1, error)
     GetFrameV1(context.Context, contract.ContextFrameCacheKeyV1, int64) (framecache.EntryV1, error)
-    InspectFrameAttemptV1(context.Context, string) (framecache.EntryV1, error)
+    InspectFrameAttemptV1(context.Context, string, int64) (framecache.EntryV1, error)
     InvalidateFrameV1(context.Context, contract.ContextFrameCacheKeyV1, uint64) error
 }
 
 type ProjectionCachePortV1 interface {
     PutProjectionV1(context.Context, string, projectioncache.EntryV1, int64) (projectioncache.EntryV1, error)
     GetProjectionV1(context.Context, contract.ContextProjectionCacheKeyV1, int64) (projectioncache.EntryV1, error)
-    InspectProjectionAttemptV1(context.Context, string) (projectioncache.EntryV1, error)
+    InspectProjectionAttemptV1(context.Context, string, int64) (projectioncache.EntryV1, error)
     InvalidateProjectionV1(
         context.Context,
         contract.ContextProjectionCacheKeyV1,
@@ -112,6 +112,8 @@ The charge of an entry is the byte length of its canonical sealed JSON represent
 
 An entry whose own charge exceeds the category policy fails with `ErrLimitExceeded` and leaves the cache unchanged. One stored value may be referenced by both the ordinary key index and the completed-attempt index, but its charge is counted exactly once. Capacity includes values retained inside the bounded attempt recovery window. Capacity configuration is immutable for the lifetime of one facade; resizing, live reconfiguration and remote quota control are not V1 operations.
 
+Each category admits at most `MaxEntries` completed-attempt records. Attempt metadata contains only attempt ID, exact stored-value reference and recovery deadline; it does not copy the entry payload and does not add a second entry charge. Put and Inspect synchronously remove attempt records whose recovery deadline is at or before their explicit `now`. If cleanup still leaves `MaxEntries` attempt records, a new attempt admission fails with `ErrLimitExceeded` and publishes nothing. An already recorded exact attempt remains inspectable until its recovery deadline even while new attempts are rejected.
+
 ## Deterministic synchronous eviction
 
 There is no background goroutine, wall-clock sampler, LRU clock or probabilistic policy.
@@ -121,7 +123,7 @@ Every successful Put performs one atomic category-local mutation:
 1. validate context, attempt, sealed entry and supplied `now`;
 2. compute the candidate charge with checked arithmetic;
 3. reject an oversized candidate before mutation;
-4. under the category lock, remove entries with `ExpiresUnixNano <= now` and completed-attempt records whose bounded recovery deadline has passed;
+4. under the category lock, remove entries with `ExpiresUnixNano <= now` and completed-attempt records whose bounded recovery deadline is at or before `now`;
 5. preserve the existing attempt and invalidation-generation checks;
 6. if capacity is still insufficient, select existing values that are no longer protected by an attempt recovery window, by ascending:
    1. `ExpiresUnixNano`;
@@ -135,11 +137,11 @@ The incoming candidate is never selected as its own victim. Eviction never chang
 
 - Put requires `now < ExpiresUnixNano`.
 - Get at `now >= ExpiresUnixNano` returns `ErrExpired` and never refreshes the entry.
-- Inspect Attempt returns the exact completed mutation result only inside its bounded recovery window and never refreshes TTL or performs another Put.
+- Inspect Attempt requires explicit positive `now`, synchronously clears expired recovery records, returns the exact completed mutation result only inside its bounded recovery window and never refreshes TTL or performs another Put.
 - Invalidate requires the existing `next == current + 1` CAS rule.
 - Eviction does not masquerade as invalidation and does not modify the generation.
 - A stale key generation returns `ErrConflict` even if an entry with the same digest remains physically present.
-- Clock rollback, when observable against the facade's last accepted operation time, fails closed with `ErrConflict`; V1 does not rewrite timestamps.
+- Put, Get, Inspect Attempt and Observe all compare their explicit `now` with the facade's last accepted operation time. Clock rollback fails closed with `ErrConflict`; V1 does not rewrite timestamps.
 
 The cache's invalidation generation is local concurrency control. It is not a Context Generation Current pointer, publication revision or Owner-current Fact.
 
@@ -228,7 +230,7 @@ Mandatory cases:
 4. candidate-too-large rejection before mutation;
 5. expired purge before deterministic `Expires + Digest` eviction;
 6. eviction does not extend TTL or increment invalidation generation;
-7. completed-attempt Inspect remains exact during the bounded recovery window; protected capacity may reject a new admission; after the deadline Inspect is NotFound without replay;
+7. Put/Inspect cleanup keeps at most `MaxEntries` attempt records, completed-attempt Inspect remains exact during the bounded recovery window, and after the deadline Inspect is NotFound without replay;
 8. stale generation, equality-at-expiry and clock rollback fail closed;
 9. 64 concurrent same-attempt and same-key/different-value writers;
 10. ABA sequence `generation N -> N+1` rejects an old N key after later activity;
