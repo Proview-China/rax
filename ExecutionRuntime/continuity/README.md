@@ -88,3 +88,11 @@ printf '%s\n' '{"query":{"ledger_scope_digest":"scope-1","authority_watermark":"
 ```
 
 可用命令仅为`timeline show`、`timeline watch`和`checkpoint inspect`。该入口会创建/迁移本地SQLite metadata schema，但不会投影Event、创建Checkpoint、执行Restore、调用Provider或注册Praxis根CLI；所有治理写命令均返回Capability unavailable。
+
+本地数据库路径Fail Closed规则：
+
+- fresh文件由入口以`0600`显式创建，不依赖调用方`umask`；
+- existing文件必须是当前有效用户拥有的regular file且权限精确为`0600`，入口不会静默`chmod`；
+- 数据库文件或任一父路径是symlink时拒绝；缺失父目录、非目录父路径及未受sticky/private祖先保护的group/other-writable路径也拒绝。
+
+这些规则降低同机其他用户读取或替换metadata的风险，但不是跨进程目录租约或descriptor-relative路径证明；调用方仍应把数据库放在自己拥有的私有目录。

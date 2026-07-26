@@ -48,6 +48,8 @@ SDK Timeline Page复验与CLI只读命令真值见[SDK Timeline Page与CLI读取
 
 本地SQLite Developer Preview可执行入口与Fail Closed写面真值见[Developer Preview只读可执行封包](../../memory/continuity/20260726-110500-DeveloperPreview只读可执行封包.md)。
 
+本地DB `0600`、existing owner/mode和symlink/path Fail Closed规则见[Developer Preview本地DB权限返修](../../memory/continuity/20260726-112200-DeveloperPreview本地DB权限返修.md)。
+
 Wave1 supported/unsupported exact能力闭集与production root NO-GO真值见[Wave1 Conformance exact能力闭集](../../memory/continuity/20260718-100638-Wave1ConformanceExact能力闭集.md)。
 
 Checkpoint Manifest Seal最小Runtime Delta与只读Adapter真值见[Checkpoint Manifest Seal Runtime exact Adapter闭环](../../memory/continuity/20260717-232700-CheckpointManifestSealRuntimeExactAdapter闭环.md)。

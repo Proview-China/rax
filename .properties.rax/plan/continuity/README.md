@@ -49,6 +49,7 @@
 - [A-CTY-01公开Gateway与治理写面Reference闭环](../../memory/continuity/20260718-093800-ACTY01公开Gateway与治理写面Reference闭环.md)
 - [SDK Timeline Page与CLI读取闭环](../../memory/continuity/20260718-095800-SDKTimelinePage与CLI读取闭环.md)
 - [Developer Preview只读可执行封包](../../memory/continuity/20260726-110500-DeveloperPreview只读可执行封包.md)
+- [Developer Preview本地DB权限返修](../../memory/continuity/20260726-112200-DeveloperPreview本地DB权限返修.md)
 - [Wave1 Conformance exact能力闭集](../../memory/continuity/20260718-100638-Wave1ConformanceExact能力闭集.md)
 - [ComponentReleaseV1 Delta](../../design/continuity/component-release-v1.md)：已实现reference-only owner publisher/readiness；不解锁production capture、remote Provider、production Restore root、cleanup或deployment root。
 
@@ -435,6 +436,7 @@ C-02/C-03 exact-ref schema、canonical、migration/diagnostic规则属于第5步
 - **completed / reference, production root blocked** — Go SDK query/watch/inspect/plan API与唯一`Submit/InspectGovernedWorkflow`治理写面已实现；Application公开Submission+Inspect Gateway、Continuity Adapter及七类closed kind已闭合。Timeline Page在SDK边界复验Event/过滤/sequence/PageLimit/Cursor exact watermark；production trusted Assembler/各kind current route未闭合时仍Fail Closed；
 - **completed / owner-local mapping** — CLI只读`timeline show/watch`、`checkpoint inspect`，七类治理写命令、`workflow inspect`及strict JSON参数/输出/错误映射已实现；不注册根CLI，不选择endpoint/credential；
 - **completed / Developer Preview** — `cmd/continuity-reference`可直接构建并打开本地SQLite metadata store，装配SDK与只读Runner执行`timeline show/watch`、`checkpoint inspect`；治理写命令固定Fail Closed。该入口不是`praxis`根CLI、Application root、服务或production封包；
+- **completed / local DB permission guard** — fresh DB由CLI显式创建为`0600`；existing DB必须是当前有效用户拥有的regular file且精确`0600`；symlink、非法父路径和未受保护的共享可写路径Fail Closed。该前置不修改SQLite公共SPI，不宣称descriptor-relative路径租约；
 - **partial** — transport-neutral分页、Cursor与长任务exact Inspect已实现；production授权脱敏策略及其root装配仍由外部Policy/Application Owner提供，Continuity不发明redaction字段；
 - [ ] 根CLI/API注册只输出集成增量，由Owner串行合入。
 
