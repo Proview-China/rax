@@ -85,5 +85,6 @@
 - full `go test ./...`、`go test -race ./...`、`go vet ./...`；
 - Store与API reusable Conformance；
 - `go test -bench 'SQLite|Router|HTTP|Watch' -benchmem -count=3`只记录基线；
+- `scripts/test-internal-preview.sh`验证归档双构建字节一致、checksum、真实SQLite+HTTP+CLI启动，以及篡改归档/非法Secret失败关闭；
 - `gofmt -l`、`git diff --check`、禁止import扫描；
 - 无真实平台凭据时明确标记platform live E2E未执行。

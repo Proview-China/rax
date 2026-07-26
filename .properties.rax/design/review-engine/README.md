@@ -4,6 +4,7 @@
 
 - 当前阶段：**Review owner-local/reference/test 非完整生产闭环最终独立复审 YES（P0/P1/P2=0）**。
 - 当前结论：**Review-owned 单机服务、Decision/Auto/Human/Bypass/Runtime只读组合、Result Grounding V2与reusable测试已完成；Praxis production integration仍 NO-GO**。真实外部 Owner adapter/certification、宿主 composition root、公共 Gate 与 Provider Effect 不在本轮完成面。
+- 单节点 Internal Preview 封包已落地：确定性 Go 构建、外置 Secret 启动、真实 SQLite+HTTP+CLI 黑盒与篡改/非法配置故障门禁；该封包不改变 `reference_only` 与 production NO-GO。
 - 最高业务输入：`tmp.document/Review.md`。
 - live 技术基线：Review 已实现只读 `OperationReviewCurrentReaderV4` 投影，但不创建 Runtime Authorization Fact；Harness/Application/Model Invoker 接线与生产 current source 仍是发布门禁。本设计复用现有基座，不重造 Runtime 治理链，也不私建 Harness 装配替代品。
 - REV-D11固定状态：**Review-owned aggregate P0/P1/P2=0；五类外部Owner production adapter/root NO-GO**。Review已实现只读聚合与真实Reader注入边界，但不拥有或伪造外部Owner current。

@@ -5,6 +5,7 @@
 - Wave 1 reference/test implementation：最终独立复审 **YES（P0/P1/P2=0）**。
 - Review-owned非完整生产闭环：单机服务、Decision/Auto/Human/Bypass、Runtime只读组合、Result Grounding V2与测试已完成，最终独立复审 **YES（P0/P1/P2=0）**。
 - Review-owned Rubric V1：七类 baseline、Store/SQLite/Admission/conformance 已完成，纳入本轮最终独立复审 **YES（P0/P1/P2=0）**。
+- Review 单节点 Internal Preview：确定性 Linux/amd64 封包、外置 Secret 启动、真实 SQLite+HTTP+CLI 黑盒与故障门禁已落地；仍为 owner-local `reference_only`。
 - Praxis production integration：**NO-GO**。真实外部Owner adapter/certification、宿主 composition root、公共Gate与Provider Effect尚未闭合。
 - 2026-07-18 production-proof live 核验：11 项 proof 仍全部缺少可独立验证的 production current certification；Decision、Verdict、SQLite durable store、Human owner-local software 已实现但不能升权。`releasecandidate` 已发布机器可读 blocker inventory，继续固定 `reference_only`。
 
@@ -33,6 +34,7 @@ Review Engine 是判断 Owner。它维护 Request、Target、Case、Round、Assi
 | `resultgrounding` | Result Bundle V2全链exact-current S1/S2、full Owner router proof、min TTL与sealed aggregate |
 | `releasecandidate` | 声明式 `ComponentReleaseV1` assembly-candidate；固定 `reference_only`，只暴露 Host factory descriptor |
 | `conformance`、`tests` | reusable Store/Service 合同、unit/whitebox/blackbox/fault/runtime-integration、并发与 benchmark |
+| `INTERNAL_PREVIEW.md`、`scripts/*internal-preview.sh` | 确定性单节点封包、外置Secret启动、checksum与真实SQLite+HTTP+CLI验证 |
 
 ## 核心不变量
 
@@ -55,6 +57,7 @@ Review Engine 是判断 Owner。它维护 Request、Target、Case、Round、Assi
 - Slack/Linear/Jira 协议解析、签名校验、重放时间窗和 outbound DeliveryIntent；
 - 安全 Router、Result Bundle、Behavior Feedback Candidate；
 - 内存 reference backend、SQLite backend、Service 与 Runtime Reader 的测试矩阵。
+- 可复现 Linux/amd64 tar.gz、SHA-256、无内置 Secret 启动包装及篡改/非法配置故障门禁。
 
 ## 当前 NO-GO
 
@@ -77,5 +80,6 @@ Review Engine 是判断 Owner。它维护 Request、Target、Case、Round、Assi
 - Port Delta：[port-delta.md](../../design/review-engine/port-delta.md)
 - 计划：[review-engine-v1.md](../../plan/review-engine/review-engine-v1.md)
 - 代码：[ExecutionRuntime/review/README.md](../../../ExecutionRuntime/review/README.md)
+- Internal Preview：[INTERNAL_PREVIEW.md](../../../ExecutionRuntime/review/INTERNAL_PREVIEW.md)
 
 本目录的验证命令与最后一次真实结果记录在最新 `memory/review-engine` 事件中；未实际运行的生产联调、Provider、HA 或 SLA 不作通过声明。
