@@ -1,6 +1,8 @@
 package corepack
 
 import (
+	"encoding/json"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -30,7 +32,7 @@ func TestCatalogV1ExactStableIdentities(t *testing.T) {
 	if err := catalog.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"workspace.read", "workspace.search", "workspace.inspect", "workspace.patch", "process.exec"}
+	want := []string{"process.exec", "workspace.inspect", "workspace.patch", "workspace.read", "workspace.search"}
 	for i, name := range want {
 		if catalog.Definitions[i].ModelName != name || catalog.Tools[i].Mechanism != contract.MechanismLocal {
 			t.Fatalf("definition %d drifted: %#v", i, catalog.Definitions[i])
@@ -42,6 +44,31 @@ func TestCatalogV1ExactStableIdentities(t *testing.T) {
 	}
 	if len(catalog.Package.Descriptors) != 5 {
 		t.Fatal("package does not bind five tools")
+	}
+}
+
+func TestCatalogV1PublishesStrictTypedOutputSchemas(t *testing.T) {
+	catalog := testCatalogV1(t)
+	wantFields := map[string][]string{
+		"process.exec":      {"attempt_ref", "stdout_artifact_ref", "stderr_artifact_ref", "checked_unix_nano", "allOf"},
+		"workspace.inspect": {"object", "entries", "range_valid", "checked_unix_nano", "maxItems"},
+		"workspace.patch":   {"change_set_ref", "base_workspace", "result_workspace", "files", "minItems"},
+		"workspace.read":    {"file", "content", "artifact_ref", "checked_unix_nano", "oneOf"},
+		"workspace.search":  {"matches", "artifact_ref", "preview", "checked_unix_nano", "oneOf"},
+	}
+	for _, definition := range catalog.Definitions {
+		if !json.Valid(definition.OutputSchema) {
+			t.Fatalf("%s output schema is not valid JSON", definition.ModelName)
+		}
+		text := string(definition.OutputSchema)
+		if !strings.Contains(text, `"additionalProperties":false`) {
+			t.Fatalf("%s output schema is not closed", definition.ModelName)
+		}
+		for _, field := range wantFields[definition.ModelName] {
+			if !strings.Contains(text, `"`+field+`"`) {
+				t.Fatalf("%s output schema omits %s", definition.ModelName, field)
+			}
+		}
 	}
 }
 

@@ -133,11 +133,13 @@ func (c CatalogV1) Validate() error {
 
 func coreDefinitionsV1() []DefinitionV1 {
 	return []DefinitionV1{
-		definitionV1(contract.CoreToolWorkspaceReadV1, "workspace-read", contract.RiskLow, "praxis.core-tool/review-bypass-v1", workspaceReadSchemaV1, workspaceReadOutputSchemaV1, "Read a bounded byte range from one exact workspace file.", contract.CoreToolDefaultTimeoutMSV1, contract.CoreToolMaxReadBytesV1),
-		definitionV1(contract.CoreToolWorkspaceSearchV1, "workspace-search", contract.RiskLow, "praxis.core-tool/review-bypass-v1", workspaceSearchSchemaV1, workspaceSearchOutputSchemaV1, "Search bounded text matches inside one exact workspace.", contract.CoreToolDefaultTimeoutMSV1, contract.CoreToolMaxSearchBytesV1),
-		definitionV1(contract.CoreToolWorkspaceInspectV1, "workspace-inspect", contract.RiskLow, "praxis.core-tool/review-bypass-v1", workspaceInspectSchemaV1, workspaceInspectOutputSchemaV1, "Inspect bounded file or directory metadata and currentness.", contract.CoreToolDefaultTimeoutMSV1, contract.CoreToolMaxReadBytesV1),
-		definitionV1(contract.CoreToolWorkspacePatchV1, "workspace-patch", contract.RiskModerate, "praxis.core-tool/review-auto-v1", workspacePatchSchemaV1, workspacePatchOutputSchemaV1, "Atomically apply structured text hunks against exact base digests.", contract.CoreToolDefaultTimeoutMSV1, uint64(contract.CoreToolMaxPatchBytesV1)),
-		definitionV1(contract.CoreToolProcessExecV1, "process-exec", contract.RiskModerate, "praxis.core-tool/review-auto-v1", processExecSchemaV1, processExecOutputSchemaV1, "Execute bounded argv without an implicit shell in a governed sandbox.", contract.CoreToolMaxTimeoutMSV1, contract.CoreToolMaxOutputBytesV1),
+		// This is the live contract.SealSurface canonical identity order. It is
+		// deterministic serialization order, not execution priority.
+		definitionV1(contract.CoreToolProcessExecV1, "process-exec", contract.RiskModerate, "praxis.core-tool/review-auto-v1", processExecSchemaV1, processExecOutputSchemaStrictV1, "Execute bounded argv without an implicit shell in a governed sandbox.", contract.CoreToolMaxTimeoutMSV1, contract.CoreToolMaxOutputBytesV1),
+		definitionV1(contract.CoreToolWorkspaceInspectV1, "workspace-inspect", contract.RiskLow, "praxis.core-tool/review-bypass-v1", workspaceInspectSchemaV1, workspaceInspectOutputSchemaStrictV1, "Inspect bounded file or directory metadata and currentness.", contract.CoreToolDefaultTimeoutMSV1, contract.CoreToolMaxReadBytesV1),
+		definitionV1(contract.CoreToolWorkspacePatchV1, "workspace-patch", contract.RiskModerate, "praxis.core-tool/review-auto-v1", workspacePatchSchemaV1, workspacePatchOutputSchemaStrictV1, "Atomically apply structured text hunks against exact base digests.", contract.CoreToolDefaultTimeoutMSV1, uint64(contract.CoreToolMaxPatchBytesV1)),
+		definitionV1(contract.CoreToolWorkspaceReadV1, "workspace-read", contract.RiskLow, "praxis.core-tool/review-bypass-v1", workspaceReadSchemaV1, workspaceReadOutputSchemaStrictV1, "Read a bounded byte range from one exact workspace file.", contract.CoreToolDefaultTimeoutMSV1, contract.CoreToolMaxReadBytesV1),
+		definitionV1(contract.CoreToolWorkspaceSearchV1, "workspace-search", contract.RiskLow, "praxis.core-tool/review-bypass-v1", workspaceSearchSchemaV1, workspaceSearchOutputSchemaStrictV1, "Search bounded text matches inside one exact workspace.", contract.CoreToolDefaultTimeoutMSV1, contract.CoreToolMaxSearchBytesV1),
 	}
 }
 

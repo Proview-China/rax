@@ -62,7 +62,9 @@ Sandbox/Review/Runtime类型或导入其实现。
 ### P2：Registry与Surface
 
 - [ ] Capability→Tool→Package按顺序Admission；
-- [ ] 固定Surface顺序与ModelName唯一性；
+- [ ] 固定Surface canonical顺序为
+  `process.exec, workspace.inspect, workspace.patch, workspace.read, workspace.search`，并保证ModelName唯一；
+- [ ] 明确该顺序只服务序列化、Digest与缓存身份，不表示执行优先级或调度顺序；
 - [ ] exact Schema/Description/Descriptor digest；
 - [ ] `shell.run`若保留，只作指向`process.exec` exact Descriptor的装配期Alias；
 - [ ] MCP同名能力不可shadow Core对象。
