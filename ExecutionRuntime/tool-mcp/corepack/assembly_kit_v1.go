@@ -202,6 +202,9 @@ func (r CorePackAssemblyRequestV1) validateCurrentV1(now time.Time) error {
 	if r.Mode != CorePackAssemblyPreviewV1 && r.Mode != CorePackAssemblyAdmittedV1 {
 		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidState, "Core Pack assembly mode is invalid")
 	}
+	if r.Mode == CorePackAssemblyPreviewV1 && (r.VerificationRequest.ContractVersion != "" || r.VerificationIssuance.ContractVersion != "" || r.AdmissionCommand.ContractVersion != "") {
+		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "preview cannot carry Package verification or admission coordinates")
+	}
 	if r.Mode == CorePackAssemblyAdmittedV1 {
 		if r.VerificationRequest.ValidateCurrent(now) != nil || r.VerificationIssuance.ValidateCurrent(now) != nil || r.AdmissionCommand.Validate() != nil {
 			return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "admitted Core Pack coordinates are invalid")
@@ -242,8 +245,20 @@ func (r CorePackAssemblyResultV1) Validate() error {
 	if r.ContractVersion != CorePackAssemblyContractVersionV1 || r.Catalog.Validate() != nil || r.RegistrySnapshot.Validate() != nil || r.PackageRecord.Validate() != nil || r.Surface.Validate() != nil || r.Digest.Validate() != nil || r.Executable || r.UnsupportedReason != CorePackUnsupportedReasonV1 || r.ExpiresUnixNano <= 0 {
 		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "Core Pack Assembly result is incomplete")
 	}
-	if r.Surface.RegistrySnapshotDigest != r.RegistrySnapshot.Digest || (r.Mode == CorePackAssemblyPreviewV1) != r.ReferenceOnly || (r.Mode == CorePackAssemblyAdmittedV1) != r.Admitted {
+	if r.Mode != CorePackAssemblyPreviewV1 && r.Mode != CorePackAssemblyAdmittedV1 {
+		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidState, "Core Pack Assembly result mode is invalid")
+	}
+	if r.Surface.RegistrySnapshotDigest != r.RegistrySnapshot.Digest || (r.Mode == CorePackAssemblyPreviewV1) != r.ReferenceOnly || (r.Mode == CorePackAssemblyAdmittedV1) != r.Admitted || r.ReferenceOnly == r.Admitted {
 		return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Core Pack Assembly result mode or Snapshot drifted")
+	}
+	if r.PackageRecord.Kind != "package" || r.PackageRecord.ID != string(r.Catalog.Package.ID) || r.PackageRecord.ObjectRevision != r.Catalog.Package.Revision || r.PackageRecord.ObjectDigest != r.Catalog.Package.Digest {
+		return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Core Pack Assembly Package Record differs from the Catalog")
+	}
+	if r.ExpiresUnixNano > r.Surface.ExpiresUnixNano {
+		return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Core Pack Assembly expiry exceeds the Surface")
+	}
+	if err := validateCorePackSurfaceClosureV1(r.Catalog, r.Surface); err != nil {
+		return err
 	}
 	if r.ReferenceOnly && (r.PackageAssembly != nil || r.PackageRecord.State != registry.StateSubmitted) {
 		return core.NewError(core.ErrorConflict, core.ReasonInvalidState, "preview result contains admitted state")
@@ -251,11 +266,41 @@ func (r CorePackAssemblyResultV1) Validate() error {
 	if r.Admitted && (r.PackageAssembly == nil || r.PackageAssembly.Validate() != nil || r.PackageRecord.State != registry.StateActive) {
 		return core.NewError(core.ErrorConflict, core.ReasonInvalidState, "admitted result lacks an active exact Package closure")
 	}
+	if r.Admitted {
+		assembly := r.PackageAssembly
+		if assembly.RegistrySnapshot != r.RegistrySnapshot || assembly.Package.ID != r.Catalog.Package.ID || assembly.Package.Revision != r.Catalog.Package.Revision || assembly.Package.Digest != r.Catalog.Package.Digest || assembly.PackageRecord != r.PackageRecord {
+			return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "admitted Package Assembly differs from the Result closure")
+		}
+	}
 	copy := r.Clone()
 	copy.Digest = ""
 	digest, err := toolcontract.Seal("praxis.tool-mcp.core-pack-assembly", CorePackAssemblyContractVersionV1, "CorePackAssemblyResultV1", copy)
 	if err != nil || digest != r.Digest {
 		return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Core Pack Assembly result digest drifted")
+	}
+	return nil
+}
+
+func validateCorePackSurfaceClosureV1(catalog CatalogV1, surface toolcontract.ToolSurfaceManifest) error {
+	if len(surface.Entries) != len(catalog.Tools) || len(catalog.Tools) != len(catalog.Capabilities) || len(catalog.Tools) != len(catalog.Materials) || len(catalog.Tools) != len(catalog.Definitions) {
+		return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Core Pack Surface closure cardinality drifted")
+	}
+	for i, entry := range surface.Entries {
+		tool := catalog.Tools[i]
+		capability := catalog.Capabilities[i]
+		material := catalog.Materials[i]
+		definition := catalog.Definitions[i]
+		if entry.Tool != objectRefV1(tool.ID, tool.Revision, tool.Digest) || entry.Capability != objectRefV1(capability.ID, capability.Revision, capability.Digest) || entry.InputSchema != capability.InputSchema || entry.DescriptionDigest != material.Ref.DescriptionDigest || entry.ModelName != definition.ModelName || entry.Order != uint32(i) {
+			return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Core Pack Surface entry differs from the Catalog")
+		}
+		if len(entry.EffectKinds) != len(tool.EffectKinds) || len(entry.EffectKinds) != len(capability.EffectKinds) {
+			return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Core Pack Surface effect closure cardinality drifted")
+		}
+		for j := range entry.EffectKinds {
+			if entry.EffectKinds[j] != tool.EffectKinds[j] || entry.EffectKinds[j] != capability.EffectKinds[j] {
+				return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Core Pack Surface effect closure drifted")
+			}
+		}
 	}
 	return nil
 }

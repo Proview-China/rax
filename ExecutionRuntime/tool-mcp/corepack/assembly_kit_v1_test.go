@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
+	toolcontract "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/registry"
 	"github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/sdk"
 )
@@ -131,5 +132,54 @@ func TestCorePackAssemblyAdmittedFailsClosedWithoutVerificationV1(t *testing.T) 
 	request.Mode = CorePackAssemblyAdmittedV1
 	if _, err := kit.AssembleV1(context.Background(), request); err == nil {
 		t.Fatal("admitted mode bypassed verification")
+	}
+}
+
+func TestCorePackAssemblyPreviewRejectsIgnoredVerificationCoordinatesV1(t *testing.T) {
+	kit, request := previewAssemblyFixtureV1(t)
+	request.AdmissionCommand.ContractVersion = toolcontract.PackageVerificationContractVersionV1
+	if _, err := kit.AssembleV1(context.Background(), request); err == nil {
+		t.Fatal("preview ignored non-zero admission coordinates")
+	}
+}
+
+func TestCorePackAssemblyResultRejectsForgedClosureV1(t *testing.T) {
+	kit, request := previewAssemblyFixtureV1(t)
+	result, err := kit.AssembleV1(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tests := []struct {
+		name   string
+		mutate func(*CorePackAssemblyResultV1)
+	}{
+		{"invalid-mode", func(v *CorePackAssemblyResultV1) { v.Mode = "forged"; v.ReferenceOnly = false }},
+		{"package-record", func(v *CorePackAssemblyResultV1) {
+			v.PackageRecord.ObjectDigest = core.DigestBytes([]byte("forged-package"))
+		}},
+		{"surface-tool", func(v *CorePackAssemblyResultV1) { v.Surface.Entries[0].Tool = v.Surface.Entries[1].Tool }},
+		{"surface-capability", func(v *CorePackAssemblyResultV1) { v.Surface.Entries[0].Capability = v.Surface.Entries[1].Capability }},
+		{"surface-schema", func(v *CorePackAssemblyResultV1) { v.Surface.Entries[0].InputSchema = v.Surface.Entries[1].InputSchema }},
+		{"surface-description", func(v *CorePackAssemblyResultV1) {
+			v.Surface.Entries[0].DescriptionDigest = core.DigestBytes([]byte("forged-description"))
+		}},
+		{"surface-effect", func(v *CorePackAssemblyResultV1) { v.Surface.Entries[0].EffectKinds[0] = "forged/effect" }},
+		{"surface-cardinality", func(v *CorePackAssemblyResultV1) { v.Surface.Entries = v.Surface.Entries[:4] }},
+		{"expiry", func(v *CorePackAssemblyResultV1) { v.ExpiresUnixNano = v.Surface.ExpiresUnixNano + 1 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			forged := result.Clone()
+			test.mutate(&forged)
+			forged.Digest = ""
+			digest, sealErr := toolcontract.Seal("praxis.tool-mcp.core-pack-assembly", CorePackAssemblyContractVersionV1, "CorePackAssemblyResultV1", forged)
+			if sealErr != nil {
+				t.Fatal(sealErr)
+			}
+			forged.Digest = digest
+			if err := forged.Validate(); err == nil {
+				t.Fatal("forged self-sealed result was accepted")
+			}
+		})
 	}
 }

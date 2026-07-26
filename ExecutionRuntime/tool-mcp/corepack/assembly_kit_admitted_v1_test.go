@@ -159,6 +159,35 @@ func TestCorePackAssemblyAdmissionUnknownOnlyInspectsWinnerV1(t *testing.T) {
 	}
 }
 
+func TestCorePackAssemblyAdmittedRejectsForgedAssemblyClosureV1(t *testing.T) {
+	kit, request, _ := admittedAssemblyFixtureV1(t, false)
+	result, err := kit.AssembleV1(context.Background(), request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, mutate := range []func(*CorePackAssemblyResultV1){
+		func(v *CorePackAssemblyResultV1) {
+			v.PackageAssembly.RegistrySnapshot.Digest = core.DigestBytes([]byte("forged-snapshot"))
+		},
+		func(v *CorePackAssemblyResultV1) {
+			v.PackageAssembly.Package.Digest = core.DigestBytes([]byte("forged-package"))
+		},
+		func(v *CorePackAssemblyResultV1) { v.PackageAssembly.PackageRecord.RegistryRevision++ },
+	} {
+		forged := result.Clone()
+		mutate(&forged)
+		forged.Digest = ""
+		digest, sealErr := toolcontract.Seal("praxis.tool-mcp.core-pack-assembly", CorePackAssemblyContractVersionV1, "CorePackAssemblyResultV1", forged)
+		if sealErr != nil {
+			t.Fatal(sealErr)
+		}
+		forged.Digest = digest
+		if err := forged.Validate(); err == nil {
+			t.Fatal("forged admitted closure was accepted")
+		}
+	}
+}
+
 func buildVerificationFixtureForCorePackV1(t *testing.T, pkg toolcontract.ToolPackageManifest, record registry.Record, now time.Time) verificationFixtureForCorePackV1 {
 	t.Helper()
 	digest := func(s string) core.Digest { return core.DigestBytes([]byte(s)) }
