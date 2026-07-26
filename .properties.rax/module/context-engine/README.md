@@ -75,6 +75,12 @@ Component release当前只到`reference_only assembly-candidate`。进程内refr
 
 ## 6. 构建验证
 
+### 6.1 Frame Consumption与本地Cache V1
+
+首个可消费Frame纵切已经落地：ContextFrameConsumptionDescriptorV1把exact Frame/Manifest/Generation、三段ContentRef、Fragment/Prompt/Recipe/Disclosure current closure冻结为严格模型中立的消费描述符；它不包含Provider、Model、Prompt Cache Key或KV Cache语义。fragmentcache、framecache和projectioncache提供线程安全的进程内参考实现，覆盖create-once、TTL、deep-copy/no-alias、64并发、lost-reply Inspect和invalidation-generation CAS/no-ABA。StructuralValueEvaluatorV1与CompressionEvidenceV1只提供Epiplexity-inspired辅助Observation及不变量凭证，不能自行批准压缩或改变Context current。
+
+该纵切仍是Owner-local/reference能力：Provider-specific lowering/cache继续属于Model Invoker；Tool settled result增量回填等待Tool公共SettledToolResultProjectionV1合并后直接消费，不复制Tool DTO，也不构成production composition root。
+
 ```bash
 cd ExecutionRuntime/context-engine
 go test -count=1 ./...
