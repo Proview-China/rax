@@ -22,7 +22,6 @@ current Context frame closure
   -> child Manifest / Frame / Generation
   -> ContextFrameConsumptionDescriptorV1
 ```
-
 The facade exposes existing verified behavior. It creates no new state model, authority, settlement decision, wire protocol or cross-owner contract.
 
 ## Package and public surface
@@ -144,4 +143,3 @@ go vet ./...
 gofmt -l <changed-go-files>
 git diff --check origin/main...HEAD
 ```
-
