@@ -2,6 +2,16 @@
 
 状态：规划内无需production composition root的Owner-local/B-cross/reference-only切片均已完成软件验证，包括`CTX-D09-R1`、`CTX-D10`、Offline/Engineering SDK、Compaction/Generation、Outcome、Recipe/PromptAsset pre-release、Prompt Provenance、durable Reviewer Context、Restore Context materialization及Component Release候选。production Recipe/Prompt发布仍等待CTX-D07；C层production composition、Capability、Harness Continuation与Turn推进未启用。
 
+新增Design Candidate见[Context Frame Consumption V1](../../design/context-engine/context-frame-consumption-v1.md)。Design合并后实施顺序固定为：
+
+1. `contract/frame_consumption_v1.go`、`contract/compression_evidence_v1.go`：presence、canonical digest、错误闭集；
+2. `kernel/frame_consumption_v1.go`、`kernel/settled_tool_fragment_v1.go`：S1/S2 Context exact materialization、只消费Tool Owner单一settled projection的`inline_payload`或`artifact_ref`、small/large分支与incremental Frame；
+3. `kernel/structural_value_evaluator_v1.go`：确定性Invariant Gate与默认advisory启发式；
+4. `fragmentcache/memory_v1.go`、`framecache/memory_v1.go`：线程安全、TTL最小、invalidation generation、deep-copy/no-alias；
+5. package unit与`tests/{blackbox,failure,conformance}`，随后target100、race20、full ordinary/race/vet、gofmt与import/range/diff gates。
+
+Implementation PR不得定义Model Projection/Projection Cache、Provider Prefix/KV Cache，不接Application/Harness/Tool/Model/Provider生产实现，不启用Capability/Continuation/Turn。
+
 ## 1. 范围
 
 `CTX-D09`三段Refresh/Apply/Inspect、Owner-local settled-action current projection和本组件fixture已经实现并通过第二轮独立复审；`CTX-D10` Reader/Adapter、Application公共Port Adapter及Memory/Knowledge G6B B-cross fixture也已完成。这些完成项不授予production root、Capability、Harness Continuation或Turn推进资格。
@@ -235,7 +245,7 @@ Compaction/Generation Owner-local小闭环已完成：`contract/compaction*.go`�
 - S1/S2复读Session/Turn/PendingAction、ToolResult全链、Assembly Generation/Binding/Activation、Authority、ParentFrame/Manifest/Generation、Source/Artifact/Cache currentness；
 - Create/DomainResult/Apply/CAS lost reply只Inspect原Attempt/Frame/Generation；Unknown/cancel/deadline写前零状态、写后`waiting_inspect`；
 - 父Frame不可变；StablePrefix与SemiStable逐项复用exact `ContentRef{Ref,Digest,Length}`，仅DynamicTail加入本次有界ToolResult Fragment；PrefixDigest seal完整StablePrefix，stable cache identity使用StableSourceSetDigest；
-- Receipt/Observation/raw大输出不得进入Frame；大文件与旧Tool输出只允许bounded summary或exact Artifact ref/version/digest/range；Delta链有界，压缩后仅RetainedAnchorSet有效；
+- Receipt/Observation/raw大输出不得进入Frame；Settled Tool大结果只接收Tool Owner projection的exact ArtifactRef，不要求Tool摘要字段。其他Artifact未来可由Context受治理materialization/compaction产生摘要，但不在本V1实现；Delta链有界，压缩后仅RetainedAnchorSet有效；
 - Frame/Generation/Cache TTL取请求NotAfter与全部Owner-current来源、Binding/Authority、Artifact/Provider currentness严格最短值；`checked >= expires`拒绝；计算provider-neutral Cache economics与ExpectedInjectionManifest；
 - 本首切面无远程Source/Provider Effect；禁止扩V4或复用Tool settlement。S2失败最多保留pending/diagnostic fact且current pointer不可见；只有原子ApplySettlement+Generation current CAS成功才形成验收候选；
 - Provider Observation、Harness Actual Manifest与Context Conformance保持三Owner分层；

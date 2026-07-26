@@ -2,6 +2,8 @@
 
 状态：规划内无需production composition root的切片已完成软件验证，包括`CTX-D09-R1` A/B-cross、`CTX-D10`、Offline/Engineering SDK与API/CLI、Compaction/Generation、Outcome、Recipe/PromptAsset pre-release、Prompt Provenance、durable Reviewer Context单节点参考能力、Restore Context materialization及`reference_only` Component Release候选。PromptAsset采用用户确认的内嵌规范化片段方案；production Recipe/Prompt发布仍等待CTX-D07，production State Plane/Cache、Capability、Harness Continuation与Turn推进未启用。
 
+新增Design Candidate：[Context Frame Consumption、Local Cache与Compression Evidence V1](./context-frame-consumption-v1.md)。它只冻结Context-owned immutable Frame消费描述、Fragment/Frame Cache、settled ToolResult增量Frame、非权威Structural Evaluator与Compression Evidence；Model Projection/Projection Cache归Model Invoker，Provider Prefix/KV Cache归Provider Adapter，不在Context定义。
+
 最高业务输入：[Context&Cache定稿文档](../../../tmp.document/Context&Cache.md)。本设计同时受根`AGENTS.md`、`.properties.rax/MAIN.md`、6+1组件治理合同及Runtime/Harness live contracts约束；业务语义以定稿文档为先，运行治理以live schema为准。
 
 开发者工程面的[Context Engineering SDK V1](./engineering-sdk.md)已完成Prompt validate/preview与可插拔Evaluator Observation→Context Evaluation/Feedback Owner-local链；五入口transport-neutral API/CLI已通过target100/race20及full ordinary/race/vet。它不扩既有Offline SDK六operation闭集，也不实现远程Judge或production发布。模型专属Prompt的[官方上游审计](./prompt-upstream-audit.md)已覆盖Codex、Gemini、Kimi、Grok、Claude SDK、DeepSeek、MiniMax及T3Code消费边界；[Prompt Upstream Provenance V1](./prompt-provenance.md)的Owner-local exact合同、seal/verify核、fixture与分层反例已实现并通过相同门。具体预埋结构见[多模型 Prompt 候选架构](./prompt-family-candidates.md)；production模型适用性仍等待Model Invoker exact Profile ref/current reader。
