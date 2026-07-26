@@ -19,6 +19,7 @@ Review Engine 是 Praxis 的判断 Owner：它维护 Request、Target、Case、R
 - 鉴权 HTTP/JSON、sealed cursor 分页、SSE Watch、Go SDK、`praxis-review` CLI 和可启动的 `review-service`；
 - Slack、Linear、Jira 官方签名/时间窗解析与脱敏 Envelope exact binding；平台回包始终只是 Observation，outbound 只生成 DeliveryIntent，不调用网络；
 - reusable Store/Service conformance、unit/whitebox/blackbox/fault/runtime integration、race/vet 和 benchmark。
+- 可复现单节点 Internal Preview 封包：确定性 Go 二进制与 tar 构建、无内置 Secret 的启动包装、DB `0600`/symlink路径门禁、预解包closed-set校验，以及真实 SQLite+HTTP+CLI 黑盒/故障门禁。
 
 ## 公开入口
 
@@ -33,6 +34,19 @@ Review Engine 是 Praxis 的判断 Owner：它维护 Request、Target、Case、R
 - `production`：Review-owned composition，要求宿主显式注入真实公开 Owner Reader/Auto invocation；不创建跨组件 host root；
 - `conformance`：可复用 Store/Service、Auto Reviewer、Condition、Result Grounding 正反合同检查。
 - `releasecandidate`：发布完整的声明式 `ComponentReleaseV1` assembly-candidate；固定 `reference_only`，Host 只得到 Factory descriptor，不得到反向 import 或隐式 root。
+- `INTERNAL_PREVIEW.md`、`scripts/*internal-preview.sh`：单节点内部预览的构建、启动、校验与故障测试入口。
+
+## 单节点 Internal Preview
+
+本模块可封成不内置 Secret 的 Linux/amd64 单节点内部预览包。它复用真实 `review-service`、SQLite WAL、HTTP/JSON、Go SDK 与 CLI，不创建跨组件 production root，也不改变 `reference_only` 支持级别。
+
+```bash
+./scripts/package-internal-preview.sh
+./scripts/verify-internal-preview.sh dist/praxis-review-internal-preview_linux_amd64.tar.gz
+./scripts/test-internal-preview.sh
+```
+
+封包的能力边界、启动参数和校验步骤见 [`INTERNAL_PREVIEW.md`](INTERNAL_PREVIEW.md)。
 
 ## 当前 NO-GO
 
@@ -56,4 +70,5 @@ go test ./...
 go test -race ./...
 go vet ./...
 go test -bench 'SQLite|Router|HTTP' -benchmem -count=3 ./...
+./scripts/test-internal-preview.sh
 ```

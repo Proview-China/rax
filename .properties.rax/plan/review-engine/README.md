@@ -5,6 +5,7 @@
 - 计划状态：**Review owner-local/reference/test 非完整生产闭环最终独立复审 YES（P0/P1/P2=0）**。
 - REV-D11双轴真值：Review-owned aggregate已落地并通过独立复审；五类外部Owner production adapter/certification与宿主composition root继续NO-GO。
 - 当前结论：**Review-owned单机服务、Decision/Auto/Human/Bypass/Runtime只读组合、Result Grounding V2、Trace typed projection与reusable测试完成；Praxis production integration尚未GO**。
+- 单节点 Internal Preview：确定性 Linux/amd64 封包、外置 Secret 启动、真实 SQLite+HTTP+CLI 黑盒与故障门禁已落地；支持级别仍为 owner-local `reference_only`。
 - 最高业务输入：`tmp.document/Review.md`。
 - 设计入口：`.properties.rax/design/review-engine/README.md`。
 - 主计划：`review-engine-v1.md`。
@@ -20,10 +21,14 @@
 - Result Bundle Current Grounding V2：`result-bundle-current-grounding-v2.md`；设计与矩阵：`../../design/review-engine/result-bundle-current-grounding-v2.md`、`../../design/review-engine/result-bundle-current-grounding-v2-test-matrix.md`。Owner-local Go、compound Store、full aggregate、closed Router、fault/conformance及最终独立复审均完成（0/0/0）；真实三类source Owner adapter/certification与typed host root仍production NO-GO。
 - Detached Delivery V1：`detached-delivery-v1.md`；设计与矩阵：`../../design/review-engine/detached-delivery-v1.md`、`../../design/review-engine/detached-delivery-v1-test-matrix.md`。Review只冻结Binding/Closure候选；Runtime lineage/current、Application detached coordination、Human delivery current、Host root四组P0关闭前Go/production NO-GO。
 - 本轮非完整生产闭环收口记录：`../../memory/review-engine/20260723-223953-Review非完整生产闭环收口.md`。
+- 单节点 Internal Preview 封包记录：`../../memory/review-engine/20260726-110816-Review单节点InternalPreview封包.md`。
+- Internal Preview SQLite/归档安全返修：`../../memory/review-engine/20260726-112450-ReviewInternalPreview安全返修.md`。
 
 ## 计划产物预期
 
 Wave 1 已产出Go reference/test Review Verdict Owner。Review-owned SQLite持久服务、HTTP/SSE、Go SDK/CLI、平台协议Adapter与安全Router也已完成实现和Owner自测；Bypass正式事实、真实外部网络Reviewer、Application/Harness/Model接线和production current Reader仍为unsupported。
+
+Internal Preview 额外产出确定性单节点归档、checksum、无内置Secret启动脚本、真实服务黑盒验证与篡改/非法Secret故障门禁；它不包含外部Provider、OIDC、HA或跨Owner production root。
 
 REV-D11的S1 ProjectionRef来源与stable projection语义已闭合；Review aggregate与显式依赖注入组合已写Go并验收。真实Binding、Evidence、Policy、Authority、Scope Owner production adapters/certification与host root仍未满足production准入，测试fixture不冒充这些能力。
 

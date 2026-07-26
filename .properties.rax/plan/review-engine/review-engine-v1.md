@@ -181,6 +181,8 @@ Application 持久 Gate + Runtime current projection ─┴─> 生产集成与�
 
 验收：SQLite migration/WAL/generation CAS与重启/故障反例通过；HTTP strict JSON、tenant隔离、幂等、分页、SSE恢复通过；CLI只依赖SDK，平台raw输入只形成Observation且outbound只形成DeliveryIntent；Router不按Tool ID授权；service YES与external current/root NO-GO分别同步。
 
+Internal Preview 收口：在不新增业务语义的前提下，提供确定性 Linux/amd64 归档、SHA-256、无内置 Secret 的启动包装，以及真实 SQLite+HTTP+CLI 黑盒和篡改/非法配置故障门禁。该产物固定 owner-local `reference_only`，不关闭 production external-current/root NO-GO。
+
 ### REV-D11 production external current Reader 切片
 
 Review-owned asset已完成最终复核，以下内容保持冻结：
