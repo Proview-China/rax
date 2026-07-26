@@ -11,7 +11,7 @@
 - 五个正式Capability/Tool Descriptor与严格Schema；
 - 一个Package Manifest及Registry Admission；
 - 确定性Tool Surface；
-- Tool Owner中立Result→Context投影；
+- Tool Owner消费者中立`SettledToolResultProjectionV1`；
 - Sandbox Provider窄adapter；
 - SDK/API只通过既有Governed Action链调用；
 - 单元、白盒、黑盒、故障、Conformance、Race与Vet证据。
@@ -27,12 +27,12 @@ GitHub/database/邮件/部署/删除型工具或系统级SLA。
 |---|---|
 | `contract/core_tool_pack_v1.go` | 五工具ID、Package ID、Review默认、限制常量和共享坐标 |
 | `contract/core_tool_schemas_v1.go` | 五组严格Input/Output DTO、Validate/Seal/Clone |
-| `contract/core_tool_result_context_v1.go` | 中立Result投影、current/digest验证 |
+| `contract/settled_tool_result_projection_v1.go` | Tool-owned消费者中立Settled Result投影、current/digest验证 |
 | `corepack/catalog_v1.go` | Descriptor/Schema/Package确定性构造 |
 | `corepack/surface_v1.go` | 固定顺序Surface构造与exact material |
 | `corepack/registry_v1.go` | 按Capability→Tool→Package的Admission编排 |
-| `corepack/workspace_provider_v1.go` | read/search/inspect/patch受控执行adapter |
-| `corepack/process_provider_v1.go` | argv-oriented受控执行adapter；无shell fallback |
+| `corepack/workspace_sandbox_adapter_v1.go` | 只调用Sandbox公开Port的read/search/inspect/patch窄adapter；不直接读写OS文件 |
+| `corepack/process_sandbox_adapter_v1.go` | 只调用Sandbox公开Port的argv-oriented窄adapter；不启动OS进程、无shell fallback |
 | `sdk/core_tool_pack_v1.go` | Governed Action/Inspect façade |
 | `api/core_tool_pack_v1.go` | transport-neutral调用与只读Inspect |
 | `internal/testkit/core_tool_pack_v1.go` | 仅测试fixture与计数器 |
@@ -67,16 +67,17 @@ Sandbox/Review/Runtime类型或导入其实现。
 - [ ] `shell.run`若保留，只作指向`process.exec` exact Descriptor的装配期Alias；
 - [ ] MCP同名能力不可shadow Core对象。
 
-### P3：Workspace Provider
+### P3：Workspace Sandbox Adapter
 
-- [ ] 实现root current、canonical path与symlink-safe解析；
+- [ ] 只通过Sandbox公开Port复读root current、canonical path与symlink-safe结果；
 - [ ] read S1/S2 exact、range与Artifact化；
 - [ ] search bounded、稳定排序与binary拒绝；
 - [ ] inspect metadata/range/currentness，不读大正文；
 - [ ] patch完整validate/stage后单次原子CAS；
 - [ ] workspace外、TOCTOU、base drift、partial commit全部Fail Closed。
+- [ ] Sandbox Port不足时Capability保持unsupported并提交Port Delta；Tool不直接调用OS文件API。
 
-### P4：Process Provider
+### P4：Process Sandbox Adapter
 
 - [ ] 只接受argv数组；
 - [ ] exact executable allowlist与artifact digest；
@@ -84,11 +85,14 @@ Sandbox/Review/Runtime类型或导入其实现。
 - [ ] network/secret/host escape拒绝；
 - [ ] 实际入口fresh复读Review/Sandbox/Fence/TTL；
 - [ ] lost reply只Inspect原Attempt。
+- [ ] Sandbox Port不足时Capability保持unsupported并提交Port Delta；Tool不直接调用
+  `os/exec`或其他进程启动API。
 
 ### P5：Result与开发者入口
 
 - [ ] Provider Observation→Tool DomainResult→Runtime Settlement→Tool Apply；
-- [ ] 仅settled ToolResult+Runtime V4 current closure签发Context投影；
+- [ ] 仅settled ToolResult+Runtime V4 current closure签发消费者中立
+  `SettledToolResultProjectionV1`；
 - [ ] 大结果只交Artifact Ref；
 - [ ] SDK/API不提供Provider直连后门；
 - [ ] Tool不写Context Frame或Harness Continuation。
@@ -115,12 +119,13 @@ Sandbox/Review/Runtime类型或导入其实现。
 | process.exec | argv/cwd/env/timeout/output | 无隐式shell、无宿主env/network/secret |
 | Review | bypass/auto/human升级与TTL | 无current projection时Provider=0 |
 | Sandbox | root、symlink、executable、Fence实际点 | 任一漂移Provider=0 |
-| Result | Observation/DomainResult/Settlement/Apply/Context投影 | Provider回包不能越级 |
+| Result | Observation/DomainResult/Settlement/Apply/Settled Result投影 | Provider回包不能越级；投影不定义Context语义 |
 | Unknown | provider后各lost-reply点 | 只Inspect，原Attempt最多一次Effect |
 | 黑盒 | SDK调用五工具的成功/拒绝/Unknown | 不暴露内部handle或直连Provider |
 | 故障 | Reader unavailable、clock rollback、TTL crossing、CAS丢回包 | 零扩权、可审计恢复 |
 | 并发 | 同key 64并发、不同key并行、同文件patch竞争 | 同key单Effect；写冲突单赢家 |
 | Conformance | import、method-set、无network/secret/shell backdoor | 禁止跨Owner实现导入和第二执行语义 |
+| Effect Owner/import | 扫描Tool production文件的`os/exec`、OS文件mutation、进程启动与Sandbox实现导入 | Tool只能调用Sandbox公开Port；命中即失败，对应Capability保持unsupported |
 | Race/Vet | 全模块 | `go test -race ./...`、`go vet ./...`通过 |
 
 ## 5. 定向命令
@@ -148,7 +153,8 @@ Implementation开始前必须同时满足：
 1. 本Design PR已由总控审查并合并；
 2. 总控明确下发Implementation授权；
 3. live Sandbox公共Port能无损表达workspace root current、symlink-safe解析、
-   patch原子CAS、Executable allowlist和actual-point TTL；否则对应Provider保持unsupported；
+   patch原子CAS、Executable allowlist和actual-point TTL；否则对应Capability/Adapter保持
+   unsupported并提交Port Delta，Tool不得直接实现文件/进程Effect；
 4. Review现有公共合同能表达`operation_not_required|auto|human` current决策；
 5. Context只消费Tool中立投影，不要求Tool导入Context实现；
 6. production root、网络、Secret和远程MCP没有被本计划暗中启用。

@@ -280,7 +280,7 @@ Registry exact objects
   -> Runtime Intent / Admission / Permit / Begin
   -> Review current projection
   -> Sandbox current + actual-point enforcement
-  -> local Provider Observation / Receipt
+  -> Sandbox Provider Observation / Receipt
   -> Tool Owner DomainResult
   -> Runtime Settlement V4 current closure
   -> Tool ApplySettlement / settled ToolResultV2
@@ -296,14 +296,14 @@ Registry exact objects
 - patch触及高风险Policy路径；
 - Review、Authority、Fence、Sandbox或workspace current不可读/过期。
 
-## 6. Result到Context中立投影
+## 6. Settled Tool Result中立投影
 
-Tool Owner新增候选`CoreToolResultContextProjectionV1`，只做只读交接，不成为Context
-Fact、Frame或Runtime Outcome：
+Tool Owner新增消费者中立的`SettledToolResultProjectionV1`，只做settled结果的只读交接，
+不定义Context Fragment、Context Frame或Runtime Outcome语义：
 
 | 字段 | 语义 |
 |---|---|
-| `contract_version` | `praxis.core-tool.result-context-projection/v1` |
+| `contract_version` | `praxis.tool-mcp.settled-tool-result-projection/v1` |
 | `tool_result` | exact settled `ToolResultV2` Ref |
 | `tool` | exact Core ToolDescriptor Ref |
 | `operation_inspection` | current `OperationInspectionSettlementRefV4` |
@@ -314,8 +314,10 @@ Fact、Frame或Runtime Outcome：
 | `checked_unix_nano`、`expires_unix_nano`、`projection_digest` | current窗口与canonical摘要 |
 
 只有Tool Owner的settled ToolResult与Runtime V4 current closure同时有效时才可签发。
-Context Owner必须独立Inspect并经既有Refresh/S2/Generation CAS消费；Tool不得直接写
-Context Frame或Harness Continuation。
+该Projection只公开exact settled result、current closure、inline/artifact二选一、
+classification、completeness和TTL。Context只是潜在消费者之一；任何消费者均须独立Inspect。
+Context Owner若消费它，仍必须经既有Refresh/S2/Generation CAS形成自己的事实；Tool不得直接
+写Context Fragment、Context Frame或Harness Continuation。
 
 ## 7. Registry、Surface与MCP边界
 
@@ -349,7 +351,7 @@ context cancellation保留`context.Canceled`或`DeadlineExceeded`，不伪装成
 
 | Owner | 本纵切职责 | 明确禁止 |
 |---|---|---|
-| Tool/MCP | Core Descriptor/Schema/Package/Surface、Result规范化、DomainResult/Apply/Inspect | 不执行Sandbox Effect，不写Review/Context/Runtime事实 |
+| Tool/MCP | Core Descriptor/Schema/Package/Surface、Result规范化、DomainResult/Apply/Inspect、消费者中立Settled Result Projection | 不执行Sandbox Effect，不写Review/Context/Runtime事实，不直接调用OS文件/进程API |
 | Runtime | Intent、Admission、Permit、Begin、Fence、Settlement V4 | 不解释Tool payload，不选择Tool领域Disposition |
 | Review | Bypass/Auto/Human Policy与current Verdict | 不Dispatch Provider |
 | Sandbox | workspace/process current、Scope强制、原子patch、进程actual-point | 不注册或改写Tool语义 |
@@ -358,7 +360,9 @@ context cancellation保留`context.Canceled`或`DeadlineExceeded`，不伪装成
 
 当前Design PR不新增跨Owner公共Go合同。Implementation开始前若现有Sandbox workspace/process
 读写Port无法无损承载root current、base CAS、Executable allowlist或actual-point TTL，
-必须提交结构化Port Delta并保持对应Provider unsupported，禁止Tool本地复制共享类型。
+必须提交结构化Port Delta并保持对应Capability/Adapter unsupported，禁止Tool本地复制共享类型。
+Tool生产文件只允许通过Sandbox公开Port请求Effect；不得直接调用`os/exec`、OS文件写口、
+进程启动API或在Tool包内实现Sandbox Effect。
 
 ## 10. 硬反例
 

@@ -22,7 +22,7 @@
         <mxCell id="result" value="Tool Owner&#xa;DomainResult → Settlement → ToolResult" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
           <mxGeometry x="980" y="250" width="190" height="90" as="geometry"/>
         </mxCell>
-        <mxCell id="context" value="Neutral Context Projection&#xa;exact settled refs only" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+        <mxCell id="context" value="Settled Tool Result Projection&#xa;consumer-neutral exact refs" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
           <mxGeometry x="980" y="470" width="190" height="80" as="geometry"/>
         </mxCell>
         <mxCell id="e1" style="edgeStyle=orthogonalEdgeStyle;rounded=0;orthogonalLoop=1;jettySize=auto;html=1;endArrow=block;" edge="1" parent="1" source="tools" target="registry">
