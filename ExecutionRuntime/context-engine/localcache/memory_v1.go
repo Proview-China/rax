@@ -31,6 +31,7 @@ type cacheOpsV1[K any, E any] struct {
 
 type cacheRecordV1[E any] struct {
 	value          E
+	partition      contract.Digest
 	expires        int64
 	charge         uint64
 	protectedUntil int64
@@ -48,6 +49,7 @@ type cacheStoreV1[K any, E any] struct {
 	entries     map[contract.Digest]cacheRecordV1[E]
 	attempts    map[string]attemptRecordV1
 	generations map[contract.Digest]uint64
+	partitions  map[contract.Digest]uint32
 	charge      uint64
 	counters    LocalCacheCountersV1
 }
@@ -55,7 +57,7 @@ type cacheStoreV1[K any, E any] struct {
 func newCacheStoreV1[K any, E any](config LocalCacheCapacityV1, ops cacheOpsV1[K, E]) *cacheStoreV1[K, E] {
 	return &cacheStoreV1[K, E]{
 		config: config, ops: ops,
-		entries: map[contract.Digest]cacheRecordV1[E]{}, attempts: map[string]attemptRecordV1{}, generations: map[contract.Digest]uint64{},
+		entries: map[contract.Digest]cacheRecordV1[E]{}, attempts: map[string]attemptRecordV1{}, generations: map[contract.Digest]uint64{}, partitions: map[contract.Digest]uint32{},
 		counters: LocalCacheCountersV1{Invalidations: map[contract.ContextCacheInvalidationReasonV1]uint64{}},
 	}
 }
@@ -130,9 +132,10 @@ func (s *cacheStoreV1[K, E]) put(ctx context.Context, attemptID string, entry E,
 		s.removeEntryV1(key, false)
 		saturatingIncrementV1(&s.counters.Evictions)
 	}
-	s.entries[meta.key] = cacheRecordV1[E]{value: stored, expires: expires, charge: charge, protectedUntil: recoveryUntil}
+	s.entries[meta.key] = cacheRecordV1[E]{value: stored, partition: meta.partition, expires: expires, charge: charge, protectedUntil: recoveryUntil}
 	s.charge += charge
 	s.generations[meta.partition] = meta.generation
+	s.partitions[meta.partition]++
 	s.attempts[attemptID] = attemptRecordV1{key: meta.key, recoveryUntil: recoveryUntil}
 	saturatingIncrementV1(&s.counters.Admissions)
 	return cloneJSONV1(stored)
@@ -280,6 +283,13 @@ func (s *cacheStoreV1[K, E]) removeEntryV1(key contract.Digest, removeAttempts b
 			}
 		}
 	}
+	remaining := s.partitions[record.partition]
+	if remaining > 1 {
+		s.partitions[record.partition] = remaining - 1
+		return
+	}
+	delete(s.partitions, record.partition)
+	delete(s.generations, record.partition)
 }
 
 func (s *cacheStoreV1[K, E]) snapshotV1() LocalCacheCountersV1 {
