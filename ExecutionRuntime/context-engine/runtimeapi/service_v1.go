@@ -15,6 +15,7 @@ type AppendSettledToolResultResultV2 = kernel.AppendSettledToolResultResultV2
 type ContextRuntimeAPIV1 interface {
 	ConsumeFrame(context.Context, contract.ContextFrameConsumptionRequestV1) (contract.ContextFrameConsumptionDescriptorV1, error)
 	AppendSettledToolResult(context.Context, AppendSettledToolResultRequestV2) (AppendSettledToolResultResultV2, error)
+	MaterializeDescriptor(context.Context, MaterializeDescriptorRequestV1) (MaterializeDescriptorResultV1, error)
 }
 
 type ServiceV1 struct {
