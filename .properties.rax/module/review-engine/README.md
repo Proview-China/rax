@@ -58,6 +58,7 @@ Review Engine 是判断 Owner。它维护 Request、Target、Case、Round、Assi
 - 安全 Router、Result Bundle、Behavior Feedback Candidate；
 - 内存 reference backend、SQLite backend、Service 与 Runtime Reader 的测试矩阵。
 - 可复现 Linux/amd64 tar.gz、SHA-256、无内置 Secret 启动包装及篡改/非法配置故障门禁。
+- check-only启动诊断：真实校验配置/TLS/SQLite migration/WAL/foreign-key/integrity，不创建listener，不输出Secret，不提升production状态。
 
 ## 当前 NO-GO
 

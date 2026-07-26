@@ -13,6 +13,7 @@ tenant="${PRAXIS_REVIEW_TENANT:-local-preview}"
 subject="${PRAXIS_REVIEW_SUBJECT:-local-operator}"
 export PRAXIS_REVIEW_ADDR="${PRAXIS_REVIEW_ADDR:-127.0.0.1:8087}"
 export PRAXIS_REVIEW_AUTH_TTL_SECONDS="${PRAXIS_REVIEW_AUTH_TTL_SECONDS:-3600}"
+export PRAXIS_REVIEW_MODE="${PRAXIS_REVIEW_MODE:-serve}"
 
 if [[ ! "${PRAXIS_REVIEW_TOKEN}" =~ ^[[:xdigit:]]{64,4096}$ ]]; then
   printf '%s\n' 'PRAXIS_REVIEW_TOKEN must contain 64-4096 hexadecimal characters' >&2
@@ -29,6 +30,10 @@ fi
 if [[ ! "${PRAXIS_REVIEW_AUTH_TTL_SECONDS}" =~ ^[0-9]+$ ]] ||
   ((PRAXIS_REVIEW_AUTH_TTL_SECONDS < 1 || PRAXIS_REVIEW_AUTH_TTL_SECONDS > 2592000)); then
   printf '%s\n' 'PRAXIS_REVIEW_AUTH_TTL_SECONDS must be between 1 and 2592000' >&2
+  exit 2
+fi
+if [[ "${PRAXIS_REVIEW_MODE}" != serve && "${PRAXIS_REVIEW_MODE}" != check ]]; then
+  printf '%s\n' 'PRAXIS_REVIEW_MODE must be serve or check' >&2
   exit 2
 fi
 if [[ ! -x "${service_bin}" ]]; then

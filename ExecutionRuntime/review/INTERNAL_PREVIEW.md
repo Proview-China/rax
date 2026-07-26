@@ -69,6 +69,24 @@ export PRAXIS_REVIEW_TENANT="local-preview"
 - 过宽权限、非当前用户、symlink、hardlink、symlinked parent或dot path component一律Fail Closed；
 - 启动器不会用`chmod`静默“修复”不安全的既有数据库。
 
+### 启动前诊断
+
+使用同一启动配置执行check-only模式：
+
+```bash
+PRAXIS_REVIEW_MODE=check ./bin/run-local.sh
+```
+
+该模式严格执行配置/Secret shape、监听地址/TLS约束、SQLite open/migration/WAL/foreign-key及`PRAGMA integrity_check`，但不创建HTTP listener。fresh DB会初始化schema，因此它不是纯只读命令；既有损坏数据库、未知mode、坏TLS或非loopback无TLS均以非零状态失败。
+
+成功只输出不含路径、token或其他Secret的稳定JSON：
+
+```json
+{"contract_version":"praxis.review.service-check/v1","status":"ok","configuration":"valid","database":"ready","integrity":"ok","listener":"not_started","support_mode":"owner-local","production_eligible":false}
+```
+
+这里的`database=ready`只表示Review-owned单节点启动依赖已通过，不表示跨Owner current、Runtime Gate、Provider或Praxis production readiness。
+
 另一个终端可使用CLI：
 
 ```bash
@@ -103,7 +121,7 @@ export PRAXIS_REVIEW_TOKEN="<与服务相同的token>"
 ./scripts/test-internal-preview.sh
 ```
 
-该门禁执行两次独立封包并比较归档字节，随后执行真实服务/CLI冒烟、篡改归档、非法Secret、DB权限/symlink路径，以及relative-traversal/absolute-path/symlink/hardlink/unexpected-member恶意归档拒绝。
+该门禁执行两次独立封包并比较归档字节，随后执行check-only启动诊断、真实服务/CLI冒烟、损坏DB/未知mode、篡改归档、非法Secret、DB权限/symlink路径，以及relative-traversal/absolute-path/symlink/hardlink/unexpected-member恶意归档拒绝。
 
 ## 明确不包含
 

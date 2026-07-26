@@ -155,6 +155,15 @@ export PRAXIS_REVIEW_DB="${work_dir}/review.db"
 export PRAXIS_REVIEW_ADDR="127.0.0.1:${port}"
 export PRAXIS_REVIEW_TENANT="internal-preview"
 export PRAXIS_REVIEW_SERVICE_BIN="${root}/bin/review-service"
+export PRAXIS_REVIEW_MODE=check
+check_output="$("${root}/bin/run-local.sh")"
+expected_check='{"contract_version":"praxis.review.service-check/v1","status":"ok","configuration":"valid","database":"ready","integrity":"ok","listener":"not_started","support_mode":"owner-local","production_eligible":false}'
+if [[ "${check_output}" != "${expected_check}" ]]; then
+  printf '%s\n' 'review-service check mode returned an invalid diagnostic' >&2
+  printf '%s\n' "${check_output}" >&2
+  exit 1
+fi
+export PRAXIS_REVIEW_MODE=serve
 "${root}/bin/run-local.sh" >"${work_dir}/service.stdout" 2>"${work_dir}/service.stderr" &
 service_pid=$!
 

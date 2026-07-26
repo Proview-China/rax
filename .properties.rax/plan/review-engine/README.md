@@ -23,6 +23,7 @@
 - 本轮非完整生产闭环收口记录：`../../memory/review-engine/20260723-223953-Review非完整生产闭环收口.md`。
 - 单节点 Internal Preview 封包记录：`../../memory/review-engine/20260726-110816-Review单节点InternalPreview封包.md`。
 - Internal Preview SQLite/归档安全返修：`../../memory/review-engine/20260726-112450-ReviewInternalPreview安全返修.md`。
+- Internal Preview check-only启动诊断：`../../memory/review-engine/20260726-113822-ReviewInternalPreview启动诊断.md`。
 
 ## 计划产物预期
 

@@ -59,6 +59,8 @@
 | API-15 | Finding写入 | Principal Subject必须等于current claimed Reviewer/LeaseHolder，lease过期或冒名零写 |
 | API-16 | Result Bundle | Submit/SDK返回并重启复读exact Bundle；Request ref漂移零Admission |
 | API-17 | Behavior Feedback | 只创建Candidate；不提供Policy/Context/Memory/Application写口 |
+| API-18 | `review-service` check-only | 真实配置/TLS/SQLite migration/WAL/foreign-key/integrity通过；稳定无Secret JSON；listener零 |
+| API-19 | check-only损坏DB/未知mode/坏TLS | 非零失败；无success JSON；未知mode在DB创建前拒绝 |
 
 ## 4. Platform Adapter
 
@@ -85,6 +87,6 @@
 - full `go test ./...`、`go test -race ./...`、`go vet ./...`；
 - Store与API reusable Conformance；
 - `go test -bench 'SQLite|Router|HTTP|Watch' -benchmem -count=3`只记录基线；
-- `scripts/test-internal-preview.sh`验证归档双构建字节一致、checksum、真实SQLite+HTTP+CLI启动，fresh DB `0600`、既有宽权限/DB symlink/symlinked parent拒绝，以及篡改/relative-traversal/absolute-path/symlink/hardlink/unexpected-member归档与非法Secret失败关闭；
+- `scripts/test-internal-preview.sh`验证归档双构建字节一致、checksum、check-only诊断、真实SQLite+HTTP+CLI启动，损坏DB/未知mode、fresh DB `0600`、既有宽权限/DB symlink/symlinked parent拒绝，以及篡改/relative-traversal/absolute-path/symlink/hardlink/unexpected-member归档与非法Secret失败关闭；
 - `gofmt -l`、`git diff --check`、禁止import扫描；
 - 无真实平台凭据时明确标记platform live E2E未执行。
