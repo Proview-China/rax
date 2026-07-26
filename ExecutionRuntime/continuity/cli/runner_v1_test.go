@@ -176,6 +176,49 @@ func TestRunnerV1ReadCommandsRejectMissingPortAndUnknownFields(t *testing.T) {
 	}
 }
 
+func TestReadOnlyRunnerV1ExecutesReadsAndRejectsGovernedWrites(t *testing.T) {
+	now := time.Date(2026, 7, 26, 3, 0, 0, 0, time.UTC)
+	backend := memory.NewWithClock(func() time.Time { return now })
+	clock := &testkit.Clock{Time: now}
+	timeline, err := domain.NewReferenceTimeline(backend, clock, time.Minute)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, _, err := timeline.Project(context.Background(), testkit.Candidate(1, 1, continuitycontract.TrustObservation))
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkpoint, err := domain.NewCheckpointManifestControllerV2(backend)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := sdk.New(sdk.Config{Timeline: timeline, Checkpoints: checkpoint, Clock: func() time.Time { return now }})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := cli.NewReadOnlyRunnerV1(client, client)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	showInput, _ := json.Marshal(cli.TimelineShowRequestV1{EvidenceRecordRef: record.EvidenceRecordRef})
+	var output bytes.Buffer
+	if err := runner.RunV1(context.Background(), []string{"timeline", "show"}, bytes.NewReader(showInput), &output); err != nil {
+		t.Fatal(err)
+	}
+	var shown cli.OutputV1
+	if err := json.Unmarshal(output.Bytes(), &shown); err != nil || shown.Event == nil || shown.Event.EvidenceRecordRef != record.EvidenceRecordRef {
+		t.Fatalf("read-only timeline show = %#v err=%v", shown, err)
+	}
+
+	output.Reset()
+	request := cliWorkflowRequestV1(now, appcontract.ContinuityCheckpointCreateV1)
+	payload, _ := json.Marshal(request)
+	if err := runner.RunV1(context.Background(), []string{"checkpoint", "create"}, bytes.NewReader(payload), &output); err == nil || !core.HasReason(err, core.ReasonComponentMissing) || output.Len() != 0 {
+		t.Fatalf("read-only runner accepted governed write: err=%v output=%q", err, output.String())
+	}
+}
+
 func TestRunnerV1TypedNilCanceledAndConcurrentDeterministic(t *testing.T) {
 	var typedNil *cliWorkflowPortV1
 	if _, err := cli.NewRunnerV1(typedNil); err == nil {

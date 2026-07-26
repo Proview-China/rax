@@ -72,8 +72,18 @@ func NewRunnerWithReadersV1(workflows GovernedWorkflowPortV1, timeline TimelineR
 	return &RunnerV1{workflows: workflows, timeline: timeline, checkpoint: checkpoint}, nil
 }
 
+// NewReadOnlyRunnerV1 constructs the reference-only local read surface. It
+// intentionally has no governed workflow port, so every write command fails
+// closed instead of bypassing the Application gateway.
+func NewReadOnlyRunnerV1(timeline TimelineReadPortV1, checkpoint CheckpointReadPortV1) (*RunnerV1, error) {
+	if nilCLIV1(timeline) || nilCLIV1(checkpoint) {
+		return nil, core.NewError(core.ErrorInvalidArgument, core.ReasonComponentMissing, "Continuity read ports are required")
+	}
+	return &RunnerV1{timeline: timeline, checkpoint: checkpoint}, nil
+}
+
 func (r *RunnerV1) RunV1(ctx context.Context, args []string, input io.Reader, output io.Writer) error {
-	if r == nil || nilCLIV1(r.workflows) || nilCLIV1(ctx) || nilCLIV1(input) || nilCLIV1(output) {
+	if r == nil || nilCLIV1(ctx) || nilCLIV1(input) || nilCLIV1(output) {
 		return core.NewError(core.ErrorInvalidArgument, core.ReasonComponentMissing, "Continuity CLI dependencies are required")
 	}
 	if err := ctx.Err(); err != nil {
@@ -90,6 +100,9 @@ func (r *RunnerV1) RunV1(ctx context.Context, args []string, input io.Reader, ou
 	kind, inspect, ok := commandV1(args)
 	if !ok {
 		return core.NewError(core.ErrorCapabilityUnavailable, core.ReasonComponentMissing, "Continuity CLI command is not registered")
+	}
+	if nilCLIV1(r.workflows) {
+		return core.NewError(core.ErrorCapabilityUnavailable, core.ReasonComponentMissing, "Continuity governed workflow capability is not configured")
 	}
 	var request appcontract.ContinuityWorkflowRequestV1
 	if err := decodeInputV1(input, &request); err != nil {

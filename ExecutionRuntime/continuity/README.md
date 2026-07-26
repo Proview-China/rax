@@ -29,6 +29,7 @@
 - C-08 `HistoryDerivationCandidateFactV1`：从同Execution Scope的ordered exact Timeline Event集合与已可见output Content Object双轮检查派生immutable revision-1 candidate-only Fact；不证明summary/index正确，不发布current，不改写Event，不执行Compaction/Purge。
 - `applicationadapter.GovernedWorkflowAdapterV1`只依赖Application公开`contract/ports`，要求Continuity-owned exact Domain Request Ref；`sdk`新增唯一受治理写入口`Submit/InspectGovernedWorkflow`，七类写请求只交给Application Gateway，不持Fact Store、不构造raw Bundle、不调用Provider。
 - `cli`实现Continuity自有命令描述与strict JSON参数映射：只读`timeline show/watch`、`checkpoint inspect`，治理写`timeline project`、`checkpoint create`、`fork`、`rewind plan`、`restore`、`artifact attach`、`retention resolve`及`workflow inspect`；根CLI注册、endpoint、credential与production root不在本模块。
+- `cmd/continuity-reference`提供可直接构建运行的Developer Preview只读入口：打开本地SQLite metadata store并装配SDK/CLI Runner，只允许`timeline show/watch`与`checkpoint inspect`；治理写命令固定Fail Closed。它不是`praxis`根CLI、Application root或production服务。
 - `releasecandidate`通过Agent Assembler公共合同发布`reference_only` ComponentRelease候选；publisher遇到Ensure未知回包只按exact ref Inspect，Host只得到Factory descriptor。Wave1 Conformance的supported/unsupported声明为exact闭集，未知、缺失、重复能力均Fail Closed；只读Adapter已存在不等于production Runtime/Application root已解锁。
 - 内容寻址Chunk、Manifest、跨存储Journal、精确Inspect恢复和完整性校验。
 - Retention、Tombstone、Legal Hold元数据状态机；Create/CAS未知或丢回包按原Object/revision/content exact Inspect，changed winner Conflict；Physical Purge明确unsupported。
@@ -54,6 +55,7 @@ storage/sqlite/    pure-Go SQLite schema/migration、WAL/FULL、Fact history/cur
 storage/rocksdb/   build-tag隔离的RocksDB 9.10窄C API ContentStore
 sdk/               transport-neutral查询、Page/Cursor边界复验、Inspect、Plan Validate与Application治理写请求客户端
 cli/               Continuity只读/治理写命令描述、strict JSON参数与结果映射；不注册根CLI
+cmd/continuity-reference/ 本地SQLite Developer Preview只读可执行入口；不包含治理写面或production root
 conformance/       Wave 1能力声明与越界检查
 releasecandidate/   reference-only ComponentRelease builder与lost-reply exact publisher
 fakes/             测试专用lost-reply fault wrapper，无生产能力
@@ -74,3 +76,15 @@ go test -tags continuity_rocksdb ./...
 go test -race -tags continuity_rocksdb ./...
 go vet -tags continuity_rocksdb ./...
 ```
+
+## Developer Preview只读入口
+
+构建并对本地SQLite metadata store执行分页读取：
+
+```bash
+go build -o ./bin/continuity-reference ./cmd/continuity-reference
+printf '%s\n' '{"query":{"ledger_scope_digest":"scope-1","authority_watermark":"authority-1","policy_watermark":"policy-1","page_limit":10}}' \
+  | ./bin/continuity-reference -db ./continuity.db timeline watch
+```
+
+可用命令仅为`timeline show`、`timeline watch`和`checkpoint inspect`。该入口会创建/迁移本地SQLite metadata schema，但不会投影Event、创建Checkpoint、执行Restore、调用Provider或注册Praxis根CLI；所有治理写命令均返回Capability unavailable。
