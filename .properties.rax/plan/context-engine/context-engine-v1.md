@@ -5,7 +5,7 @@
 新增Design Candidate见[Context Frame Consumption V1](../../design/context-engine/context-frame-consumption-v1.md)。Design合并后实施顺序固定为：
 
 1. `contract/frame_consumption_v1.go`、`contract/compression_evidence_v1.go`：presence、canonical digest、错误闭集；
-2. `kernel/frame_consumption_v1.go`、`kernel/tool_result_fragment_v1.go`：S1/S2 exact materialization、settled ToolResult small/large分支、incremental Frame；
+2. `kernel/frame_consumption_v1.go`、`kernel/settled_tool_fragment_v1.go`：S1/S2 Context exact materialization、只消费Tool Owner单一settled projection、small/large分支与incremental Frame；
 3. `kernel/structural_value_evaluator_v1.go`：确定性Invariant Gate与默认advisory启发式；
 4. `fragmentcache/memory_v1.go`、`framecache/memory_v1.go`：线程安全、TTL最小、invalidation generation、deep-copy/no-alias；
 5. package unit与`tests/{blackbox,failure,conformance}`，随后target100、race20、full ordinary/race/vet、gofmt与import/range/diff gates。

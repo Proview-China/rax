@@ -60,10 +60,6 @@ type ContextFrameConsumptionRequestV1 struct {
     AgentInstanceRef      FactRef
     RunID                 string
     RunScopeDigest        Digest
-    RendererVersion       string
-    ModelFamily           string
-    ModelProfileRef       FactRef
-    ToolSchemaDigest      Digest
     PromptAssetRefs       []PromptAssetRefV1
     RecipeRef             FactRef
     DisclosureClass       DisclosureClassV1
@@ -88,10 +84,6 @@ type ContextFrameConsumptionDescriptorV1 struct {
     AgentInstanceRef      FactRef
     RunID                 string
     RunScopeDigest        Digest
-    RendererVersion       string
-    ModelFamily           string
-    ModelProfileRef       FactRef
-    ToolSchemaDigest      Digest
     PromptAssetRefs       []PromptAssetRefV1
     RecipeRef             FactRef
     DisclosureClass       DisclosureClassV1
@@ -102,7 +94,7 @@ type ContextFrameConsumptionDescriptorV1 struct {
 }
 ```
 
-`ModelFamily/ModelProfileRef`只作为下游消费条件和cache fingerprint维度，不定义Model消息、role、Projection或Provider协议。
+Descriptor只输出Context exact闭包。Model Invoker把Context提供的Frame Fingerprint与其自有renderer、model family/profile、Tool Schema等维度组合为Model-owned Projection Cache key；Context不读取这些Model current facts。
 
 ### 2.2 Presence、排序与Digest
 
@@ -115,7 +107,7 @@ type ContextFrameConsumptionDescriptorV1 struct {
 - Descriptor Digest使用domain=`praxis.context/frame-consumption-v1`，seal除自身Digest置空外的完整Descriptor。
 - Descriptor Ref Digest必须等于完整Descriptor Digest，禁止只seal ID、FrameRef、Rendered或Fingerprint。
 
-生成算法固定为S1 exact读取Frame/Manifest/Generation/ContentRefs并完整Inspect，构造Descriptor后执行S2相同Owner-current复读。任一ref、digest、current pointer、scope、renderer、model profile、tool schema、prompt/recipe、disclosure或TTL漂移时零Descriptor、零Cache写。
+生成算法固定为S1 exact读取Frame/Manifest/Generation/ContentRefs并完整Inspect，构造Descriptor后执行S2相同Context Owner-current复读。任一ref、digest、current pointer、scope、prompt/recipe、disclosure或TTL漂移时零Descriptor、零Cache写。
 
 ## 3. Context Cache Hint与Fingerprint
 
@@ -136,9 +128,6 @@ frame_changed
 manifest_changed
 generation_changed
 fragment_changed
-renderer_changed
-model_profile_changed
-tool_schema_changed
 prompt_revision_changed
 recipe_revision_changed
 disclosure_changed
@@ -153,8 +142,7 @@ Fingerprint必须seal：
 tenant scope + agent exact ref + run ID/scope
 + Frame/Manifest/Generation exact refs
 + Stable/SemiStable/DynamicTail ContentRefs
-+ renderer version + model family/profile exact ref
-+ tool schema digest + prompt exact refs + recipe exact ref
++ Fragment exact refs + prompt exact refs + recipe exact ref
 + disclosure class + cache key version
 ```
 
@@ -171,9 +159,24 @@ Context可以说明哪些区域稳定及为什么失效，但：
 ### 4.1 Key闭包
 
 ```go
-type ContextLocalCacheKeyClosureV1 struct {
+type ContextFragmentCacheKeyV1 struct {
     ContractVersion        string
-    Layer                  ContextCacheLayerV1
+    TenantScopeDigest      Digest
+    AgentInstanceRef       FactRef
+    RunID                  string
+    RunScopeDigest         Digest
+    FragmentRef            FactRef
+    Content                ContentRef
+    PromptAssetRefs        []PromptAssetRefV1
+    RecipeRef              FactRef
+    DisclosureClass        DisclosureClassV1
+    InvalidationGeneration uint64
+    KeyVersion             string
+    Digest                 Digest
+}
+
+type ContextFrameCacheKeyV1 struct {
+    ContractVersion        string
     TenantScopeDigest      Digest
     AgentInstanceRef       FactRef
     RunID                  string
@@ -181,11 +184,6 @@ type ContextLocalCacheKeyClosureV1 struct {
     FrameRef               FactRef
     ManifestRef            FactRef
     GenerationRef          FactRef
-    FragmentRef            *FactRef
-    RendererVersion        string
-    ModelFamily            string
-    ModelProfileRef        FactRef
-    ToolSchemaDigest       Digest
     PromptAssetRefs        []PromptAssetRefV1
     RecipeRef              FactRef
     DisclosureClass        DisclosureClassV1
@@ -195,18 +193,29 @@ type ContextLocalCacheKeyClosureV1 struct {
 }
 ```
 
-Fragment Cache V1仍绑定消费它的exact Frame，禁止通过省略Frame/scope维度进行跨Frame复用。Frame Cache value是已完整Inspect的immutable Frame/Manifest/Generation/ContentRef闭包，不替代权威metadata/current store。
+Fragment Cache允许跨Frame复用，但必须同时满足exact FragmentRef+ContentRef、tenant/agent/run scope、disclosure、Prompt/Recipe policy、invalidation generation与key version完全相同。Frame Cache继续exact绑定Frame/Manifest/Generation；其value是已完整Inspect的immutable闭包，不替代权威metadata/current store。
 
 ### 4.2 TTL
+
+Fragment Cache：
+
+```text
+Expires = min(
+  request.NotAfter,
+  Fragment Source current window,
+  Prompt/Recipe current window,
+  Disclosure/Authority current window,
+  cache policy upper bound
+)
+```
+
+Frame Cache：
 
 ```text
 Expires = min(
   request.NotAfter,
   Frame/Manifest/Generation current window,
-  every Fragment Source current window,
-  renderer current window,
-  Model Profile current window,
-  Tool Schema current window,
+  every admitted Fragment Source current window,
   Prompt/Recipe current window,
   Disclosure/Authority current window,
   cache policy upper bound
@@ -229,37 +238,15 @@ Entry状态闭集为`current | expired | invalidated`：
 
 ## 5. settled ToolResult到Incremental Frame
 
-MCP调用在Context边界只作为Tool Owner已经settled的ToolResult；Context不定义第二套MCP Result。
-
-```go
-type ToolResultFragmentMaterializationRequestV1 struct {
-    ContractVersion       string
-    ParentFrameRef        FactRef
-    ToolResultRef         FactRef
-    ToolDomainResultRef   FactRef
-    ToolApplyRef          FactRef
-    ToolCurrentRef        FactRef
-    AssociationRef        FactRef
-    ExecutionScopeDigest  Digest
-    RunID                 string
-    SourceTurn            uint32
-    ActionID              string
-    AttemptID             string
-    InlineContent         *ContentRef
-    ArtifactRef           *ArtifactAnchor
-    BoundedSummary        *ContentRef
-    CheckedUnixNano       int64
-    NotAfterUnixNano      int64
-    RequestDigest         Digest
-}
-```
+MCP调用在Context边界只作为Tool Owner已经settled的ToolResult；Context不定义第二套MCP Result、治理闭包或current DTO。
 
 规则：
 
-- Tool exact refs必须绑定同一Execution/Action/Attempt/Result，且Revision/Digest/TTL current；
-- `InlineContent`只允许`<= min(Recipe.ToolInlineMaxBytes, 64 KiB)`且仍受token预算约束；
-- 大正文必须走exact `ArtifactAnchor{Owner,Version/Digest,Range}`和有界摘要；Frame不得复制原始大对象；
-- Inline与Artifact分支exact-one；大结果缺Artifact或摘要时Fail Closed；
+- Context只消费Tool Owner唯一公开`SettledToolResultProjectionV1`的exact ref和current snapshot；最终名称随Tool Owner批准的公共合同校准，不在Context复制或扩展DTO；
+- Context Reader/Adapter只无损接收该projection中的Revision、Digest、Checked/Expires和Owner已验证的materialization分支，不复刻ToolResult/DomainResult/Apply/Current/Association链；
+- 小正文只接受Tool projection给出的exact ContentRef，且`<= min(Recipe.ToolInlineMaxBytes, 64 KiB)`并受token预算约束；
+- 大正文必须由Tool projection给出exact ArtifactRef和有界摘要；Frame不得复制原始大对象；
+- Tool projection的inline/artifact分支不合法、大结果缺Artifact或摘要时Fail Closed；
 - Receipt、Observation、Provider response、未settled Result、raw/unbounded output在任何Cache/Frame写前拒绝；
 - 结果只能形成`tool_result`或`artifact_reference` Fragment，不能形成instruction、Authority、Tool Schema或Review Verdict；
 - Parent Frame不可变；新增Fragment只进入incremental child Frame，StablePrefix/SemiStable exact refs保持，动态内容进入DynamicTail。
@@ -360,14 +347,15 @@ Gate失败不得生成current child Frame/Generation；最多保留非current诊
 | `unavailable` | Owner Reader/Store确定不可用 | 保留原Frame后重试读取 |
 | `indeterminate` | Unknown、cancel、deadline或lost reply | 只Inspect原Attempt/Key |
 | `limit_exceeded` | bytes/token/items/delta深度超限 | 安全降级，否则Fail Closed |
-| `unsupported` | Provider DTO/cache handle、Epiplexity或跨FrameCache复用 | 不执行 |
+| `unsupported` | Provider DTO/cache handle、Epiplexity或省略任一Cache Key闭包维度的复用 | 不执行 |
 
 Cache miss/eviction不是领域错误。任何错误均不得修改原Frame或触发Provider/Harness调用。
 
 ## 9. 硬反例
 
 - 相同FrameID但Revision/Digest不同仍命中Cache；
-- cache key遗漏tenant/agent/run、Frame exact ref、renderer、model、tool schema、prompt/recipe或disclosure；
+- Fragment key遗漏exact FragmentRef/ContentRef、tenant/agent/run、prompt/recipe policy或disclosure；
+- Frame key遗漏Frame/Manifest/Generation exact ref、tenant/agent/run、prompt/recipe或disclosure；
 - Entry TTL长于任一Owner current window；
 - eviction后改变Frame Digest；
 - Provider cached tokens自报被认定为Context hit；
@@ -386,8 +374,8 @@ Cache miss/eviction不是领域错误。任何错误均不得修改原Frame或�
 
 Design PR合并后仅允许：
 
-- `contract`：Consumption Descriptor、Cache Hint/Key、Tool materialization、Evaluation/Evidence；
-- `kernel`：exact descriptor、ToolResult incremental Frame、Invariant Gate、默认确定性Evaluator；
+- `contract`：Consumption Descriptor、Cache Hint/Key、Evaluation/Evidence；不复制Tool Owner DTO；
+- `kernel`：exact descriptor、消费Tool Owner settled projection形成incremental Frame、Invariant Gate、默认确定性Evaluator；
 - `fragmentcache`、`framecache`：线程安全Memory reference implementation；
 - unit/whitebox/blackbox/fault/conformance/race测试。
 
