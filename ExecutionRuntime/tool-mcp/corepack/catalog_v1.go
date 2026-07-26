@@ -189,7 +189,14 @@ func cloneDefinitionsV1(values []DefinitionV1) []DefinitionV1 {
 func (c CatalogV1) Clone() CatalogV1 {
 	out := c
 	out.Capabilities = append([]contract.CapabilityDescriptor(nil), c.Capabilities...)
+	for i := range out.Capabilities {
+		out.Capabilities[i].EffectKinds = append([]runtimeports.NamespacedNameV2(nil), out.Capabilities[i].EffectKinds...)
+	}
 	out.Tools = append([]contract.ToolDescriptor(nil), c.Tools...)
+	for i := range out.Tools {
+		out.Tools[i].EffectKinds = append([]runtimeports.NamespacedNameV2(nil), out.Tools[i].EffectKinds...)
+		out.Tools[i].Residuals = append([]contract.Residual(nil), out.Tools[i].Residuals...)
+	}
 	out.Materials = append([]contract.ToolDefinitionMaterialV1(nil), c.Materials...)
 	for i := range out.Materials {
 		out.Materials[i] = out.Materials[i].Clone()
