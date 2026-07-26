@@ -4,6 +4,7 @@ package memory
 
 import (
 	"context"
+	"reflect"
 	"sort"
 	"sync"
 	"time"
@@ -275,7 +276,7 @@ func (b *Backend) CreateJournal(_ context.Context, journal contract.WriteJournal
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	if existing, ok := b.journals[journal.JournalID]; ok {
-		if existing.ObjectID == journal.ObjectID && existing.ManifestDigest == journal.ManifestDigest {
+		if reflect.DeepEqual(existing, journal) {
 			return nil
 		}
 		return contract.NewError(contract.ErrRevisionConflict, "journal_id", "create-once journal conflict")

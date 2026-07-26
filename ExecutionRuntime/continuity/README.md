@@ -24,6 +24,7 @@
 - immutable revision 1 `CheckpointManifestSealFactV2`：Repository事务内复读current `verified_candidate`并exact绑定Manifest revision/digest/Owner、Attempt/Barrier/EffectCut、frozen-ref-set与required Participant closures；same-ID exact幂等、changed Conflict、lost reply只Inspect原Seal。
 - 并发安全的Manifest/Seal内存reference repository与lost-reply fault fake；current/history按结构化Tenant/Scope/ID隔离，返回值均深拷贝，不暴露可变alias；progressed旧CAS重放Conflict且不形成ABA。
 - Backend-neutral metadata/content/retention SPI；`storage/sqlite`已提供pure-Go WAL/FULL SQLite schema v9实现，覆盖Journal/Object/Retention、Timeline、Artifact Relation、Content Integrity Audit、Content Delta、History Derivation Candidate、Checkpoint Manifest/Seal及Restore/Rewind Plan history/current/CAS；`storage/rocksdb`在`continuity_rocksdb` build tag下提供窄C API生产Chunk实现。
+- `conformance.RunBackendSuiteV1`提供可被替代后端直接调用的reference suite：对隔离namespace验证Content missing/put/get/clone/digest、Manifest stage/Inspect/conflict/visible、Journal create-once/CAS/stale/32路单赢家及Retention create/CAS/stale共11项既有SPI不变量。报告固定`ReferenceOnly=true`、`ProductionEligible=false`，不认证部署、加密/KMS、备份、Participant、Provider或SLA。
 - C-06 `ContentIntegrityAuditFactV1`：对调用方明确列出的Object/Journal坐标执行两轮Manifest/Journal/Chunk exact检查，封存immutable revision-1诊断Fact；missing/corrupt/unknown闭合为dangling/corrupt/indeterminate。它不枚举全库、不证明无孤儿、不回收、不删除、不调用Provider。
 - C-07 `ContentDeltaFactV1`：从两个已可见且完整可读Object的Manifest/Chunk双轮检查派生ordered target recipe及reused/added/removed集合；只记录结构共享关系，不创建Target、不执行patch/Compaction、不删除base/Chunk。
 - C-08 `HistoryDerivationCandidateFactV1`：从同Execution Scope的ordered exact Timeline Event集合与已可见output Content Object双轮检查派生immutable revision-1 candidate-only Fact；不证明summary/index正确，不发布current，不改写Event，不执行Compaction/Purge。
@@ -56,7 +57,7 @@ storage/rocksdb/   build-tag隔离的RocksDB 9.10窄C API ContentStore
 sdk/               transport-neutral查询、Page/Cursor边界复验、Inspect、Plan Validate与Application治理写请求客户端
 cli/               Continuity只读/治理写命令描述、strict JSON参数与结果映射；不注册根CLI
 cmd/continuity-reference/ 本地SQLite Developer Preview只读可执行入口；不包含治理写面或production root
-conformance/       Wave 1能力声明与越界检查
+conformance/       Wave 1能力声明、越界检查及backend-neutral reference suite
 releasecandidate/   reference-only ComponentRelease builder与lost-reply exact publisher
 fakes/             测试专用lost-reply fault wrapper，无生产能力
 tests/             黑盒、故障注入与Conformance测试

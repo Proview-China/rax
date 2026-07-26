@@ -54,6 +54,8 @@ Wave1 supported/unsupported exact能力闭集与production root NO-GO真值见[W
 
 Checkpoint Manifest Seal最小Runtime Delta与只读Adapter真值见[Checkpoint Manifest Seal Runtime exact Adapter闭环](../../memory/continuity/20260717-232700-CheckpointManifestSealRuntimeExactAdapter闭环.md)。
 
+替代后端可调用的Metadata/Content/Retention reference suite与边界见[Backend-neutral Conformance V1](../../memory/continuity/20260726-114000-BackendNeutralConformanceV1.md)。
+
 ## 1. 作用与Owner边界
 
 Continuity拥有Timeline投影与查询、Checkpoint Manifest/Plan领域对象、`CheckpointManifestFactV2`的create-once/CAS/history/current Inspect、diagnostic/residual finalization及immutable revision 1 Manifest Seal。Runtime Evidence Ledger仍是ledger sequence和Evidence Record唯一Owner；Runtime拥有CheckpointAttempt、Barrier、Effect Cut、immutable `CheckpointConsistencyFact`、short-TTL/current `RestoreEligibilityFact`、RestoreAttempt、新Instance/高Epoch/new Lease/Fence和Activation。各Participant只拥有自身Snapshot；Continuity只保存exact refs，不捕获、不解释、不修改其他Owner的Snapshot或事实。
@@ -75,7 +77,7 @@ Continuity拥有Timeline投影与查询、Checkpoint Manifest/Plan领域对象�
 | `ExecutionRuntime/continuity/sdk` | Timeline/Artifact Relation/Content Integrity Audit/Content Delta/Checkpoint/RestorePlan/Retention Inspect、Query/Watch、Timeline Page/Cursor exact边界复验、Plan/Credential Validate及唯一Application治理`Submit/InspectGovernedWorkflow`；无Fact Store直写 |
 | `ExecutionRuntime/continuity/cli` | 只读`timeline show/watch`、`checkpoint inspect`，七类治理写命令与`workflow inspect`的strict JSON参数/输出映射；不负责根CLI注册、endpoint或credential |
 | `ExecutionRuntime/continuity/storage/rocksdb` | `continuity_rocksdb` build tag隔离的RocksDB 9.10窄C API ContentStore；sync WAL、checksum、Snappy、metrics与Chunk integrity |
-| `ExecutionRuntime/continuity/conformance` | restricted/reference-only supported/unsupported exact能力闭集；未知、缺失、重复与production root overclaim均拒绝 |
+| `ExecutionRuntime/continuity/conformance` | restricted/reference-only supported/unsupported exact能力闭集，以及可调用的Metadata/Content/Retention backend reference suite；未知、缺失、重复与production overclaim均拒绝 |
 | `ExecutionRuntime/continuity/releasecandidate` | 公共`ComponentReleaseV1` reference-only builder、readiness与lost-reply exact publisher；Factory仅descriptor |
 | `ExecutionRuntime/continuity/fakes` | 测试专用create/CAS/Seal durable-write lost-reply wrapper；拒绝nil/typed-nil delegate，不是生产Backend |
 | `ExecutionRuntime/continuity/tests` | 单元、白盒、黑盒、故障注入、并发/race、Conformance和Checkpoint/Restore/Settlement NO-GO反例 |

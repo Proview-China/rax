@@ -4,6 +4,8 @@
 
 > Developer Preview本地DB安全前置：fresh文件显式`0600`；existing必须是当前有效用户拥有的regular file且精确`0600`；任一symlink、缺失/非目录父路径或未受sticky/private祖先保护的共享可写路径均拒绝。该CLI前置检查不修改`storage/sqlite`公共语义，也不声称descriptor-relative路径租约或production secret store保障。
 
+> Backend-neutral Conformance V1已实现为owner-local reference suite：调用方必须提供隔离namespace及Metadata/Content/Retention SPI，suite只验证既有create-once、CAS、Inspect、digest、clone、visibility和并发单赢家不变量。报告永远`reference_only`且禁止production promotion；Participant/Provider、remote durability、KMS、备份、部署与SLA不在本suite。
+
 > Continuity Owner Manifest/Seal V2、Checkpoint-first跨Owner reference纵切及Restore最小公共参考纵切已实现并通过定向重复/race与相关模块全门；Restore纵切包含Application Intent、Runtime Reservation/Eligibility、Admission/Review/Permit/Begin、双重Enforcement、Sandbox Stage、Evidence/Settlement/ApplySettlement、Context物化与Runtime Activation。仍不解锁production trusted Assembler/root、跨Owner全量Participant、远程Provider或SLA。
 
 > C-01 Timeline Projection Governance、Artifact Relation、C-06/C-07/C-08、Continuity-owned持久化Owner切面及Checkpoint Manifest Seal exact Runtime只读Adapter已实现。Checkpoint-first reference纵切已组合Harness Gate、Application Coordinator、Harness/Sandbox两个测试Participant、Continuity Manifest/Seal和Runtime Consistency；全链`ProviderCalls=0`，不宣称生产Snapshot capture、production root或Restore GO。

@@ -109,6 +109,33 @@ func TestQualityJournalLostReplyRequiresInspectBeforeProgress(t *testing.T) {
 	}
 }
 
+func TestJournalCreateOnceRejectsAnyIdentityOrContentDrift(t *testing.T) {
+	ctx := context.Background()
+	backend := memory.New()
+	journal := contract.WriteJournal{
+		JournalID: "journal-create-once", ObjectID: "object-1", ObjectDigest: "object-digest",
+		ManifestDigest: "manifest-digest", State: contract.JournalProposed,
+		Revision: 1, ResidualRefs: []contract.ResidualRef{}, UpdatedUnixNano: 1,
+	}
+	if err := backend.CreateJournal(ctx, journal); err != nil {
+		t.Fatal(err)
+	}
+	if err := backend.CreateJournal(ctx, journal); err != nil {
+		t.Fatalf("exact create replay failed: %v", err)
+	}
+	for _, mutate := range []func(*contract.WriteJournal){
+		func(value *contract.WriteJournal) { value.ObjectDigest = "other-object-digest" },
+		func(value *contract.WriteJournal) { value.State = contract.JournalUnknownWrite },
+		func(value *contract.WriteJournal) { value.UpdatedUnixNano++ },
+	} {
+		changed := journal
+		mutate(&changed)
+		if err := backend.CreateJournal(ctx, changed); !contract.HasCode(err, contract.ErrRevisionConflict) {
+			t.Fatalf("changed create replay was accepted: %#v err=%v", changed, err)
+		}
+	}
+}
+
 func TestQualityConcurrentRetentionCASHasSingleWinner(t *testing.T) {
 	ctx := context.Background()
 	backend := memory.New()
