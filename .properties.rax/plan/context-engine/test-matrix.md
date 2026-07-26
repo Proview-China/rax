@@ -2,6 +2,22 @@
 
 状态：规划内无需production composition root的Owner-local/B-cross/reference-only矩阵均已执行通过，包括Wave 1离线核、`CTX-D10`、`CTX-D09`、Offline/Engineering SDK、Compaction/Generation、Outcome、Recipe/PromptAsset pre-release、Prompt Provenance、durable Reviewer Context、Restore Context materialization与Component Release候选。定向ordinary100/race20及full ordinary/race/vet均通过；production C层不在本组件实现范围且未执行。
 
+## 待执行：Context Frame Consumption V1
+
+以下矩阵当前仅完成设计，未执行Go测试：
+
+| 层级 | 硬反例 | 通过标准 |
+|---|---|---|
+| Descriptor/Digest | nil/empty、乱序Fragment refs、同Frame换scope/renderer/model/toolschema/prompt/recipe/disclosure | canonical确定；任一闭包维度变化必须改变Request/Descriptor/Fingerprint |
+| S1/S2与TTL | Frame/Manifest/Generation/Content/current或八类依赖边界`-1/equal/+1`漂移 | 零Descriptor、零Cache写；Expires严格取最小且不延寿 |
+| Fragment/Frame Cache | 同Key同/异Digest、invalidate/Get/Put竞态、eviction、64并发 | 同包幂等、异包Conflict、旧generation miss、deep-copy/no-alias |
+| Tool/MCP输入 | Receipt/Observation/未settled、跨Attempt、inline 64KiB边界、大结果缺ArtifactRef/摘要 | 写前拒绝；small为ToolResult Fragment，large只ArtifactRef+有界摘要 |
+| Incremental Frame | Parent变更、Stable/Semi漂移、Dynamic追加、同ID换包 | Parent immutable；Stable/Semi exact复用；不同内容复用ID冲突 |
+| Evaluator/Invariant | 高分但删除required anchor、安全、Tool Schema、纠正/open effect；Unknown/cancel | 确定性Gate优先；安全回退或Fail Closed，原Frame不变 |
+| Compression Evidence | source/candidate/evaluator/metrics/limitations漂移或冒充Verdict/Authority/Evidence | exact绑定可复算；仅advisory |
+| Owner边界 | Context定义Model Projection/Projection Cache、Provider handle或认定hit | 编译/import/call检查拒绝；Provider usage仅Observation |
+| 软件门 | target100、race20、full ordinary/race/vet、gofmt、import/range/diff | Implementation PR实际PASS后才更新为已执行 |
+
 ## 已执行：CTX-D09本地A/B-local
 
 | 组 | 已执行覆盖 | 实际结论 |

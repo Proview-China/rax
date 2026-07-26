@@ -2,6 +2,8 @@
 
 状态：规划内无需production composition root的Owner-local/B-cross/reference-only切片均已完成软件验证：`CTX-D09-R1`、`CTX-D10`、Application Adapter、Memory/Knowledge B-cross、Offline/Engineering SDK与API/CLI、Compaction/Generation、Outcome、Recipe/PromptAsset pre-release、Prompt Provenance、durable Reviewer Context、Restore Context materialization及Component Release候选。target100、race20、full ordinary/race/vet通过。production Recipe/Prompt发布仍等待CTX-D07；Model Profile current绑定、production State Plane/Cache、Capability、Harness Continuation与Turn推进未启用。
 
+新增Design-only工作包：[Context Frame Consumption V1](../../design/context-engine/context-frame-consumption-v1.md)。本PR不落Go；合并确认后另开Context Owner-local Implementation PR，候选落点仅为`contract`、`kernel`、`fragmentcache`、`framecache`及本组件测试。Model Projection/Projection Cache、Provider Prefix/KV Cache、跨Owner生产Adapter与production root不在实施范围。
+
 - [Context Engineering与Cache v1实施计划](./context-engine-v1.md)
 - [测试矩阵](./test-matrix.md)
 - [Context&Cache业务终点覆盖矩阵](./coverage-matrix.md)

@@ -2,6 +2,16 @@
 
 状态：规划内无需production composition root的Owner-local/B-cross/reference-only切片均已完成软件验证，包括`CTX-D09-R1`、`CTX-D10`、Offline/Engineering SDK、Compaction/Generation、Outcome、Recipe/PromptAsset pre-release、Prompt Provenance、durable Reviewer Context、Restore Context materialization及Component Release候选。production Recipe/Prompt发布仍等待CTX-D07；C层production composition、Capability、Harness Continuation与Turn推进未启用。
 
+新增Design Candidate见[Context Frame Consumption V1](../../design/context-engine/context-frame-consumption-v1.md)。Design合并后实施顺序固定为：
+
+1. `contract/frame_consumption_v1.go`、`contract/compression_evidence_v1.go`：presence、canonical digest、错误闭集；
+2. `kernel/frame_consumption_v1.go`、`kernel/tool_result_fragment_v1.go`：S1/S2 exact materialization、settled ToolResult small/large分支、incremental Frame；
+3. `kernel/structural_value_evaluator_v1.go`：确定性Invariant Gate与默认advisory启发式；
+4. `fragmentcache/memory_v1.go`、`framecache/memory_v1.go`：线程安全、TTL最小、invalidation generation、deep-copy/no-alias；
+5. package unit与`tests/{blackbox,failure,conformance}`，随后target100、race20、full ordinary/race/vet、gofmt与import/range/diff gates。
+
+Implementation PR不得定义Model Projection/Projection Cache、Provider Prefix/KV Cache，不接Application/Harness/Tool/Model/Provider生产实现，不启用Capability/Continuation/Turn。
+
 ## 1. 范围
 
 `CTX-D09`三段Refresh/Apply/Inspect、Owner-local settled-action current projection和本组件fixture已经实现并通过第二轮独立复审；`CTX-D10` Reader/Adapter、Application公共Port Adapter及Memory/Knowledge G6B B-cross fixture也已完成。这些完成项不授予production root、Capability、Harness Continuation或Turn推进资格。
