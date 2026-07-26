@@ -44,6 +44,11 @@
 - Model Projection消费门：Tool已接入Model公开exact Reader；只有完整`ToolCallCandidateObservationProjectionV1`的Ref全字段、Observation digest与`Calls == 1`通过后才写Watermark，失败时零Tool写/零Gateway，Tool无Model publish/write口。
 - N=1 payload关联：`CanonicalArgumentsDigest == PendingAction.PayloadDigest == Candidate.Payload.ContentDigest`已冻结并实现；不等时零Watermark/Candidate/Gateway。V1不支持隐式schema transformation，未来转换需另立typed Fact/Port Delta。
 - 最高业务输入：`tmp.document/Tool&MCP.md`。
+- 首个官方本地编码工具包：
+  [Core Tool Pack V1实施计划](core-tool-pack-v1.md)，对应
+  [设计合同](../../design/tool-engine/core-tool-pack-v1.md)。当前为Design PR候选，只冻结
+  `workspace.read/search/inspect/patch`与`process.exec`，不包含Go实现、网络、Secret、
+  远程MCP或production root。
 - 设计输入：
   - [Tool Engine设计](../../design/tool-engine/README.md)
   - [Tool合同与状态机](../../design/tool-engine/contracts.md)
