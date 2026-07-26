@@ -5,6 +5,11 @@
 - 设计域：`tool-engine`；与`mcp-gateway`分离设计、共同组成`tool-mcp`组件线。
 - 最高业务输入：`tmp.document/Tool&MCP.md`。
 - 当前阶段：既有Tool G6A V2 Owner-local隔离实现第三轮独立审计最终YES保持不变；[ToolSurfaceManifestCurrent V1](tool-surface-manifest-current-v1.md) P4-0、[SurfaceInvocationBinding V1](surface-invocation-binding-v1.md) P4-1与PD-TM-04 P4-2均已通过software test。MCP侧Runtime V3 actual-point与official SDK `tools/call` owner-local闭环也已通过；正式Evidence/Observation、Harness M2、G6B、system/production继续NO-GO。
+- 首个官方工具产品纵切：[Core Tool Pack V1](core-tool-pack-v1.md)已按总控裁决进入
+  `design_pr_candidate`，冻结`workspace.read/search/inspect/patch`与`process.exec`；
+  [局部架构图](core-tool-pack-v1.drawio)和
+  [实施计划](../../plan/tool-mcp/core-tool-pack-v1.md)随本Design PR评审。PR合并前不写实现，
+  合并也不等于production GO。
 - 实现语言：Go。当前没有经基准证明的计算稠密热点，不规划Rust、FFI或独立Rust进程。
 - 体系图：[architecture.drawio](architecture.drawio)。对象、状态机、Single Call Tool侧Port和调用链见[contracts.md](contracts.md)，Application/Runtime/Harness Owner映射见[integration.md](integration.md)，验收见[acceptance.md](acceptance.md)，公共缺口见[port-delta.md](port-delta.md)，PD-TM-04 live字段修正见[第七设计修正候选](pd-tm-04-seventh-candidate.md)，M2 C slice见[ToolSurfaceManifestCurrent V1](tool-surface-manifest-current-v1.md)，现有生态供应链组装见[Tool Package Offline Verification与Admission V1](package-offline-verification-v1.md)，MCP语义进入Registry的唯一接法见[MCP Tool Mapping Manifest V1](mcp-tool-mapping-manifest-v1.md)，开发者只读对象面见[Registry Catalog Exact Inspect V1](catalog-exact-inspect-v1.md)，Model Route实际工具兼容缺口见[PD-TM-05联合候选](model-route-tool-compatibility-v1.md)。
 
