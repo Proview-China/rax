@@ -1,0 +1,1258 @@
+{
+  "result": {
+    "contract_version": "praxis.tool-mcp.result/v2",
+    "id": "tool-result-app",
+    "revision": 1,
+    "digest": "sha256:e5cd291dbb9b6dd4b2428ae7ee0cc7203f5a647d82434a2931f157d2e8e39d23",
+    "action": {
+      "id": "action-app",
+      "revision": 1,
+      "digest": "sha256:eb6779ab15d44f3ae506212361ace427c347e61800c396360eedb3e5e786f8b6"
+    },
+    "reservation": {
+      "id": "reservation-app",
+      "revision": 1,
+      "digest": "sha256:c7348ff1a461397ad6b9b611ed823ad91aa472081c97a6ce909b6b7b82351d72"
+    },
+    "domain_result": {
+      "id": "tool-domain-result-app",
+      "revision": 1,
+      "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549"
+    },
+    "apply": {
+      "id": "apply-app",
+      "revision": 1,
+      "digest": "sha256:a97694b03ac28cbddcfa538834c89172d9167315264cbbb84bdb3d34ef55ece2"
+    },
+    "inspection": {
+      "settlement": {
+        "id": "runtime-settlement-app",
+        "revision": 1,
+        "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "effect_id": "effect-v2",
+        "domain_result": {
+          "owner": {
+            "binding_set_id": "tool-binding-app",
+            "binding_set_revision": 1,
+            "component_id": "tool-mcp/engine",
+            "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+            "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+            "capability": "praxis.tool/execute"
+          },
+          "kind": "praxis.tool/domain-result",
+          "id": "tool-domain-result-app",
+          "revision": 1,
+          "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+          "tenant_id": "tenant-v2",
+          "effect_id": "effect-v2",
+          "effect_revision": 1,
+          "operation": {
+            "kind": "run",
+            "execution_scope": {
+              "identity": {
+                "tenant_id": "tenant-v2",
+                "agent_identity_id": "identity-v2",
+                "identity_epoch": 1
+              },
+              "lineage": {
+                "instance_lineage_id": "lineage-v2",
+                "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+              },
+              "instance": {
+                "instance_id": "instance-v2",
+                "instance_epoch": 1
+              },
+              "sandbox_lease": {
+                "sandbox_lease_id": "sandbox-v2",
+                "lease_epoch": 1
+              },
+              "authority_epoch": 1
+            },
+            "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+            "run_id": "run-v2",
+            "subject_revision": 1,
+            "current_projection_ref": "run-current-v2",
+            "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+            "current_projection_revision": 1
+          },
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "attempt": {
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "effect_id": "effect-v2",
+            "intent_revision": 1,
+            "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+            "permit_id": "permit-v2",
+            "permit_revision": 2,
+            "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+            "attempt_id": "attempt-v2",
+            "delegation": {
+              "id": "delegation-v2",
+              "revision": 2,
+              "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+            }
+          },
+          "schema": {
+            "namespace": "tool",
+            "name": "application-result",
+            "version": "1.0.0",
+            "media_type": "application/json",
+            "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+          },
+          "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+          "payload_revision": 1,
+          "authoritative_unix_nano": 1699999999000000000
+        }
+      },
+      "association": {
+        "id": "association-app",
+        "revision": 1,
+        "digest": "sha256:0599d6cc2294c32d600727681b86b853cfe36f3c413c4d332cfff6d69ef6a312",
+        "settlement": {
+          "id": "runtime-settlement-app",
+          "revision": 1,
+          "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2",
+          "domain_result": {
+            "owner": {
+              "binding_set_id": "tool-binding-app",
+              "binding_set_revision": 1,
+              "component_id": "tool-mcp/engine",
+              "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+              "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+              "capability": "praxis.tool/execute"
+            },
+            "kind": "praxis.tool/domain-result",
+            "id": "tool-domain-result-app",
+            "revision": 1,
+            "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+            "tenant_id": "tenant-v2",
+            "effect_id": "effect-v2",
+            "effect_revision": 1,
+            "operation": {
+              "kind": "run",
+              "execution_scope": {
+                "identity": {
+                  "tenant_id": "tenant-v2",
+                  "agent_identity_id": "identity-v2",
+                  "identity_epoch": 1
+                },
+                "lineage": {
+                  "instance_lineage_id": "lineage-v2",
+                  "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                },
+                "instance": {
+                  "instance_id": "instance-v2",
+                  "instance_epoch": 1
+                },
+                "sandbox_lease": {
+                  "sandbox_lease_id": "sandbox-v2",
+                  "lease_epoch": 1
+                },
+                "authority_epoch": 1
+              },
+              "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+              "run_id": "run-v2",
+              "subject_revision": 1,
+              "current_projection_ref": "run-current-v2",
+              "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+              "current_projection_revision": 1
+            },
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "attempt": {
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "effect_id": "effect-v2",
+              "intent_revision": 1,
+              "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+              "permit_id": "permit-v2",
+              "permit_revision": 2,
+              "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+              "attempt_id": "attempt-v2",
+              "delegation": {
+                "id": "delegation-v2",
+                "revision": 2,
+                "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+              }
+            },
+            "schema": {
+              "namespace": "tool",
+              "name": "application-result",
+              "version": "1.0.0",
+              "media_type": "application/json",
+              "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+            },
+            "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+            "payload_revision": 1,
+            "authoritative_unix_nano": 1699999999000000000
+          }
+        },
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "effect_id": "effect-v2"
+      },
+      "guard": {
+        "id": "guard-app",
+        "tenant_id": "tenant-v2",
+        "effect_id": "effect-v2",
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "revision": 1,
+        "digest": "sha256:ba566e2f887ff09a82ceae9502bc10c31d2cf49b046da717a9e5e934e6660a61",
+        "settlement": {
+          "id": "runtime-settlement-app",
+          "revision": 1,
+          "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2",
+          "domain_result": {
+            "owner": {
+              "binding_set_id": "tool-binding-app",
+              "binding_set_revision": 1,
+              "component_id": "tool-mcp/engine",
+              "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+              "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+              "capability": "praxis.tool/execute"
+            },
+            "kind": "praxis.tool/domain-result",
+            "id": "tool-domain-result-app",
+            "revision": 1,
+            "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+            "tenant_id": "tenant-v2",
+            "effect_id": "effect-v2",
+            "effect_revision": 1,
+            "operation": {
+              "kind": "run",
+              "execution_scope": {
+                "identity": {
+                  "tenant_id": "tenant-v2",
+                  "agent_identity_id": "identity-v2",
+                  "identity_epoch": 1
+                },
+                "lineage": {
+                  "instance_lineage_id": "lineage-v2",
+                  "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                },
+                "instance": {
+                  "instance_id": "instance-v2",
+                  "instance_epoch": 1
+                },
+                "sandbox_lease": {
+                  "sandbox_lease_id": "sandbox-v2",
+                  "lease_epoch": 1
+                },
+                "authority_epoch": 1
+              },
+              "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+              "run_id": "run-v2",
+              "subject_revision": 1,
+              "current_projection_ref": "run-current-v2",
+              "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+              "current_projection_revision": 1
+            },
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "attempt": {
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "effect_id": "effect-v2",
+              "intent_revision": 1,
+              "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+              "permit_id": "permit-v2",
+              "permit_revision": 2,
+              "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+              "attempt_id": "attempt-v2",
+              "delegation": {
+                "id": "delegation-v2",
+                "revision": 2,
+                "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+              }
+            },
+            "schema": {
+              "namespace": "tool",
+              "name": "application-result",
+              "version": "1.0.0",
+              "media_type": "application/json",
+              "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+            },
+            "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+            "payload_revision": 1,
+            "authoritative_unix_nano": 1699999999000000000
+          }
+        }
+      },
+      "projection": {
+        "id": "terminal-app",
+        "revision": 1,
+        "digest": "sha256:c737785aff3b817656e8d2decd3c7dc239dfc1cab3f6626fd389d894a67091c8",
+        "tenant_id": "tenant-v2",
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "effect_id": "effect-v2",
+        "settlement": {
+          "id": "runtime-settlement-app",
+          "revision": 1,
+          "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2",
+          "domain_result": {
+            "owner": {
+              "binding_set_id": "tool-binding-app",
+              "binding_set_revision": 1,
+              "component_id": "tool-mcp/engine",
+              "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+              "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+              "capability": "praxis.tool/execute"
+            },
+            "kind": "praxis.tool/domain-result",
+            "id": "tool-domain-result-app",
+            "revision": 1,
+            "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+            "tenant_id": "tenant-v2",
+            "effect_id": "effect-v2",
+            "effect_revision": 1,
+            "operation": {
+              "kind": "run",
+              "execution_scope": {
+                "identity": {
+                  "tenant_id": "tenant-v2",
+                  "agent_identity_id": "identity-v2",
+                  "identity_epoch": 1
+                },
+                "lineage": {
+                  "instance_lineage_id": "lineage-v2",
+                  "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                },
+                "instance": {
+                  "instance_id": "instance-v2",
+                  "instance_epoch": 1
+                },
+                "sandbox_lease": {
+                  "sandbox_lease_id": "sandbox-v2",
+                  "lease_epoch": 1
+                },
+                "authority_epoch": 1
+              },
+              "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+              "run_id": "run-v2",
+              "subject_revision": 1,
+              "current_projection_ref": "run-current-v2",
+              "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+              "current_projection_revision": 1
+            },
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "attempt": {
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "effect_id": "effect-v2",
+              "intent_revision": 1,
+              "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+              "permit_id": "permit-v2",
+              "permit_revision": 2,
+              "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+              "attempt_id": "attempt-v2",
+              "delegation": {
+                "id": "delegation-v2",
+                "revision": 2,
+                "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+              }
+            },
+            "schema": {
+              "namespace": "tool",
+              "name": "application-result",
+              "version": "1.0.0",
+              "media_type": "application/json",
+              "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+            },
+            "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+            "payload_revision": 1,
+            "authoritative_unix_nano": 1699999999000000000
+          }
+        },
+        "association": {
+          "id": "association-app",
+          "revision": 1,
+          "digest": "sha256:0599d6cc2294c32d600727681b86b853cfe36f3c413c4d332cfff6d69ef6a312",
+          "settlement": {
+            "id": "runtime-settlement-app",
+            "revision": 1,
+            "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "effect_id": "effect-v2",
+            "domain_result": {
+              "owner": {
+                "binding_set_id": "tool-binding-app",
+                "binding_set_revision": 1,
+                "component_id": "tool-mcp/engine",
+                "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+                "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+                "capability": "praxis.tool/execute"
+              },
+              "kind": "praxis.tool/domain-result",
+              "id": "tool-domain-result-app",
+              "revision": 1,
+              "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+              "tenant_id": "tenant-v2",
+              "effect_id": "effect-v2",
+              "effect_revision": 1,
+              "operation": {
+                "kind": "run",
+                "execution_scope": {
+                  "identity": {
+                    "tenant_id": "tenant-v2",
+                    "agent_identity_id": "identity-v2",
+                    "identity_epoch": 1
+                  },
+                  "lineage": {
+                    "instance_lineage_id": "lineage-v2",
+                    "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                  },
+                  "instance": {
+                    "instance_id": "instance-v2",
+                    "instance_epoch": 1
+                  },
+                  "sandbox_lease": {
+                    "sandbox_lease_id": "sandbox-v2",
+                    "lease_epoch": 1
+                  },
+                  "authority_epoch": 1
+                },
+                "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+                "run_id": "run-v2",
+                "subject_revision": 1,
+                "current_projection_ref": "run-current-v2",
+                "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+                "current_projection_revision": 1
+              },
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "attempt": {
+                "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+                "effect_id": "effect-v2",
+                "intent_revision": 1,
+                "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+                "permit_id": "permit-v2",
+                "permit_revision": 2,
+                "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+                "attempt_id": "attempt-v2",
+                "delegation": {
+                  "id": "delegation-v2",
+                  "revision": 2,
+                  "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+                }
+              },
+              "schema": {
+                "namespace": "tool",
+                "name": "application-result",
+                "version": "1.0.0",
+                "media_type": "application/json",
+                "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+              },
+              "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+              "payload_revision": 1,
+              "authoritative_unix_nano": 1699999999000000000
+            }
+          },
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2"
+        },
+        "guard": {
+          "id": "guard-app",
+          "tenant_id": "tenant-v2",
+          "effect_id": "effect-v2",
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "revision": 1,
+          "digest": "sha256:ba566e2f887ff09a82ceae9502bc10c31d2cf49b046da717a9e5e934e6660a61",
+          "settlement": {
+            "id": "runtime-settlement-app",
+            "revision": 1,
+            "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "effect_id": "effect-v2",
+            "domain_result": {
+              "owner": {
+                "binding_set_id": "tool-binding-app",
+                "binding_set_revision": 1,
+                "component_id": "tool-mcp/engine",
+                "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+                "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+                "capability": "praxis.tool/execute"
+              },
+              "kind": "praxis.tool/domain-result",
+              "id": "tool-domain-result-app",
+              "revision": 1,
+              "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+              "tenant_id": "tenant-v2",
+              "effect_id": "effect-v2",
+              "effect_revision": 1,
+              "operation": {
+                "kind": "run",
+                "execution_scope": {
+                  "identity": {
+                    "tenant_id": "tenant-v2",
+                    "agent_identity_id": "identity-v2",
+                    "identity_epoch": 1
+                  },
+                  "lineage": {
+                    "instance_lineage_id": "lineage-v2",
+                    "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                  },
+                  "instance": {
+                    "instance_id": "instance-v2",
+                    "instance_epoch": 1
+                  },
+                  "sandbox_lease": {
+                    "sandbox_lease_id": "sandbox-v2",
+                    "lease_epoch": 1
+                  },
+                  "authority_epoch": 1
+                },
+                "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+                "run_id": "run-v2",
+                "subject_revision": 1,
+                "current_projection_ref": "run-current-v2",
+                "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+                "current_projection_revision": 1
+              },
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "attempt": {
+                "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+                "effect_id": "effect-v2",
+                "intent_revision": 1,
+                "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+                "permit_id": "permit-v2",
+                "permit_revision": 2,
+                "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+                "attempt_id": "attempt-v2",
+                "delegation": {
+                  "id": "delegation-v2",
+                  "revision": 2,
+                  "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+                }
+              },
+              "schema": {
+                "namespace": "tool",
+                "name": "application-result",
+                "version": "1.0.0",
+                "media_type": "application/json",
+                "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+              },
+              "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+              "payload_revision": 1,
+              "authoritative_unix_nano": 1699999999000000000
+            }
+          }
+        }
+      },
+      "domain_result": {
+        "owner": {
+          "binding_set_id": "tool-binding-app",
+          "binding_set_revision": 1,
+          "component_id": "tool-mcp/engine",
+          "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+          "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+          "capability": "praxis.tool/execute"
+        },
+        "kind": "praxis.tool/domain-result",
+        "id": "tool-domain-result-app",
+        "revision": 1,
+        "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+        "tenant_id": "tenant-v2",
+        "effect_id": "effect-v2",
+        "effect_revision": 1,
+        "operation": {
+          "kind": "run",
+          "execution_scope": {
+            "identity": {
+              "tenant_id": "tenant-v2",
+              "agent_identity_id": "identity-v2",
+              "identity_epoch": 1
+            },
+            "lineage": {
+              "instance_lineage_id": "lineage-v2",
+              "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+            },
+            "instance": {
+              "instance_id": "instance-v2",
+              "instance_epoch": 1
+            },
+            "sandbox_lease": {
+              "sandbox_lease_id": "sandbox-v2",
+              "lease_epoch": 1
+            },
+            "authority_epoch": 1
+          },
+          "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+          "run_id": "run-v2",
+          "subject_revision": 1,
+          "current_projection_ref": "run-current-v2",
+          "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+          "current_projection_revision": 1
+        },
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "attempt": {
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2",
+          "intent_revision": 1,
+          "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+          "permit_id": "permit-v2",
+          "permit_revision": 2,
+          "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+          "attempt_id": "attempt-v2",
+          "delegation": {
+            "id": "delegation-v2",
+            "revision": 2,
+            "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+          }
+        },
+        "schema": {
+          "namespace": "tool",
+          "name": "application-result",
+          "version": "1.0.0",
+          "media_type": "application/json",
+          "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+        },
+        "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+        "payload_revision": 1,
+        "authoritative_unix_nano": 1699999999000000000
+      },
+      "effect_fact_revision": 4,
+      "owner": {
+        "role": "settlement",
+        "component_id": "tool-mcp/engine",
+        "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f"
+      },
+      "checked_unix_nano": 1700000000000000000,
+      "expires_unix_nano": 1700000008000000000,
+      "digest": "sha256:cbda5aef4ea277e2f3391e9213d149d0490b2962b12ea4763a57b1b924d62710"
+    },
+    "outcome": "succeeded",
+    "disposition": "confirmed_applied",
+    "schema": {
+      "namespace": "tool",
+      "name": "application-result",
+      "version": "1.0.0",
+      "media_type": "application/json",
+      "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+    },
+    "payload_digest": "sha256:e4dd34c32174c05f3000b69ed53f7b8cbb0f2106f28c1e0b2003de40b008f7bd",
+    "payload_revision": 1,
+    "finalized_unix_nano": 1699999999999999999
+  },
+  "projection": {
+    "contract_version": "praxis.tool-mcp.settled-tool-result-projection/v1",
+    "result": {
+      "id": "tool-result-app",
+      "revision": 1,
+      "digest": "sha256:e5cd291dbb9b6dd4b2428ae7ee0cc7203f5a647d82434a2931f157d2e8e39d23"
+    },
+    "tool": {
+      "id": "praxis.core-tool/workspace-read-local-v1",
+      "revision": 1,
+      "digest": "sha256:7c9bbe5ec9b3fb774e8fa0f54247e93c34ddf8e5d16fe3073420de0ae81a262d"
+    },
+    "inspection": {
+      "settlement": {
+        "id": "runtime-settlement-app",
+        "revision": 1,
+        "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "effect_id": "effect-v2",
+        "domain_result": {
+          "owner": {
+            "binding_set_id": "tool-binding-app",
+            "binding_set_revision": 1,
+            "component_id": "tool-mcp/engine",
+            "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+            "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+            "capability": "praxis.tool/execute"
+          },
+          "kind": "praxis.tool/domain-result",
+          "id": "tool-domain-result-app",
+          "revision": 1,
+          "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+          "tenant_id": "tenant-v2",
+          "effect_id": "effect-v2",
+          "effect_revision": 1,
+          "operation": {
+            "kind": "run",
+            "execution_scope": {
+              "identity": {
+                "tenant_id": "tenant-v2",
+                "agent_identity_id": "identity-v2",
+                "identity_epoch": 1
+              },
+              "lineage": {
+                "instance_lineage_id": "lineage-v2",
+                "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+              },
+              "instance": {
+                "instance_id": "instance-v2",
+                "instance_epoch": 1
+              },
+              "sandbox_lease": {
+                "sandbox_lease_id": "sandbox-v2",
+                "lease_epoch": 1
+              },
+              "authority_epoch": 1
+            },
+            "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+            "run_id": "run-v2",
+            "subject_revision": 1,
+            "current_projection_ref": "run-current-v2",
+            "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+            "current_projection_revision": 1
+          },
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "attempt": {
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "effect_id": "effect-v2",
+            "intent_revision": 1,
+            "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+            "permit_id": "permit-v2",
+            "permit_revision": 2,
+            "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+            "attempt_id": "attempt-v2",
+            "delegation": {
+              "id": "delegation-v2",
+              "revision": 2,
+              "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+            }
+          },
+          "schema": {
+            "namespace": "tool",
+            "name": "application-result",
+            "version": "1.0.0",
+            "media_type": "application/json",
+            "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+          },
+          "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+          "payload_revision": 1,
+          "authoritative_unix_nano": 1699999999000000000
+        }
+      },
+      "association": {
+        "id": "association-app",
+        "revision": 1,
+        "digest": "sha256:0599d6cc2294c32d600727681b86b853cfe36f3c413c4d332cfff6d69ef6a312",
+        "settlement": {
+          "id": "runtime-settlement-app",
+          "revision": 1,
+          "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2",
+          "domain_result": {
+            "owner": {
+              "binding_set_id": "tool-binding-app",
+              "binding_set_revision": 1,
+              "component_id": "tool-mcp/engine",
+              "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+              "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+              "capability": "praxis.tool/execute"
+            },
+            "kind": "praxis.tool/domain-result",
+            "id": "tool-domain-result-app",
+            "revision": 1,
+            "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+            "tenant_id": "tenant-v2",
+            "effect_id": "effect-v2",
+            "effect_revision": 1,
+            "operation": {
+              "kind": "run",
+              "execution_scope": {
+                "identity": {
+                  "tenant_id": "tenant-v2",
+                  "agent_identity_id": "identity-v2",
+                  "identity_epoch": 1
+                },
+                "lineage": {
+                  "instance_lineage_id": "lineage-v2",
+                  "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                },
+                "instance": {
+                  "instance_id": "instance-v2",
+                  "instance_epoch": 1
+                },
+                "sandbox_lease": {
+                  "sandbox_lease_id": "sandbox-v2",
+                  "lease_epoch": 1
+                },
+                "authority_epoch": 1
+              },
+              "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+              "run_id": "run-v2",
+              "subject_revision": 1,
+              "current_projection_ref": "run-current-v2",
+              "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+              "current_projection_revision": 1
+            },
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "attempt": {
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "effect_id": "effect-v2",
+              "intent_revision": 1,
+              "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+              "permit_id": "permit-v2",
+              "permit_revision": 2,
+              "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+              "attempt_id": "attempt-v2",
+              "delegation": {
+                "id": "delegation-v2",
+                "revision": 2,
+                "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+              }
+            },
+            "schema": {
+              "namespace": "tool",
+              "name": "application-result",
+              "version": "1.0.0",
+              "media_type": "application/json",
+              "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+            },
+            "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+            "payload_revision": 1,
+            "authoritative_unix_nano": 1699999999000000000
+          }
+        },
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "effect_id": "effect-v2"
+      },
+      "guard": {
+        "id": "guard-app",
+        "tenant_id": "tenant-v2",
+        "effect_id": "effect-v2",
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "revision": 1,
+        "digest": "sha256:ba566e2f887ff09a82ceae9502bc10c31d2cf49b046da717a9e5e934e6660a61",
+        "settlement": {
+          "id": "runtime-settlement-app",
+          "revision": 1,
+          "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2",
+          "domain_result": {
+            "owner": {
+              "binding_set_id": "tool-binding-app",
+              "binding_set_revision": 1,
+              "component_id": "tool-mcp/engine",
+              "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+              "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+              "capability": "praxis.tool/execute"
+            },
+            "kind": "praxis.tool/domain-result",
+            "id": "tool-domain-result-app",
+            "revision": 1,
+            "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+            "tenant_id": "tenant-v2",
+            "effect_id": "effect-v2",
+            "effect_revision": 1,
+            "operation": {
+              "kind": "run",
+              "execution_scope": {
+                "identity": {
+                  "tenant_id": "tenant-v2",
+                  "agent_identity_id": "identity-v2",
+                  "identity_epoch": 1
+                },
+                "lineage": {
+                  "instance_lineage_id": "lineage-v2",
+                  "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                },
+                "instance": {
+                  "instance_id": "instance-v2",
+                  "instance_epoch": 1
+                },
+                "sandbox_lease": {
+                  "sandbox_lease_id": "sandbox-v2",
+                  "lease_epoch": 1
+                },
+                "authority_epoch": 1
+              },
+              "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+              "run_id": "run-v2",
+              "subject_revision": 1,
+              "current_projection_ref": "run-current-v2",
+              "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+              "current_projection_revision": 1
+            },
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "attempt": {
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "effect_id": "effect-v2",
+              "intent_revision": 1,
+              "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+              "permit_id": "permit-v2",
+              "permit_revision": 2,
+              "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+              "attempt_id": "attempt-v2",
+              "delegation": {
+                "id": "delegation-v2",
+                "revision": 2,
+                "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+              }
+            },
+            "schema": {
+              "namespace": "tool",
+              "name": "application-result",
+              "version": "1.0.0",
+              "media_type": "application/json",
+              "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+            },
+            "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+            "payload_revision": 1,
+            "authoritative_unix_nano": 1699999999000000000
+          }
+        }
+      },
+      "projection": {
+        "id": "terminal-app",
+        "revision": 1,
+        "digest": "sha256:c737785aff3b817656e8d2decd3c7dc239dfc1cab3f6626fd389d894a67091c8",
+        "tenant_id": "tenant-v2",
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "effect_id": "effect-v2",
+        "settlement": {
+          "id": "runtime-settlement-app",
+          "revision": 1,
+          "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2",
+          "domain_result": {
+            "owner": {
+              "binding_set_id": "tool-binding-app",
+              "binding_set_revision": 1,
+              "component_id": "tool-mcp/engine",
+              "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+              "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+              "capability": "praxis.tool/execute"
+            },
+            "kind": "praxis.tool/domain-result",
+            "id": "tool-domain-result-app",
+            "revision": 1,
+            "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+            "tenant_id": "tenant-v2",
+            "effect_id": "effect-v2",
+            "effect_revision": 1,
+            "operation": {
+              "kind": "run",
+              "execution_scope": {
+                "identity": {
+                  "tenant_id": "tenant-v2",
+                  "agent_identity_id": "identity-v2",
+                  "identity_epoch": 1
+                },
+                "lineage": {
+                  "instance_lineage_id": "lineage-v2",
+                  "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                },
+                "instance": {
+                  "instance_id": "instance-v2",
+                  "instance_epoch": 1
+                },
+                "sandbox_lease": {
+                  "sandbox_lease_id": "sandbox-v2",
+                  "lease_epoch": 1
+                },
+                "authority_epoch": 1
+              },
+              "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+              "run_id": "run-v2",
+              "subject_revision": 1,
+              "current_projection_ref": "run-current-v2",
+              "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+              "current_projection_revision": 1
+            },
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "attempt": {
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "effect_id": "effect-v2",
+              "intent_revision": 1,
+              "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+              "permit_id": "permit-v2",
+              "permit_revision": 2,
+              "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+              "attempt_id": "attempt-v2",
+              "delegation": {
+                "id": "delegation-v2",
+                "revision": 2,
+                "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+              }
+            },
+            "schema": {
+              "namespace": "tool",
+              "name": "application-result",
+              "version": "1.0.0",
+              "media_type": "application/json",
+              "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+            },
+            "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+            "payload_revision": 1,
+            "authoritative_unix_nano": 1699999999000000000
+          }
+        },
+        "association": {
+          "id": "association-app",
+          "revision": 1,
+          "digest": "sha256:0599d6cc2294c32d600727681b86b853cfe36f3c413c4d332cfff6d69ef6a312",
+          "settlement": {
+            "id": "runtime-settlement-app",
+            "revision": 1,
+            "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "effect_id": "effect-v2",
+            "domain_result": {
+              "owner": {
+                "binding_set_id": "tool-binding-app",
+                "binding_set_revision": 1,
+                "component_id": "tool-mcp/engine",
+                "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+                "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+                "capability": "praxis.tool/execute"
+              },
+              "kind": "praxis.tool/domain-result",
+              "id": "tool-domain-result-app",
+              "revision": 1,
+              "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+              "tenant_id": "tenant-v2",
+              "effect_id": "effect-v2",
+              "effect_revision": 1,
+              "operation": {
+                "kind": "run",
+                "execution_scope": {
+                  "identity": {
+                    "tenant_id": "tenant-v2",
+                    "agent_identity_id": "identity-v2",
+                    "identity_epoch": 1
+                  },
+                  "lineage": {
+                    "instance_lineage_id": "lineage-v2",
+                    "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                  },
+                  "instance": {
+                    "instance_id": "instance-v2",
+                    "instance_epoch": 1
+                  },
+                  "sandbox_lease": {
+                    "sandbox_lease_id": "sandbox-v2",
+                    "lease_epoch": 1
+                  },
+                  "authority_epoch": 1
+                },
+                "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+                "run_id": "run-v2",
+                "subject_revision": 1,
+                "current_projection_ref": "run-current-v2",
+                "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+                "current_projection_revision": 1
+              },
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "attempt": {
+                "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+                "effect_id": "effect-v2",
+                "intent_revision": 1,
+                "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+                "permit_id": "permit-v2",
+                "permit_revision": 2,
+                "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+                "attempt_id": "attempt-v2",
+                "delegation": {
+                  "id": "delegation-v2",
+                  "revision": 2,
+                  "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+                }
+              },
+              "schema": {
+                "namespace": "tool",
+                "name": "application-result",
+                "version": "1.0.0",
+                "media_type": "application/json",
+                "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+              },
+              "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+              "payload_revision": 1,
+              "authoritative_unix_nano": 1699999999000000000
+            }
+          },
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2"
+        },
+        "guard": {
+          "id": "guard-app",
+          "tenant_id": "tenant-v2",
+          "effect_id": "effect-v2",
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "revision": 1,
+          "digest": "sha256:ba566e2f887ff09a82ceae9502bc10c31d2cf49b046da717a9e5e934e6660a61",
+          "settlement": {
+            "id": "runtime-settlement-app",
+            "revision": 1,
+            "digest": "sha256:595e3abc032ce86739dfd45c3e0aeb89e46ff8e10a5ebd5427e478924a68f203",
+            "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+            "effect_id": "effect-v2",
+            "domain_result": {
+              "owner": {
+                "binding_set_id": "tool-binding-app",
+                "binding_set_revision": 1,
+                "component_id": "tool-mcp/engine",
+                "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+                "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+                "capability": "praxis.tool/execute"
+              },
+              "kind": "praxis.tool/domain-result",
+              "id": "tool-domain-result-app",
+              "revision": 1,
+              "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+              "tenant_id": "tenant-v2",
+              "effect_id": "effect-v2",
+              "effect_revision": 1,
+              "operation": {
+                "kind": "run",
+                "execution_scope": {
+                  "identity": {
+                    "tenant_id": "tenant-v2",
+                    "agent_identity_id": "identity-v2",
+                    "identity_epoch": 1
+                  },
+                  "lineage": {
+                    "instance_lineage_id": "lineage-v2",
+                    "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+                  },
+                  "instance": {
+                    "instance_id": "instance-v2",
+                    "instance_epoch": 1
+                  },
+                  "sandbox_lease": {
+                    "sandbox_lease_id": "sandbox-v2",
+                    "lease_epoch": 1
+                  },
+                  "authority_epoch": 1
+                },
+                "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+                "run_id": "run-v2",
+                "subject_revision": 1,
+                "current_projection_ref": "run-current-v2",
+                "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+                "current_projection_revision": 1
+              },
+              "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+              "attempt": {
+                "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+                "effect_id": "effect-v2",
+                "intent_revision": 1,
+                "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+                "permit_id": "permit-v2",
+                "permit_revision": 2,
+                "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+                "attempt_id": "attempt-v2",
+                "delegation": {
+                  "id": "delegation-v2",
+                  "revision": 2,
+                  "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+                }
+              },
+              "schema": {
+                "namespace": "tool",
+                "name": "application-result",
+                "version": "1.0.0",
+                "media_type": "application/json",
+                "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+              },
+              "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+              "payload_revision": 1,
+              "authoritative_unix_nano": 1699999999000000000
+            }
+          }
+        }
+      },
+      "domain_result": {
+        "owner": {
+          "binding_set_id": "tool-binding-app",
+          "binding_set_revision": 1,
+          "component_id": "tool-mcp/engine",
+          "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f",
+          "artifact_digest": "sha256:5eb9e378f5a4e976e032d613a8d0d96af0c5e5a86fafa2eaa82c25c165279ba0",
+          "capability": "praxis.tool/execute"
+        },
+        "kind": "praxis.tool/domain-result",
+        "id": "tool-domain-result-app",
+        "revision": 1,
+        "digest": "sha256:8edbff108e1d7b106d91d2791c0a6bd4602d6a67dc413ee222adf3d125585549",
+        "tenant_id": "tenant-v2",
+        "effect_id": "effect-v2",
+        "effect_revision": 1,
+        "operation": {
+          "kind": "run",
+          "execution_scope": {
+            "identity": {
+              "tenant_id": "tenant-v2",
+              "agent_identity_id": "identity-v2",
+              "identity_epoch": 1
+            },
+            "lineage": {
+              "instance_lineage_id": "lineage-v2",
+              "resolved_plan_digest": "sha256:c71cce75217deaa405230b1a881b06f3e5cfdd4ffbaa8c532d9c9b9005ce6d20"
+            },
+            "instance": {
+              "instance_id": "instance-v2",
+              "instance_epoch": 1
+            },
+            "sandbox_lease": {
+              "sandbox_lease_id": "sandbox-v2",
+              "lease_epoch": 1
+            },
+            "authority_epoch": 1
+          },
+          "execution_scope_digest": "sha256:6ffee98a926ffa2947fa1c10f57d7f7aaacc2638e0fef125de419f65071c2c60",
+          "run_id": "run-v2",
+          "subject_revision": 1,
+          "current_projection_ref": "run-current-v2",
+          "current_projection_digest": "sha256:37f06a005fda18b8fe7ef66c4bc5fcade09d06d4d7b5eea4b4f8a00b1df5ff66",
+          "current_projection_revision": 1
+        },
+        "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+        "attempt": {
+          "operation_digest": "sha256:84dab0f4e18951601495a7d4dd7f3ef1333f704f156f3042b7abdcfec4f0631c",
+          "effect_id": "effect-v2",
+          "intent_revision": 1,
+          "intent_digest": "sha256:31fc9650a926c539bff461eaf6b6c529ae6e6dd4d9c85799fa2b71ad3c75560e",
+          "permit_id": "permit-v2",
+          "permit_revision": 2,
+          "permit_digest": "sha256:8f4887dc19c393400e3d486bd839f4f65438a8ee57dfbe9fef5f0d003cf9ba1f",
+          "attempt_id": "attempt-v2",
+          "delegation": {
+            "id": "delegation-v2",
+            "revision": 2,
+            "digest": "sha256:1d1661f8255ea5d18585c7dac682463a7d916fd81f7b57fdb1b2550e3fc69d92"
+          }
+        },
+        "schema": {
+          "namespace": "tool",
+          "name": "application-result",
+          "version": "1.0.0",
+          "media_type": "application/json",
+          "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+        },
+        "payload_digest": "sha256:ed9311f4f3c9bc08ec322b43bc1bfa5220a466ef8cb1ac58f655f4ca74164372",
+        "payload_revision": 1,
+        "authoritative_unix_nano": 1699999999000000000
+      },
+      "effect_fact_revision": 4,
+      "owner": {
+        "role": "settlement",
+        "component_id": "tool-mcp/engine",
+        "manifest_digest": "sha256:05b3abf2579a5eb66403cd78be557fd860633a1fe2103c7642030defe32c657f"
+      },
+      "checked_unix_nano": 1700000000000000000,
+      "expires_unix_nano": 1700000008000000000,
+      "digest": "sha256:cbda5aef4ea277e2f3391e9213d149d0490b2962b12ea4763a57b1b924d62710"
+    },
+    "schema": {
+      "namespace": "tool",
+      "name": "application-result",
+      "version": "1.0.0",
+      "media_type": "application/json",
+      "content_digest": "sha256:1a34224b28f2562234b6ca333fcb702a49a3f40d4147591af1b0635aaba816d3"
+    },
+    "payload_digest": "sha256:e4dd34c32174c05f3000b69ed53f7b8cbb0f2106f28c1e0b2003de40b008f7bd",
+    "payload_revision": 1,
+    "inline": "c2V0dGxlZCB0b29sIHJlc3VsdA==",
+    "classification_digest": "sha256:9f0c8aa526579f4dbde02f70f4cdf635a22df7d844ce012de5791febea95e732",
+    "complete": true,
+    "checked_unix_nano": 1700000000000000000,
+    "expires_unix_nano": 1700000005000000000,
+    "projection_digest": "sha256:83014e3d3db0ba74b4e5a981b3e5abac10be0ddeffdc721e5f521cfabc7e0312"
+  }
+}

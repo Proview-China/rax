@@ -9,11 +9,13 @@ require (
 	github.com/Proview-China/rax/ExecutionRuntime/memory-knowledge v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/review v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/runtime v0.0.0
+	github.com/Proview-China/rax/ExecutionRuntime/tool-mcp v0.0.0
 	modernc.org/sqlite v1.53.0
 )
 
 require (
 	github.com/Proview-China/rax/ExecutionRuntime/agent-definition v0.0.0 // indirect
+	github.com/Proview-China/rax/ExecutionRuntime/model-invoker v0.0.0 // indirect
 	github.com/Proview-China/rax/ExecutionRuntime/organization-engine v0.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
@@ -33,6 +35,8 @@ replace github.com/Proview-China/rax/ExecutionRuntime/application => ../applicat
 replace github.com/Proview-China/rax/ExecutionRuntime/memory-knowledge => ../memory-knowledge
 
 replace github.com/Proview-China/rax/ExecutionRuntime/runtime => ../runtime
+
+replace github.com/Proview-China/rax/ExecutionRuntime/tool-mcp => ../tool-mcp
 
 replace github.com/Proview-China/rax/ExecutionRuntime/agent-assembler => ../agent-assembler
 
