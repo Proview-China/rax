@@ -114,6 +114,11 @@ C-01反例索引为`CTY-TL-P0-01..03`与连续`CTY-TL-01..33`；不得遗漏28..
 | CTY-STORAGE-09 | Audit create成功但回包丢失后换Audit ID重扫 | 拒绝；只Inspect原Tenant/Scope/Audit ID，same request返回原Fact |
 | CTY-STORAGE-10 | Audit直接推进Journal/Retention/Tombstone、删除Chunk或调用remote Provider | 拒绝；诊断Port零Cleanup/Effect能力 |
 | CTY-STORAGE-11 | 同Audit ID/idempotency换Subject、expected digest或Scope | Conflict；原revision-1 Fact/history不变 |
+| CTY-BACKEND-01 | Backend suite报告被改为production eligible，或缺失/重复/新增检查项 | Validate拒绝；suite只产生reference-only exact报告 |
+| CTY-BACKEND-02 | 同Journal ID换Object digest/state/time仍被当作exact create replay | `revision_conflict`；create-once必须完整内容一致 |
+| CTY-BACKEND-03 | Content/Manifest读取返回可变alias，或same ref/ID接受换bytes/Manifest | suite失败；后端不得无声改写已保存内容 |
+| CTY-BACKEND-04 | 32个相同expected revision Journal CAS出现零个或多个赢家 | suite失败；必须精确一个赢家，其余`revision_conflict` |
+| CTY-BACKEND-05 | 用owner-local backend suite冒充Participant/Provider、remote durability、KMS、backup、deployment或SLA认证 | 拒绝；这些能力继续独立NO-GO |
 | CTY-DELTA-01 | caller提交Chunk列表、reuse bool、bytes统计或预制Fact | 拒绝；只接受Base/Target exact坐标，关系由Owner读取派生 |
 | CTY-DELTA-02 | Base/Target任一不可见、缺Chunk、坏Chunk或完整Object digest不匹配 | Fail Closed；零Delta Fact |
 | CTY-DELTA-03 | Chunk digest相同但schema或length不同仍标reuse | 拒绝；Chunk exact identity必须三字段全等 |

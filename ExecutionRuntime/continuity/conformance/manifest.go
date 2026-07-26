@@ -34,6 +34,7 @@ const (
 	CapabilityContentIntegrityV1    = "continuity/content-integrity-audit-v1-diagnostic"
 	CapabilityContentDeltaV1        = "continuity/content-delta-v1-reference"
 	CapabilityHistoryDerivationV1   = "continuity/history-derivation-candidate-v1-reference"
+	CapabilityBackendConformanceV1  = "continuity/backend-conformance-suite-v1-reference"
 )
 
 var supportedCapabilities = []string{
@@ -55,6 +56,7 @@ var supportedCapabilities = []string{
 	CapabilityContentIntegrityV1,
 	CapabilityContentDeltaV1,
 	CapabilityHistoryDerivationV1,
+	CapabilityBackendConformanceV1,
 }
 
 var requiredUnsupported = []string{

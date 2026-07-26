@@ -50,6 +50,7 @@
 - [SDK Timeline Page与CLI读取闭环](../../memory/continuity/20260718-095800-SDKTimelinePage与CLI读取闭环.md)
 - [Developer Preview只读可执行封包](../../memory/continuity/20260726-110500-DeveloperPreview只读可执行封包.md)
 - [Developer Preview本地DB权限返修](../../memory/continuity/20260726-112200-DeveloperPreview本地DB权限返修.md)
+- [Backend-neutral Conformance V1](../../memory/continuity/20260726-114000-BackendNeutralConformanceV1.md)
 - [Wave1 Conformance exact能力闭集](../../memory/continuity/20260718-100638-Wave1ConformanceExact能力闭集.md)
 - [ComponentReleaseV1 Delta](../../design/continuity/component-release-v1.md)：已实现reference-only owner publisher/readiness；不解锁production capture、remote Provider、production Restore root、cleanup或deployment root。
 
@@ -445,7 +446,8 @@ C-02/C-03 exact-ref schema、canonical、migration/diagnostic规则属于第5步
 ### 阶段8：Conformance、性能与安全收口
 
 - **completed / current Wave1** — `restricted_controlled + reference_only + no SLA`为唯一可接受声明；`fully_controlled`、`contained_observe_only`、`rejected`冒充当前Wave1均拒绝，supported/unsupported未知、缺失、重复项全部Fail Closed；
-- [ ] backend/participant/provider conformance；
+- **completed / owner-local reference** — backend-neutral Metadata/Content/Retention SPI conformance suite已实现，覆盖11项create-once/CAS/Inspect/digest/clone/visibility/并发不变量，并在memory、SQLite+reference content、RocksDB content上运行；报告固定reference-only且不可production promotion；
+- **unsupported / cross-owner** — Participant/Provider conformance、remote durability、KMS、backup、deployment与SLA仍需各Owner/管理线冻结，不由backend suite代签；
 - **partial** — Cursor与History Derivation canonical fuzz、Artifact Relation/Content Integrity Audit/Content Delta/History Derivation/RestorePlan/Manifest/Timeline定向100轮、race20、full race/vet及SQLite/RocksDB benchmark已完成；当前全模块statement coverage实测59.5%，尚未冻结覆盖率目标，跨Owner系统benchmark仍未完成；
 - [ ] 敏感Snapshot、Key不可用、Retention未知、Provider残留测试；
 - [ ] 记录真实命令、结果、覆盖和未覆盖风险。
