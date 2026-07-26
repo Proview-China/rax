@@ -1,6 +1,6 @@
 # Praxis Context Engine
 
-状态：Owner-local已完成的软件切面均通过验证。CTX-D09 A层Refresh、CTX-D10 Reader、Offline SDK、`ContextOfflineIngressV1`、`ContextEngineeringSDKV1`、Compaction/Generation、Outcome事实链、Recipe/PromptAsset pre-release及`PromptUpstreamProvenanceV1`离线核已经落地。Engineering五入口API/CLI和Prompt Provenance均通过target100/race20及full ordinary/race/vet。production发布、跨Owner root、Capability、Harness Continuation与Turn推进仍未启用。
+状态：Owner-local已完成的软件切面均通过验证。CTX-D09 A层Refresh、CTX-D10 Reader、Offline SDK、`ContextOfflineIngressV1`、`ContextEngineeringSDKV1`、`ContextRuntimeAPIV1` typed facade、Compaction/Generation、Outcome事实链、Recipe/PromptAsset pre-release及`PromptUpstreamProvenanceV1`离线核已经落地。Runtime API仅封装immutable Frame consumption与settled Tool Result append，不授予Host composition或跨Owner权威。Engineering五入口API/CLI和Prompt Provenance均通过target100/race20及full ordinary/race/vet。production发布、跨Owner root、Capability、Harness Continuation与Turn推进仍未启用。
 
 Context Owner 已实现 Review public `ReviewerContextPublisherV1` / `ReviewerContextCurrentReaderV1`：Memory 仅是 reference store；SQLite WAL durable repository 使用 stable subject-derived ID、append-only history、highest/current full-ref CAS 单事务、strict row digest、重启恢复和 exact historical lost-reply recovery。`OpenDurableReviewerContextAdapterV1`只构造单节点/单 writer-domain Owner capability，不安装宿主 composition root，也不声明多节点 HA、备份、远程持久性或 SLA。current读取每次以 fresh clock验证固定的 Checked/Expires/Digest，不因时间前进重封projection。
 
