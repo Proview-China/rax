@@ -59,6 +59,7 @@ Run, turn, tenant scope and authority come from the parent frame, ExpectedCurren
 - Large payload uses the exact Tool-admitted ArtifactRef; Context stores only its reference and metadata.
 - Inline and ArtifactRef are mutually exclusive.
 - Context never materializes a large artifact merely to compile the frame.
+- Cancellation after a content-addressed Put may leave an unreferenced blob. This is an allowed residual: retrying the exact request must reuse the same digest-addressed content, while no Manifest, Frame or descriptor becomes visible.
 
 ## Acceptance tests
 
@@ -86,4 +87,3 @@ Run, turn, tenant scope and authority come from the parent frame, ExpectedCurren
 - Provider-specific rendering or cache implementation.
 - Fetching or materializing large artifacts.
 - Claiming production composition before Host integration exists.
-
