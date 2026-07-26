@@ -22,6 +22,7 @@
 - Detached Delivery V1：`detached-delivery-v1.md`；设计与矩阵：`../../design/review-engine/detached-delivery-v1.md`、`../../design/review-engine/detached-delivery-v1-test-matrix.md`。Review只冻结Binding/Closure候选；Runtime lineage/current、Application detached coordination、Human delivery current、Host root四组P0关闭前Go/production NO-GO。
 - 本轮非完整生产闭环收口记录：`../../memory/review-engine/20260723-223953-Review非完整生产闭环收口.md`。
 - 单节点 Internal Preview 封包记录：`../../memory/review-engine/20260726-110816-Review单节点InternalPreview封包.md`。
+- Internal Preview SQLite/归档安全返修：`../../memory/review-engine/20260726-112450-ReviewInternalPreview安全返修.md`。
 
 ## 计划产物预期
 

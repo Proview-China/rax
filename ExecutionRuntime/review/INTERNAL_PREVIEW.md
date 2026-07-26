@@ -62,6 +62,13 @@ export PRAXIS_REVIEW_TENANT="local-preview"
 
 `run-local.sh`不会生成、保存或打印Secret。它只接受至少64个hex字符的Bearer token和cursor key，并在进程内构造当前单租户静态鉴权配置。非loopback监听仍必须显式设置`PRAXIS_REVIEW_TLS_CERT`与`PRAXIS_REVIEW_TLS_KEY`。
 
+启动器固定使用私有`umask 077`。`PRAXIS_REVIEW_DB`必须是绝对canonical路径，所有既有父目录都必须是真实目录且不能是symlink：
+
+- fresh DB由启动器排他创建并验证为当前用户所有、普通文件、单一hard-link、`0600`；
+- existing DB及既有`-wal`、`-shm`、`-journal`同样必须已经满足上述私有边界；
+- 过宽权限、非当前用户、symlink、hardlink、symlinked parent或dot path component一律Fail Closed；
+- 启动器不会用`chmod`静默“修复”不安全的既有数据库。
+
 另一个终端可使用CLI：
 
 ```bash
@@ -80,11 +87,15 @@ export PRAXIS_REVIEW_TOKEN="<与服务相同的token>"
 验证器会：
 
 1. 校验归档SHA-256；
-2. 解包并检查manifest边界；
-3. 启动真实`review-service`二进制和临时SQLite；
-4. 验证未认证请求为401；
-5. 使用真实`praxis-review` CLI经HTTP列出空Case集合；
-6. 发送SIGTERM并确认服务正常退出。
+2. 在任何解包前验证唯一根目录、closed member set、路径、类型、mode和展开大小；
+3. 拒绝绝对/`.`/`..`路径、重复或unexpected member、symlink、hardlink、device等非预期类型，再按已验证清单安全解包；
+4. 检查manifest边界；
+5. 启动真实`review-service`二进制和临时SQLite；
+6. 验证未认证请求为401；
+7. 使用真实`praxis-review` CLI经HTTP列出空Case集合；
+8. 发送SIGTERM并确认服务正常退出。
+
+同目录`.sha256`用于完整性和重复构建校验，不单独证明发布者身份。需要来源真实性时，调用方仍须从可信发布通道取得并核对摘要或后续签名；替换archive与checksum也无法绕过验证器的预解包结构门禁。
 
 完整重复构建、黑盒与故障门禁：
 
@@ -92,7 +103,7 @@ export PRAXIS_REVIEW_TOKEN="<与服务相同的token>"
 ./scripts/test-internal-preview.sh
 ```
 
-该门禁执行两次独立封包并比较归档字节，随后执行真实服务/CLI冒烟、篡改归档拒绝和非法Secret拒绝。
+该门禁执行两次独立封包并比较归档字节，随后执行真实服务/CLI冒烟、篡改归档、非法Secret、DB权限/symlink路径，以及relative-traversal/absolute-path/symlink/hardlink/unexpected-member恶意归档拒绝。
 
 ## 明确不包含
 

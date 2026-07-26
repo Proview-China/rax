@@ -36,6 +36,7 @@ work_dir="$(mktemp -d)"
 trap 'rm -rf "${work_dir}"' EXIT
 stage="${work_dir}/${package_name}"
 mkdir -p "${stage}/bin" "${stage}/docs" "${output_dir}"
+chmod 0755 "${stage}" "${stage}/bin" "${stage}/docs"
 
 build() {
   local target="$1"
@@ -50,6 +51,7 @@ build() {
 
 build "${stage}/bin/review-service" ./cmd/review-service
 build "${stage}/bin/praxis-review" ./cmd/praxis-review
+chmod 0755 "${stage}/bin/review-service" "${stage}/bin/praxis-review"
 install -m 0755 "${module_dir}/scripts/run-local.sh" "${stage}/bin/run-local.sh"
 install -m 0644 "${module_dir}/README.md" "${stage}/docs/README.md"
 install -m 0644 "${module_dir}/INTERNAL_PREVIEW.md" "${stage}/docs/INTERNAL_PREVIEW.md"
@@ -67,6 +69,7 @@ cat >"${stage}/manifest.json" <<EOF
   "goarch": "${goarch}"
 }
 EOF
+chmod 0644 "${stage}/manifest.json"
 
 find "${stage}" -type f -print0 | xargs -0 touch --date="@${source_epoch}"
 archive="${output_dir}/${archive_name}"

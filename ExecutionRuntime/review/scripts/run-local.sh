@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
+umask 077
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 service_bin="${PRAXIS_REVIEW_SERVICE_BIN:-${script_dir}/review-service}"
@@ -34,6 +35,65 @@ if [[ ! -x "${service_bin}" ]]; then
   printf 'review-service is not executable: %s\n' "${service_bin}" >&2
   exit 2
 fi
+
+fail_db_path() {
+  printf 'unsafe PRAXIS_REVIEW_DB: %s\n' "$1" >&2
+  exit 2
+}
+
+validate_private_file() {
+  local path="$1"
+  local label="$2"
+  [[ ! -L "${path}" ]] || fail_db_path "${label} is a symlink"
+  [[ -f "${path}" ]] || fail_db_path "${label} is not a regular file"
+  [[ "$(stat -c '%u' -- "${path}")" == "$(id -u)" ]] ||
+    fail_db_path "${label} is not owned by the current user"
+  [[ "$(stat -c '%a' -- "${path}")" == 600 ]] ||
+    fail_db_path "${label} permissions must already be 0600"
+  [[ "$(stat -c '%h' -- "${path}")" == 1 ]] ||
+    fail_db_path "${label} must not have hard links"
+}
+
+validate_db_path() {
+  local db="$1"
+  local parent component segment sidecar
+  [[ "${db}" == /* ]] || fail_db_path "path must be absolute"
+  [[ "${db}" != "/" && "${db}" != */ && "${db}" != *//* ]] ||
+    fail_db_path "path is not canonical"
+  [[ "${db}" != */./* && "${db}" != */../* ]] ||
+    fail_db_path "dot path components are forbidden"
+
+  parent="${db%/*}"
+  [[ -n "${parent}" ]] || parent="/"
+  component="/"
+  IFS='/' read -r -a segments <<<"${parent#/}"
+  for segment in "${segments[@]}"; do
+    [[ -n "${segment}" ]] || continue
+    component="${component%/}/${segment}"
+    [[ ! -L "${component}" ]] || fail_db_path "parent path contains a symlink"
+    [[ -d "${component}" ]] || fail_db_path "parent path is not an existing directory"
+  done
+
+  if [[ -L "${db}" ]]; then
+    fail_db_path "database path is a symlink"
+  elif [[ -e "${db}" ]]; then
+    validate_private_file "${db}" "existing database"
+  else
+    (set -o noclobber; : >"${db}") 2>/dev/null ||
+      fail_db_path "database could not be created exclusively"
+    validate_private_file "${db}" "fresh database"
+  fi
+
+  for sidecar in "${db}-wal" "${db}-shm" "${db}-journal"; do
+    if [[ -L "${sidecar}" ]]; then
+      fail_db_path "database sidecar is a symlink"
+    elif [[ -e "${sidecar}" ]]; then
+      validate_private_file "${sidecar}" "existing database sidecar"
+    fi
+  done
+}
+
+validate_db_path "${PRAXIS_REVIEW_DB}"
 
 capabilities='["review.attest","review.behavior-feedback.create","review.cancel","review.claim","review.evidence.attach","review.finding.create","review.read","review.submit"]'
 export PRAXIS_REVIEW_AUTH_JSON
