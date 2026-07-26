@@ -95,6 +95,10 @@ type PackageVerificationPortV1 interface {
 	VerifyPackageV1(context.Context, contract.ToolPackageVerifyRequestV1) (contract.ToolPackageVerificationFactV1, error)
 }
 
+type CorePackPreviewPortV1 interface {
+	PreviewV1(context.Context, api.CorePackPreviewConfigV1) (api.CorePackPreviewResultV1, error)
+}
+
 type ListOutputV1 struct {
 	ContractVersion string                    `json:"contract_version"`
 	Snapshot        sdk.RegistrySnapshotRefV1 `json:"snapshot"`
@@ -186,6 +190,14 @@ type RunnerV1 struct {
 	mcpResourceMaterialSet MCPDiscoveryPageResourceMaterialSetReadPortV1
 	mcpPromptMaterialSet   MCPDiscoveryPagePromptMaterialSetReadPortV1
 	packageVerification    PackageVerificationPortV1
+	corePackPreview        CorePackPreviewPortV1
+}
+
+func NewRunnerWithCorePackPreviewV1(catalog CatalogPortV1, inspector InspectorPortV1, preview CorePackPreviewPortV1) (*RunnerV1, error) {
+	if nilLikeCLIV1(catalog) || nilLikeCLIV1(inspector) || nilLikeCLIV1(preview) {
+		return nil, core.NewError(core.ErrorInvalidArgument, core.ReasonComponentMissing, "Tool CLI Core Pack Preview dependencies are required")
+	}
+	return &RunnerV1{catalog: catalog, inspector: inspector, corePackPreview: preview}, nil
 }
 
 func NewRunnerWithPackageVerificationV1(catalog CatalogPortV1, inspector InspectorPortV1, verification PackageVerificationPortV1) (*RunnerV1, error) {
@@ -322,6 +334,12 @@ func (r *RunnerV1) RunV1(ctx context.Context, args []string, output io.Writer) e
 	}
 	if args[0] != "tool" {
 		return unsupportedCommandV1()
+	}
+	if args[1] == "core-pack" {
+		if len(args) < 3 || args[2] != "preview" || nilLikeCLIV1(r.corePackPreview) {
+			return unsupportedCommandV1()
+		}
+		return r.runCorePackPreviewV1(ctx, args[3:], output)
 	}
 	switch args[1] {
 	case "list":
