@@ -49,6 +49,8 @@ run_launcher() {
     "${script_dir}/run-local.sh"
 }
 
+go build -trimpath -buildvcs=false -o "${launcher}/review-service" ./cmd/review-service
+
 (
   umask 022
   run_launcher "${launcher}/fresh.db"
@@ -85,6 +87,32 @@ if run_launcher "${launcher}/linked-parent/review.db" >/dev/null 2>&1; then
 fi
 if [[ -e "${launcher}/real-parent/review.db" ]]; then
   printf '%s\n' 'symlinked parent rejection leaked a Review database' >&2
+  exit 1
+fi
+
+printf '%s\n' 'not sqlite' >"${launcher}/corrupt.db"
+chmod 0600 "${launcher}/corrupt.db"
+if PRAXIS_REVIEW_MODE=check \
+  PRAXIS_REVIEW_TOKEN="${token}" \
+  PRAXIS_REVIEW_CURSOR_KEY_HEX="${cursor}" \
+  PRAXIS_REVIEW_DB="${launcher}/corrupt.db" \
+  PRAXIS_REVIEW_SERVICE_BIN="${launcher}/review-service" \
+  "${script_dir}/run-local.sh" >/dev/null 2>&1; then
+  printf '%s\n' 'review-service check mode accepted a corrupt SQLite database' >&2
+  exit 1
+fi
+
+if PRAXIS_REVIEW_MODE=unknown \
+  PRAXIS_REVIEW_TOKEN="${token}" \
+  PRAXIS_REVIEW_CURSOR_KEY_HEX="${cursor}" \
+  PRAXIS_REVIEW_DB="${launcher}/unknown-mode.db" \
+  PRAXIS_REVIEW_SERVICE_BIN="${launcher}/review-service" \
+  "${script_dir}/run-local.sh" >/dev/null 2>&1; then
+  printf '%s\n' 'review-service accepted an unknown mode' >&2
+  exit 1
+fi
+if [[ -e "${launcher}/unknown-mode.db" ]]; then
+  printf '%s\n' 'unknown review-service mode touched the SQLite database' >&2
   exit 1
 fi
 

@@ -183,6 +183,8 @@ Application 持久 Gate + Runtime current projection ─┴─> 生产集成与�
 
 Internal Preview 收口：在不新增业务语义的前提下，提供确定性 Linux/amd64 归档、SHA-256、无内置 Secret 的启动包装，以及真实 SQLite+HTTP+CLI 黑盒和篡改/非法配置故障门禁。该产物固定 owner-local `reference_only`，不关闭 production external-current/root NO-GO。
 
+Owner-local运维收口：`review-service`提供check-only启动诊断，复用真实配置/Secret、TLS与SQLite open/migration/integrity路径且不监听网络；稳定结果必须显式`listener=not_started`、`support_mode=owner-local`、`production_eligible=false`，不能冒充Praxis production readiness。
+
 ### REV-D11 production external current Reader 切片
 
 Review-owned asset已完成最终复核，以下内容保持冻结：

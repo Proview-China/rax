@@ -20,6 +20,7 @@ Review Engine 是 Praxis 的判断 Owner：它维护 Request、Target、Case、R
 - Slack、Linear、Jira 官方签名/时间窗解析与脱敏 Envelope exact binding；平台回包始终只是 Observation，outbound 只生成 DeliveryIntent，不调用网络；
 - reusable Store/Service conformance、unit/whitebox/blackbox/fault/runtime integration、race/vet 和 benchmark。
 - 可复现单节点 Internal Preview 封包：确定性 Go 二进制与 tar 构建、无内置 Secret 的启动包装、DB `0600`/symlink路径门禁、预解包closed-set校验，以及真实 SQLite+HTTP+CLI 黑盒/故障门禁。
+- `review-service` check-only启动诊断：复用真实配置/Secret、TLS、SQLite migration/WAL/foreign-key/完整性启动路径，不创建listener，稳定输出继续声明`production_eligible=false`。
 
 ## 公开入口
 

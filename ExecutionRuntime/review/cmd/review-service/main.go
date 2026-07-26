@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -30,6 +32,8 @@ type authConfigV1 struct {
 	TTLSeconds int64         `json:"ttl_seconds"`
 }
 
+const checkResultV1 = `{"contract_version":"praxis.review.service-check/v1","status":"ok","configuration":"valid","database":"ready","integrity":"ok","listener":"not_started","support_mode":"owner-local","production_eligible":false}`
+
 func main() {
 	if err := run(); err != nil {
 		_, _ = fmt.Fprintln(os.Stderr, err)
@@ -37,9 +41,22 @@ func main() {
 	}
 }
 func run() error {
+	return runV1(os.Stdout)
+}
+func runV1(output io.Writer) error {
+	if output == nil {
+		return core.NewError(core.ErrorInvalidArgument, core.ReasonComponentMissing, "review service output is required")
+	}
 	now := time.Now()
 	database := os.Getenv("PRAXIS_REVIEW_DB")
 	address := os.Getenv("PRAXIS_REVIEW_ADDR")
+	mode := os.Getenv("PRAXIS_REVIEW_MODE")
+	if mode == "" {
+		mode = "serve"
+	}
+	if mode != "serve" && mode != "check" {
+		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidState, "PRAXIS_REVIEW_MODE must be serve or check")
+	}
 	if address == "" {
 		address = "127.0.0.1:8087"
 	}
@@ -73,6 +90,10 @@ func run() error {
 	if err != nil || len(cursorKey) < 32 {
 		return core.NewError(core.ErrorInvalidArgument, core.ReasonComponentMissing, "PRAXIS_REVIEW_CURSOR_KEY_HEX must contain at least 32 bytes")
 	}
+	cert, key := os.Getenv("PRAXIS_REVIEW_TLS_CERT"), os.Getenv("PRAXIS_REVIEW_TLS_KEY")
+	if err := validateTransportV1(address, cert, key); err != nil {
+		return err
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer cancel()
 	store, err := storesqlite.Open(ctx, storesqlite.Config{Path: database, Clock: time.Now})
@@ -91,14 +112,11 @@ func run() error {
 	if err != nil {
 		return err
 	}
+	if mode == "check" {
+		_, err := fmt.Fprintln(output, checkResultV1)
+		return err
+	}
 	server := &http.Server{Addr: address, Handler: handler, ReadHeaderTimeout: 5 * time.Second, ReadTimeout: 30 * time.Second, WriteTimeout: 0, IdleTimeout: 60 * time.Second, MaxHeaderBytes: 64 << 10}
-	cert, key := os.Getenv("PRAXIS_REVIEW_TLS_CERT"), os.Getenv("PRAXIS_REVIEW_TLS_KEY")
-	if (cert == "") != (key == "") {
-		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "review TLS cert and key must be configured together")
-	}
-	if cert == "" && !loopbackAddress(address) {
-		return core.NewError(core.ErrorPreconditionFailed, core.ReasonInvalidState, "review service requires TLS outside loopback")
-	}
 	errors := make(chan error, 1)
 	go func() {
 		if cert != "" {
@@ -118,6 +136,23 @@ func run() error {
 		defer stop()
 		return server.Shutdown(shutdown)
 	}
+}
+func validateTransportV1(address, cert, key string) error {
+	if _, _, err := net.SplitHostPort(address); err != nil {
+		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "review service address is invalid")
+	}
+	if (cert == "") != (key == "") {
+		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "review TLS cert and key must be configured together")
+	}
+	if cert == "" && !loopbackAddress(address) {
+		return core.NewError(core.ErrorPreconditionFailed, core.ReasonInvalidState, "review service requires TLS outside loopback")
+	}
+	if cert != "" {
+		if _, err := tls.LoadX509KeyPair(cert, key); err != nil {
+			return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "review TLS certificate or key is invalid")
+		}
+	}
+	return nil
 }
 func loopbackAddress(address string) bool {
 	host, _, err := net.SplitHostPort(address)
