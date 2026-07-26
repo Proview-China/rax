@@ -1,5 +1,22 @@
 # Tool/MCP Wave 1
 
+## Core Pack reference preview quickstart
+
+Build the owner-local, non-executable preview binary:
+
+    go build -o praxis-tool-preview ./cmd/praxis-tool-preview
+
+Preview the five official Coding Tool declarations from a strict config:
+
+    ./praxis-tool-preview --config-json '<CorePackPreviewConfigV1 JSON>'
+
+Verify the exact five-declaration closure:
+
+    ./praxis-tool-preview --check --config-json '<CorePackPreviewConfigV1 JSON>'
+
+This quickstart is reference-only. It does not admit or publish a Tool Surface,
+bind credentials or a Sandbox, invoke a Provider, or create a production root.
+
 本模块实现 Tool 与 MCP 的领域内核：版本化合同、稳定 ID/摘要、Descriptor/Package/Registry、确定性 Tool Surface、Action V1/V2/V3 领域状态机、G6A 单调用协调水位，以及 MCP 2025-11-25 的 JSON-RPC、初始化、生命周期、Session 与 Capability Snapshot。
 
 ## 当前边界
