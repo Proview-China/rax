@@ -113,11 +113,13 @@ Descriptor只输出Context exact闭包。Model Invoker把Context提供的Frame F
 
 ```go
 type ContextCacheHintV1 struct {
-    StableEligible        bool
-    SemiStableEligible    bool
-    Fingerprint           Digest
-    InvalidationReasons   []ContextCacheInvalidationReasonV1
-    ExpiresUnixNano       int64
+    StableEligible              bool
+    SemiStableEligible          bool
+    FrameFingerprint            Digest
+    StablePrefixFingerprint     Digest
+    SemiStablePrefixFingerprint *Digest
+    InvalidationReasons         []ContextCacheInvalidationReasonV1
+    ExpiresUnixNano             int64
 }
 ```
 
@@ -136,15 +138,30 @@ ttl_expired
 owner_current_unknown
 ```
 
-Fingerprint必须seal：
+三个Fingerprint分别seal：
 
 ```text
-tenant scope + agent exact ref + run ID/scope
-+ Frame/Manifest/Generation exact refs
-+ Stable/SemiStable/DynamicTail ContentRefs
-+ Fragment exact refs + prompt exact refs + recipe exact ref
-+ disclosure class + cache key version
+FrameFingerprint =
+  tenant scope + agent exact ref + run ID/scope
+  + Frame/Manifest/Generation exact refs
+  + Stable/SemiStable/DynamicTail/Rendered ContentRefs
+  + 全部Fragment exact refs + prompt exact refs + recipe exact ref
+  + disclosure class + cache key version
+
+StablePrefixFingerprint =
+  tenant scope + agent exact ref + run ID/scope
+  + StablePrefix ContentRef + Stable区域Fragment exact refs
+  + stable prompt/recipe exact refs
+  + disclosure class + cache key version
+
+SemiStablePrefixFingerprint =
+  tenant scope + agent exact ref + run ID/scope
+  + SemiStable ContentRef + SemiStable区域Fragment exact refs
+  + semi-stable prompt/recipe exact refs
+  + disclosure class + cache key version
 ```
+
+Frame没有SemiStable区域时`SemiStablePrefixFingerprint=nil`。Stable/Semi fingerprint明确排除Frame/Manifest/Generation身份、DynamicTail/Rendered ContentRef和Dynamic区域Fragment refs，防止每轮DynamicTail变化破坏稳定Prefix复用；相应Stable或Semi exact内容变化必须改变其fingerprint。
 
 Context可以说明哪些区域稳定及为什么失效，但：
 
@@ -245,8 +262,9 @@ MCP调用在Context边界只作为Tool Owner已经settled的ToolResult；Context
 - Context只消费Tool Owner唯一公开`SettledToolResultProjectionV1`的exact ref和current snapshot；最终名称随Tool Owner批准的公共合同校准，不在Context复制或扩展DTO；
 - Context Reader/Adapter只无损接收该projection中的Revision、Digest、Checked/Expires和Owner已验证的materialization分支，不复刻ToolResult/DomainResult/Apply/Current/Association链；
 - 小正文只接受Tool projection给出的exact ContentRef，且`<= min(Recipe.ToolInlineMaxBytes, 64 KiB)`并受token预算约束；
-- 大正文必须由Tool projection给出exact ArtifactRef和有界摘要；Frame不得复制原始大对象；
-- Tool projection的inline/artifact分支不合法、大结果缺Artifact或摘要时Fail Closed；
+- 大正文只要求Tool projection给出exact ArtifactRef；Context形成`artifact_reference` Fragment且不复制正文；
+- Tool projection的inline/artifact分支不合法或大结果缺ArtifactRef时Fail Closed；
+- 若未来需要摘要，只能由Context自有、受治理的Artifact materialization/compaction路径另行生成；V1不实现该跨Owner摘要路径，也不要求Tool增加字段；
 - Receipt、Observation、Provider response、未settled Result、raw/unbounded output在任何Cache/Frame写前拒绝；
 - 结果只能形成`tool_result`或`artifact_reference` Fragment，不能形成instruction、Authority、Tool Schema或Review Verdict；
 - Parent Frame不可变；新增Fragment只进入incremental child Frame，StablePrefix/SemiStable exact refs保持，动态内容进入DynamicTail。
@@ -361,7 +379,7 @@ Cache miss/eviction不是领域错误。任何错误均不得修改原Frame或�
 - Provider cached tokens自报被认定为Context hit；
 - Context定义Model Projection DTO、Projection Cache或Provider KV handle；
 - Receipt、Observation、未settled ToolResult或MCP raw response进入Frame；
-- 大Tool正文以内联字符串绕过ArtifactRef、摘要和64 KiB上限；
+- 大Tool正文以内联字符串绕过ArtifactRef和64 KiB上限，或要求Tool额外提供摘要字段；
 - Evaluator高分删除required anchor、安全规则、Tool Schema或open effect；
 - Evaluator失败后自动接受候选摘要；
 - Compression Evidence冒充正确性证明、Verdict、Authority或Runtime Evidence；

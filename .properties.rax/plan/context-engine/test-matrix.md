@@ -8,11 +8,12 @@
 
 | 层级 | 硬反例 | 通过标准 |
 |---|---|---|
-| Descriptor/Digest | nil/empty、乱序Fragment refs、同Frame换scope/prompt/recipe/disclosure | canonical确定；任一Context闭包维度变化必须改变Request/Descriptor/Fingerprint；不读取Model current |
+| Descriptor/Digest | nil/empty、乱序Fragment refs、同Frame换scope/prompt/recipe/disclosure | canonical确定；任一Context闭包维度变化必须改变对应Request/Descriptor/Fingerprint；不读取Model current |
+| Fingerprint分区 | 只改DynamicTail、只改Stable exact Content/Fragment、只改Semi exact Content/Fragment、无Semi区域 | Dynamic变化只改变FrameFingerprint；Stable变化改变Frame+Stable；Semi变化改变Frame+Semi；无Semi时fingerprint=nil |
 | S1/S2与TTL | Frame/Manifest/Generation/Content/current或八类依赖边界`-1/equal/+1`漂移 | 零Descriptor、零Cache写；Expires严格取最小且不延寿 |
 | Fragment Cache | exact FragmentRef/ContentRef、scope/disclosure/prompt/recipe policy相同或任一漂移、跨Frame复用、invalidate/Get/Put竞态 | 完整闭包相同才允许跨Frame命中；异包Conflict、旧generation miss、deep-copy/no-alias |
 | Frame Cache | Frame/Manifest/Generation exact ref漂移、eviction、64并发 | exact闭包命中；异包Conflict；eviction不改变Frame真值 |
-| Tool/MCP输入 | Tool Owner单一settled projection exact/current、Receipt/Observation/未settled、inline 64KiB边界、大结果缺ArtifactRef/摘要 | 不复制Tool治理链或DTO；写前拒绝非法输入；small为ToolResult Fragment，large只ArtifactRef+有界摘要 |
+| Tool/MCP输入 | Tool Owner单一settled projection exact/current、`inline_payload`或`artifact_ref` exact-one、complete/classification/TTL、Receipt/Observation/未settled、inline 64KiB边界、大结果缺ArtifactRef | 不复制Tool治理链或DTO；small为ToolResult Fragment；large只ArtifactRef且不复制正文；不要求Tool摘要字段 |
 | Incremental Frame | Parent变更、Stable/Semi漂移、Dynamic追加、同ID换包 | Parent immutable；Stable/Semi exact复用；不同内容复用ID冲突 |
 | Evaluator/Invariant | 高分但删除required anchor、安全、Tool Schema、纠正/open effect；Unknown/cancel | 确定性Gate优先；安全回退或Fail Closed，原Frame不变 |
 | Compression Evidence | source/candidate/evaluator/metrics/limitations漂移或冒充Verdict/Authority/Evidence | exact绑定可复算；仅advisory |
@@ -105,7 +106,7 @@
 | Prefix/cache identity | PrefixDigest、StableSourceSetDigest、完整Manifest SourceSetDigest及key各维度 | DynamicTail改变不改变稳定key；stable ref/recipe/render/model/harness/toolschema/authority/isolation/provider/key-version任一漂移改变key或拒绝；不得用完整Manifest SourceSetDigest替代 |
 | Artifact白盒 | unchanged/diff/full、base冲突、写后Inspect | 无currentness不得沿用Anchor |
 | 压缩Anchor反例 | RetainedAnchorSet、旧Generation、摘要提及、base/target文件版本 | 未精确保留立即失效；diff冲突重新物化 |
-| 大内容/token反例 | 大文件、历史Tool输出、bounded summary、exact artifact ref/version/digest/range、delta chain上限 | 不全量重灌；超预算拒绝/降级；链超限rebase |
+| 大内容/token反例 | 大文件、历史Tool输出、Tool exact ArtifactRef、Context自有受治理摘要候选、delta chain上限 | Tool V1只接ArtifactRef；不全量重灌；Context摘要路径本V1不实现；链超限rebase |
 | Cache白盒 | partition、TTL、invalidation、经济性、miss reason、大数乘除与write+keepalive溢出 | usage不升级hit；跨分区不命中；先除后饱和值精确且加法不回绕 |
 | Injection白盒 | Expected/Actual、opaque/partial、强制字段漂移 | unknown不算matched；强制漂移拒绝 |
 | Injection因果反例 | 空Observation、Route/Attempt/Frame/sequence/revision/digest/fidelity、Expected TTL | 只有complete且exact、Expected current才matched |
