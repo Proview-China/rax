@@ -322,8 +322,9 @@ Context Owner若消费它，仍必须经既有Refresh/S2/Generation CAS形成自
 ## 7. Registry、Surface与MCP边界
 
 - 五个Capability、五个Local ToolDescriptor与一个Package按依赖顺序进入Registry；
-- Tool Surface固定顺序：
-  `workspace.inspect, workspace.read, workspace.search, workspace.patch, process.exec`；
+- Tool Surface使用`contract.SealSurface`的canonical顺序：
+  `process.exec, workspace.inspect, workspace.patch, workspace.read, workspace.search`；
+- 该顺序只用于确定性序列化、Digest与缓存身份，不表示执行优先级或调度顺序；
 - Surface必须引用上述exact Descriptor、Schema digest与Description digest；
 - Core Pack V1不创建`MCPToolMappingManifestV1`，不把远程MCP Tool纳入Package；
 - MCP发现到同名Tool时必须使用其MCP来源身份，不能shadow Core Tool；
