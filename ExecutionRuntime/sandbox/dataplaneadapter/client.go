@@ -2,8 +2,11 @@ package dataplaneadapter
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"strings"
 	"time"
@@ -100,6 +103,13 @@ func (r DispatchResponseV1) Validate(request DispatchRequestV1) error {
 		} else if r.ProviderObservation.WorkspaceCommit != nil {
 			return errors.New("non-workspace Provider observation carries a workspace commit result")
 		}
+		if request.Payload.ProviderKind == "workspace_read" && request.Phase == PhaseExecute {
+			if err := validateWorkspaceReadObservation(r.ProviderObservation.WorkspaceRead, request, r.CheckedUnixNano); err != nil {
+				return err
+			}
+		} else if r.ProviderObservation.WorkspaceRead != nil {
+			return errors.New("non-workspace-read observation carries a workspace read result")
+		}
 		providerName, providerKind, err := expectedProviderIdentity(request.Payload.ProviderKind)
 		if err != nil || r.ProviderObservation.Provider != providerKind || r.ProviderAttempt.ID != providerName+"/"+request.TenantID+"/"+request.AttemptID {
 			return errors.New("provider response identity drifted from the sealed request")
@@ -190,7 +200,37 @@ func expectedProviderIdentity(kind string) (string, string, error) {
 		return "remote", kind, nil
 	case "workspace_commit":
 		return "workspace-commit", kind, nil
+	case "workspace_read":
+		return "workspace-read", kind, nil
 	default:
 		return "", "", errors.New("provider kind is unsupported")
 	}
+}
+
+func validateWorkspaceReadObservation(value *WorkspaceReadObservationV1, request DispatchRequestV1, now int64) error {
+	if value == nil {
+		return errors.New("workspace read Provider observation is missing")
+	}
+	var payload WorkspaceReadPayloadV1
+	if err := json.Unmarshal(request.Payload.ProviderPayload, &payload); err != nil {
+		return errors.New("workspace read Provider payload is invalid")
+	}
+	expires := min(request.RequestedNotAfterUnixNano, request.SandboxAttempt.ExpiresUnixNano, request.ExecutionBinding.ExpiresUnixNano, request.RuntimeEnforcement.ExpiresUnixNano, payload.Workspace.ExpiresUnixNano)
+	if value.ContractVersion != "praxis.sandbox/workspace-read-observation/v1" || value.Workspace != payload.Workspace || value.RelativePath != payload.RelativePath || value.StartByte != payload.StartByte || value.ReturnedBytes != uint64(len([]byte(value.Content))) || value.ReturnedBytes > payload.MaxBytes || value.TotalBytes > 1<<20 || value.StartByte > value.TotalBytes || value.ReturnedBytes > value.TotalBytes-value.StartByte || value.Complete != (value.StartByte+value.ReturnedBytes == value.TotalBytes) || !value.S1Checked || !value.S2Checked || value.PhysicalReadCount != 1 || value.RecordedUnixNano <= 0 || value.RecordedUnixNano > now || value.ExpiresUnixNano != expires || now >= expires {
+		return errors.New("workspace read Provider observation is incomplete or stale")
+	}
+	if value.File.ID == "" || value.File.Revision != payload.Workspace.Revision || !validDigest(value.File.Digest) || value.File.ExpiresUnixNano != payload.Workspace.ExpiresUnixNano || payload.ExpectedFileRef != nil && value.File != *payload.ExpectedFileRef {
+		return errors.New("workspace read exact file ref drifted")
+	}
+	if !validDigest(value.ContentDigest) || value.ContentDigest != workspaceReadContentDigest([]byte(value.Content), value.StartByte, value.TotalBytes, value.Complete) {
+		return errors.New("workspace read bounded content digest drifted")
+	}
+	return nil
+}
+
+func workspaceReadContentDigest(value []byte, start, total uint64, complete bool) string {
+	h := sha256.New()
+	_, _ = fmt.Fprintf(h, "praxis.sandbox/workspace-read-range/v1%c%d%c%d%c%t%c", 0, start, 0, total, 0, complete, 0)
+	_, _ = h.Write(value)
+	return "sha256:" + hex.EncodeToString(h.Sum(nil))
 }

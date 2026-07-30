@@ -239,6 +239,7 @@ pub enum ProviderKindV1 {
     WasmtimeComponent,
     RemoteSandbox,
     WorkspaceCommit,
+    WorkspaceRead,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -273,6 +274,7 @@ impl ProviderInspectionTargetV1 {
             ProviderKindV1::WasmtimeComponent => "wasmtime",
             ProviderKindV1::RemoteSandbox => "remote",
             ProviderKindV1::WorkspaceCommit => "workspace-commit",
+            ProviderKindV1::WorkspaceRead => "workspace-read",
         };
         if self.provider_attempt.id
             != format!("{provider_name}/{tenant_id}/{}", self.original_attempt_id)
@@ -541,6 +543,47 @@ pub struct WorkspaceCommitPayloadV1 {
     pub inspection_target: Option<ProviderInspectionTargetV1>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceReadPayloadV1 {
+    pub workspace_binding_id: String,
+    pub workspace_digest: String,
+    pub workspace: ExactRefV1,
+    pub file_scope_digest: String,
+    pub relative_path: String,
+    pub start_byte: u64,
+    pub max_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expected_file_ref: Option<ExactRefV1>,
+    pub s1_checked: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub inspection_target: Option<ProviderInspectionTargetV1>,
+}
+
+impl WorkspaceReadPayloadV1 {
+    fn validate(&self) -> Result<()> {
+        if self.workspace_binding_id.trim().is_empty()
+            || !valid_digest(&self.workspace_digest)
+            || self.workspace.validate("workspace view").is_err()
+            || !valid_digest(&self.file_scope_digest)
+            || !valid_logical_path(&self.relative_path)
+            || self.max_bytes == 0
+            || self.max_bytes > 1_048_576
+            || !self.s1_checked
+            || self
+                .expected_file_ref
+                .as_ref()
+                .is_some_and(|value| value.validate("expected workspace file").is_err())
+        {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidArgument,
+                "workspace read payload violates the closed policy",
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl WorkspaceCommitPayloadV1 {
     fn validate(&self) -> Result<()> {
         if self.workspace_binding_id.trim().is_empty()
@@ -714,6 +757,7 @@ pub enum ProviderPayloadV1 {
     WasmtimeComponent(WasmPayloadV1),
     RemoteSandbox(RemotePayloadV1),
     WorkspaceCommit(WorkspaceCommitPayloadV1),
+    WorkspaceRead(WorkspaceReadPayloadV1),
 }
 
 impl ProviderPayloadV1 {
@@ -725,6 +769,7 @@ impl ProviderPayloadV1 {
             Self::WasmtimeComponent(payload) => payload.validate(),
             Self::RemoteSandbox(payload) => payload.validate(),
             Self::WorkspaceCommit(payload) => payload.validate(),
+            Self::WorkspaceRead(payload) => payload.validate(),
         }
     }
 
@@ -737,6 +782,7 @@ impl ProviderPayloadV1 {
             Self::WasmtimeComponent(_) => ProviderKindV1::WasmtimeComponent,
             Self::RemoteSandbox(_) => ProviderKindV1::RemoteSandbox,
             Self::WorkspaceCommit(_) => ProviderKindV1::WorkspaceCommit,
+            Self::WorkspaceRead(_) => ProviderKindV1::WorkspaceRead,
         }
     }
 
@@ -749,6 +795,7 @@ impl ProviderPayloadV1 {
             Self::WasmtimeComponent(payload) => payload.inspection_target.as_ref(),
             Self::RemoteSandbox(payload) => payload.inspection_target.as_ref(),
             Self::WorkspaceCommit(payload) => payload.inspection_target.as_ref(),
+            Self::WorkspaceRead(payload) => payload.inspection_target.as_ref(),
         }
     }
 }
@@ -1083,6 +1130,7 @@ pub fn valid_effect_kind(value: &str) -> bool {
             | "praxis.sandbox/inspect"
             | "praxis.sandbox/cleanup"
             | "praxis.sandbox/workspace-commit"
+            | "praxis.sandbox/workspace-read"
             | "praxis.sandbox/checkpoint"
     )
 }
@@ -1101,6 +1149,7 @@ fn inspectable_original_effect_kind(value: &str) -> bool {
             | "praxis.sandbox/release"
             | "praxis.sandbox/cleanup"
             | "praxis.sandbox/workspace-commit"
+            | "praxis.sandbox/workspace-read"
     )
 }
 

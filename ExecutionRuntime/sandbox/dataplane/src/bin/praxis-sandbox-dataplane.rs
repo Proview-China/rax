@@ -25,6 +25,7 @@ use praxis_sandbox_dataplane::wasm_capability_ipc::SocketWasmCapabilityHost;
 use praxis_sandbox_dataplane::workspace_commit::{
     WorkspaceCommitConfigV1, WorkspaceCommitProviderV1,
 };
+use praxis_sandbox_dataplane::workspace_read::{WorkspaceReadConfigV1, WorkspaceReadProviderV1};
 use serde::Deserialize;
 use tokio::fs;
 use tokio::net::{UnixListener, UnixStream};
@@ -62,6 +63,8 @@ struct RootConfig {
     allowed_remote_connector_uid: Option<u32>,
     #[serde(default)]
     workspace_commit: Option<WorkspaceCommitConfigV1>,
+    #[serde(default)]
+    workspace_read: Option<WorkspaceReadConfigV1>,
 }
 
 struct RootState {
@@ -72,6 +75,7 @@ struct RootState {
     wasm: WasmProvider,
     remote: Option<RemoteProvider<SocketRemoteTransport>>,
     workspace_commit: Option<WorkspaceCommitProviderV1>,
+    workspace_read: Option<WorkspaceReadProviderV1>,
     allowed_dispatch_uid: u32,
 }
 
@@ -146,6 +150,10 @@ async fn run() -> Result<()> {
     if let Some(provider) = &workspace_commit {
         provider.probe().await?;
     }
+    let workspace_read = config.workspace_read.map(WorkspaceReadProviderV1::new);
+    if let Some(provider) = &workspace_read {
+        provider.probe()?;
+    }
     let state = Arc::new(RootState {
         enforcer: DataPlaneEnforcer::new(reader, journal).with_checkpoint_store(checkpoint),
         host,
@@ -154,6 +162,7 @@ async fn run() -> Result<()> {
         wasm,
         remote,
         workspace_commit,
+        workspace_read,
         allowed_dispatch_uid: config.allowed_dispatch_uid,
     });
     let listener = bind_socket(&config.dispatch_socket, config.socket_mode).await?;
@@ -204,6 +213,13 @@ async fn serve_connection(state: Arc<RootState>, mut stream: UnixStream) -> Resu
                 None => Err(ClosedError::new(
                     ClosedReason::Unsupported,
                     "workspace commit Provider is not configured in this root",
+                )),
+            },
+            ProviderKindV1::WorkspaceRead => match &state.workspace_read {
+                Some(provider) => state.enforcer.dispatch(provider, request).await,
+                None => Err(ClosedError::new(
+                    ClosedReason::Unsupported,
+                    "workspace read Provider is not configured in this root",
                 )),
             },
         },

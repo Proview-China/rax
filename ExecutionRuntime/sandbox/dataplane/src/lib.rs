@@ -15,9 +15,10 @@ pub mod remote_ipc;
 pub mod wasm;
 pub mod wasm_capability_ipc;
 pub mod workspace_commit;
+pub mod workspace_read;
 
 pub use contract::{DispatchRequestV1, DispatchResponseV1};
 pub use enforcer::{CurrentFactsReader, DataPlaneEnforcer};
-pub use error::{ClosedError, ClosedReason, Result};
+pub use error::{ClosedError, ClosedReason, EffectBoundary, Result};
 pub use journal::AttemptJournal;
 pub use provider::{Provider, ProviderObservation, ProviderReceipt};

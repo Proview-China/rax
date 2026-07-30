@@ -96,6 +96,7 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 		hostRoot := strings.HasPrefix(relative, "hostroot"+string(filepath.Separator))
 		statePlaneAdapter := strings.HasPrefix(relative, filepath.Join("storage", "sqlite")+string(filepath.Separator))
 		workspaceDriver := strings.HasPrefix(relative, "workspacefs"+string(filepath.Separator))
+		workspaceReadRuntimeEntry := relative == filepath.Join("kernel", "workspace_read_v1.go") || relative == filepath.Join("ports", "workspace_read_v1.go")
 		if relative, _ := filepath.Rel(root, path); strings.HasPrefix(relative, "runtimeadapter"+string(filepath.Separator)) {
 			payload, err := os.ReadFile(path)
 			if err != nil {
@@ -123,7 +124,7 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 				t.Errorf("production file %s imports forbidden side-effect package %q", path, importPath)
 			}
 			if strings.HasPrefix(importPath, runtimePrefix) {
-				approved := (strings.HasPrefix(relative, "runtimeadapter"+string(filepath.Separator)) || dataPlaneAdapter || applicationAdapter || releaseAdapter || statePlaneAdapter) && (importPath == runtimePrefix+"core" || importPath == runtimePrefix+"ports")
+				approved := (strings.HasPrefix(relative, "runtimeadapter"+string(filepath.Separator)) || dataPlaneAdapter || applicationAdapter || releaseAdapter || statePlaneAdapter || workspaceReadRuntimeEntry) && (importPath == runtimePrefix+"core" || importPath == runtimePrefix+"ports")
 				approved = approved || ((governedSDK || apiHandler) && importPath == runtimePrefix+"ports")
 				if !approved {
 					t.Errorf("production file %s imports unapproved Runtime surface %q", path, importPath)

@@ -7,7 +7,9 @@ package sqlite
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,11 +22,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 13
+const schemaVersion = 15
 
 type Store struct {
-	db    *sql.DB
-	clock func() time.Time
+	db                            *sql.DB
+	clock                         func() time.Time
+	workspaceReadOwnerIncarnation string
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -44,7 +47,12 @@ func OpenWithClock(ctx context.Context, path string, clock func() time.Time) (*S
 	}
 	db.SetMaxOpenConns(16)
 	db.SetMaxIdleConns(16)
-	store := &Store{db: db, clock: clock}
+	incarnation, err := newWorkspaceReadOwnerIncarnationV1()
+	if err != nil {
+		_ = db.Close()
+		return nil, err
+	}
+	store := &Store{db: db, clock: clock, workspaceReadOwnerIncarnation: incarnation}
 	if err := store.initialize(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -230,6 +238,22 @@ var schemaStatements = []string{
 		PRIMARY KEY(change_set_id,revision,digest), UNIQUE(change_set_id,revision))`,
 	`CREATE TABLE IF NOT EXISTS workspace_change_set_current (
 		change_set_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_command_current (
+		command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_reservation (
+		stable_digest TEXT PRIMARY KEY, reservation_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_attempt_current (
+		stable_digest TEXT PRIMARY KEY, attempt_id TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_attempt_origin (
+		attempt_id TEXT PRIMARY KEY, stable_digest TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_attempt_owner_incarnation (
+		attempt_id TEXT PRIMARY KEY, owner_incarnation_id TEXT NOT NULL, reserved_unix_nano INTEGER NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_recovery_evidence (
+		attempt_id TEXT PRIMARY KEY, previous_owner_incarnation_id TEXT NOT NULL,
+		current_owner_incarnation_id TEXT NOT NULL, recovered_unix_nano INTEGER NOT NULL,
+		evidence_digest TEXT NOT NULL UNIQUE)`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_observation (
+		observation_id TEXT PRIMARY KEY, stable_digest TEXT NOT NULL UNIQUE, body BLOB NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS workspace_rewind_composition_facts (
 		fact_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, digest TEXT NOT NULL,
 		tenant_id TEXT NOT NULL, scope_digest TEXT NOT NULL, request_id TEXT NOT NULL,
@@ -301,4 +325,12 @@ func classifyWrite(err error) error {
 		return ports.ErrConflict
 	}
 	return err
+}
+
+func newWorkspaceReadOwnerIncarnationV1() (string, error) {
+	var bytes [16]byte
+	if _, err := rand.Read(bytes[:]); err != nil {
+		return "", fmt.Errorf("create workspace read Owner incarnation: %w", err)
+	}
+	return "workspace-read-owner-" + hex.EncodeToString(bytes[:]), nil
 }

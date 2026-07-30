@@ -179,6 +179,19 @@ type WorkspaceCommitPayloadV1 struct {
 	InspectionTarget   *ProviderInspectionTargetV1 `json:"inspection_target,omitempty"`
 }
 
+type WorkspaceReadPayloadV1 struct {
+	WorkspaceBindingID string                      `json:"workspace_binding_id"`
+	WorkspaceDigest    string                      `json:"workspace_digest"`
+	Workspace          ExactRefV1                  `json:"workspace"`
+	FileScopeDigest    string                      `json:"file_scope_digest"`
+	RelativePath       string                      `json:"relative_path"`
+	StartByte          uint64                      `json:"start_byte"`
+	MaxBytes           uint64                      `json:"max_bytes"`
+	ExpectedFileRef    *ExactRefV1                 `json:"expected_file_ref,omitempty"`
+	S1Checked          bool                        `json:"s1_checked"`
+	InspectionTarget   *ProviderInspectionTargetV1 `json:"inspection_target,omitempty"`
+}
+
 type DispatchRequestV1 struct {
 	ContractVersion           string                  `json:"contract_version"`
 	RequestID                 string                  `json:"request_id"`
@@ -221,8 +234,11 @@ type CurrentAuthorizationV1 struct {
 }
 
 type ClosedError struct {
-	Reason  string `json:"reason"`
-	Message string `json:"message"`
+	Reason             string  `json:"reason"`
+	Message            string  `json:"message"`
+	EffectBoundary     string  `json:"effect_boundary,omitempty"`
+	CrossedActualPoint *bool   `json:"crossed_actual_point,omitempty"`
+	PhysicalReadCount  *uint64 `json:"physical_read_count,omitempty"`
 }
 
 func (e ClosedError) Error() string { return e.Reason + ": " + e.Message }
@@ -250,8 +266,27 @@ type ProviderObservationV1 struct {
 	PayloadDigest      string                           `json:"payload_digest"`
 	CheckpointArtifact *CheckpointArtifactObservationV1 `json:"checkpoint_artifact,omitempty"`
 	WorkspaceCommit    *WorkspaceCommitObservationV1    `json:"workspace_commit,omitempty"`
+	WorkspaceRead      *WorkspaceReadObservationV1      `json:"workspace_read,omitempty"`
 	ObservedUnixNano   int64                            `json:"observed_unix_nano"`
 	Digest             string                           `json:"digest"`
+}
+
+type WorkspaceReadObservationV1 struct {
+	ContractVersion   string     `json:"contract_version"`
+	Workspace         ExactRefV1 `json:"workspace"`
+	File              ExactRefV1 `json:"file"`
+	RelativePath      string     `json:"relative_path"`
+	StartByte         uint64     `json:"start_byte"`
+	Content           string     `json:"content"`
+	ContentDigest     string     `json:"content_digest"`
+	ReturnedBytes     uint64     `json:"returned_bytes"`
+	TotalBytes        uint64     `json:"total_bytes"`
+	Complete          bool       `json:"complete"`
+	S1Checked         bool       `json:"s1_checked"`
+	S2Checked         bool       `json:"s2_checked"`
+	PhysicalReadCount uint64     `json:"physical_read_count"`
+	RecordedUnixNano  int64      `json:"recorded_unix_nano"`
+	ExpiresUnixNano   int64      `json:"expires_unix_nano"`
 }
 
 type WorkspaceCommitObservationV1 struct {
@@ -352,6 +387,25 @@ func NewHostWorkspacePayload(value HostWorkspacePayloadV1) (ProviderPayloadV1, e
 	return ProviderPayloadV1{ProviderKind: "host_workspace", ProviderPayload: raw}, nil
 }
 
+func NewWorkspaceReadPayloadV1(value WorkspaceReadPayloadV1) (ProviderPayloadV1, error) {
+	if strings.TrimSpace(value.WorkspaceBindingID) == "" || !validDigest(value.WorkspaceDigest) || strings.TrimSpace(value.Workspace.ID) == "" || value.Workspace.Revision == 0 || !validDigest(value.Workspace.Digest) || value.Workspace.ExpiresUnixNano <= 0 || !validDigest(value.FileScopeDigest) || value.RelativePath == "" || path.IsAbs(value.RelativePath) || path.Clean(value.RelativePath) != value.RelativePath || value.RelativePath == "." || strings.Contains(value.RelativePath, "\\") || value.MaxBytes == 0 || value.MaxBytes > 1<<20 || !value.S1Checked {
+		return ProviderPayloadV1{}, errors.New("workspace read payload violates the closed policy")
+	}
+	if value.ExpectedFileRef != nil && (value.ExpectedFileRef.ID == "" || value.ExpectedFileRef.Revision == 0 || !validDigest(value.ExpectedFileRef.Digest) || value.ExpectedFileRef.ExpiresUnixNano <= 0) {
+		return ProviderPayloadV1{}, errors.New("workspace read expected file ref is invalid")
+	}
+	for _, segment := range strings.Split(value.RelativePath, "/") {
+		if segment == "" || segment == "." || segment == ".." {
+			return ProviderPayloadV1{}, errors.New("workspace read path is not canonical")
+		}
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return ProviderPayloadV1{}, err
+	}
+	return ProviderPayloadV1{ProviderKind: "workspace_read", ProviderPayload: raw}, nil
+}
+
 func NewMicroVMPayload(value MicroVMPayloadV1) (ProviderPayloadV1, error) {
 	if strings.TrimSpace(value.KernelBindingID) == "" || !validDigest(value.KernelDigest) || strings.TrimSpace(value.InitramfsBindingID) == "" || !validDigest(value.InitramfsDigest) || value.VCPUs == 0 || value.VCPUs > 64 || value.MemoryMiB < 64 || value.MemoryMiB > 1_048_576 || !value.NetworkDenyAll || value.WallClockTimeoutMilli == 0 || value.WallClockTimeoutMilli > 604_800_000 {
 		return ProviderPayloadV1{}, errors.New("microVM payload violates the closed policy")
@@ -449,7 +503,7 @@ func (p ProviderPayloadV1) InspectionTarget() (*ProviderInspectionTargetV1, erro
 	var envelope struct {
 		InspectionTarget *ProviderInspectionTargetV1 `json:"inspection_target"`
 	}
-	if p.ProviderKind != "host_workspace" && p.ProviderKind != "qemu_microvm" && p.ProviderKind != "containerd_oci" && p.ProviderKind != "wasmtime_component" && p.ProviderKind != "remote_sandbox" && p.ProviderKind != "workspace_commit" {
+	if p.ProviderKind != "host_workspace" && p.ProviderKind != "qemu_microvm" && p.ProviderKind != "containerd_oci" && p.ProviderKind != "wasmtime_component" && p.ProviderKind != "remote_sandbox" && p.ProviderKind != "workspace_commit" && p.ProviderKind != "workspace_read" {
 		return nil, errors.New("provider payload kind is unsupported")
 	}
 	if err := json.Unmarshal(p.ProviderPayload, &envelope); err != nil {
@@ -624,7 +678,7 @@ func inspectableOriginalEffectKind(value string) bool {
 	case "praxis.sandbox/backend-discovery", "praxis.sandbox/allocate", "praxis.sandbox/activate",
 		"praxis.sandbox/open", "praxis.sandbox/cancel", "praxis.sandbox/close",
 		"praxis.sandbox/fence", "praxis.sandbox/release", "praxis.sandbox/cleanup",
-		"praxis.sandbox/workspace-commit":
+		"praxis.sandbox/workspace-commit", "praxis.sandbox/workspace-read":
 		return true
 	default:
 		return false
