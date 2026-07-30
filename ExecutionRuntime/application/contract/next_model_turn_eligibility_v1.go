@@ -135,18 +135,50 @@ func DeriveNextModelTurnDispatchIDV1(request NextModelTurnEligibilityRequestV1) 
 	if err := request.Validate(); err != nil {
 		return "", err
 	}
+	return DeriveNextModelTurnDispatchIDFromRequestDigestV1(request.Digest)
+}
+
+func DeriveNextModelTurnDispatchIDFromRequestDigestV1(
+	requestDigest core.Digest,
+) (string, error) {
+	if requestDigest.Validate() != nil {
+		return "", core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidDigest, "next Model Turn derived dispatch request digest is invalid")
+	}
 	digest, err := core.CanonicalJSONDigest(
 		"praxis.application.next-model-turn-derived-dispatch-id",
 		NextModelTurnEligibilityContractVersionV1,
 		"NextModelTurnDerivedDispatchIdentityV1",
 		struct {
 			RequestDigest core.Digest `json:"request_digest"`
-		}{RequestDigest: request.Digest},
+		}{RequestDigest: requestDigest},
 	)
 	if err != nil {
 		return "", err
 	}
 	return "next-model-turn-dispatch:v1:" + strings.TrimPrefix(string(digest), "sha256:"), nil
+}
+
+func (r NextModelTurnDerivedDispatchRefV1) Validate() error {
+	if r.ContractVersion != NextModelTurnEligibilityContractVersionV1 ||
+		!validSingleCallIDV1(r.ID) ||
+		r.Revision != 1 ||
+		r.RequestDigest.Validate() != nil ||
+		r.ContinuationAttempt.Validate() != nil ||
+		r.ContinuationCurrentDigest.Validate() != nil ||
+		r.ActiveContextDigest.Validate() != nil ||
+		r.RuntimeActualPointRequestDigest.Validate() != nil ||
+		r.Digest.Validate() != nil {
+		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "next Model Turn derived dispatch ref is incomplete")
+	}
+	expectedID, err := DeriveNextModelTurnDispatchIDFromRequestDigestV1(r.RequestDigest)
+	if err != nil || expectedID != r.ID {
+		return core.NewError(core.ErrorConflict, core.ReasonInvalidReference, "next Model Turn derived dispatch ID drifted")
+	}
+	digest, err := r.DigestV1()
+	if err != nil || digest != r.Digest {
+		return core.NewError(core.ErrorConflict, core.ReasonInvalidDigest, "next Model Turn derived dispatch ref digest drifted")
+	}
+	return nil
 }
 
 func (r NextModelTurnDerivedDispatchRefV1) DigestV1() (core.Digest, error) {
@@ -162,24 +194,13 @@ func (r NextModelTurnDerivedDispatchRefV1) DigestV1() (core.Digest, error) {
 
 func (r NextModelTurnDerivedDispatchRefV1) ValidateFor(request NextModelTurnEligibilityRequestV1) error {
 	if request.Validate() != nil ||
-		r.ContractVersion != NextModelTurnEligibilityContractVersionV1 ||
-		!validSingleCallIDV1(r.ID) ||
-		r.Revision != 1 ||
+		r.Validate() != nil ||
 		r.RequestDigest != request.Digest ||
 		r.ContinuationAttempt != request.ContinuationAttempt ||
 		r.ContinuationCurrentDigest != request.ContinuationCurrentDigest ||
 		r.ActiveContextDigest != request.ActiveContext.Digest ||
-		r.RuntimeActualPointRequestDigest != request.RuntimeActualPointRequestDigest ||
-		r.Digest.Validate() != nil {
+		r.RuntimeActualPointRequestDigest != request.RuntimeActualPointRequestDigest {
 		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "next Model Turn derived dispatch ref is incomplete")
-	}
-	expectedID, err := DeriveNextModelTurnDispatchIDV1(request)
-	if err != nil || expectedID != r.ID {
-		return core.NewError(core.ErrorConflict, core.ReasonInvalidReference, "next Model Turn derived dispatch ID drifted")
-	}
-	digest, err := r.DigestV1()
-	if err != nil || digest != r.Digest {
-		return core.NewError(core.ErrorConflict, core.ReasonInvalidDigest, "next Model Turn derived dispatch ref digest drifted")
 	}
 	return nil
 }
