@@ -31,6 +31,12 @@ pub fn request_with_payload(
     payload: ProviderPayloadV1,
 ) -> DispatchRequestV1 {
     let expires = now_unix_nano() + 60_000_000_000;
+    let sandbox_projection =
+        matches!(&payload, ProviderPayloadV1::WorkspaceRead(_)).then(|| SandboxProjectionRefV1 {
+            revision: 1,
+            digest: digest("sandbox-projection"),
+            expires_unix_nano: expires,
+        });
     DispatchRequestV1 {
         contract_version: String::new(),
         request_id: format!("request-{phase:?}"),
@@ -44,6 +50,7 @@ pub fn request_with_payload(
         tenant_id: "tenant-1".to_owned(),
         provider_binding: provider_binding(),
         sandbox_attempt: exact("attempt-1", expires),
+        sandbox_projection,
         execution_binding: execution_binding(expires),
         runtime_enforcement: RuntimeEnforcementRefV1 {
             operation_digest: digest("operation"),
@@ -82,11 +89,14 @@ pub fn current_for(request: &DispatchRequestV1) -> Result<CurrentAuthorizationV1
         attempt_id: request.attempt_id.clone(),
         phase: request.phase,
         provider_binding: request.provider_binding.clone(),
-        sandbox_projection: SandboxProjectionRefV1 {
-            revision: 1,
-            digest: digest("sandbox-projection"),
-            expires_unix_nano: request.requested_not_after_unix_nano,
-        },
+        sandbox_projection: request
+            .sandbox_projection
+            .clone()
+            .unwrap_or(SandboxProjectionRefV1 {
+                revision: 1,
+                digest: digest("sandbox-projection"),
+                expires_unix_nano: request.requested_not_after_unix_nano,
+            }),
         execution_binding: request.execution_binding.clone(),
         runtime_enforcement: request.runtime_enforcement.clone(),
         checked_unix_nano: now,

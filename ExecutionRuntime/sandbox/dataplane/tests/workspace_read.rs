@@ -7,7 +7,8 @@ use std::fs;
 use std::sync::Arc;
 
 use praxis_sandbox_dataplane::contract::{
-    EnforcementPhaseV1, ProviderPayloadV1, WorkspaceReadPayloadV1, now_unix_nano,
+    EnforcementPhaseV1, ProviderPayloadV1, SandboxProjectionRefV1, WorkspaceReadPayloadV1,
+    now_unix_nano,
 };
 use praxis_sandbox_dataplane::enforcer::DataPlaneEnforcer;
 use praxis_sandbox_dataplane::error::{ClosedReason, EffectBoundary};
@@ -36,9 +37,50 @@ fn workspace_request(
     });
     let mut request = common::request_with_payload(phase, payload);
     request.effect_kind = "praxis.sandbox/workspace-read".to_owned();
+    request.sandbox_projection = Some(SandboxProjectionRefV1 {
+        revision: 1,
+        digest: common::digest("sandbox-projection"),
+        expires_unix_nano: request.requested_not_after_unix_nano,
+    });
     request
         .seal()
         .unwrap_or_else(|error| panic!("seal workspace read: {error}"))
+}
+
+#[test]
+fn workspace_read_authorization_rejects_request_sandbox_projection_splice() {
+    let workspace = common::exact("workspace-1", now_unix_nano() + 60_000_000_000);
+    let original = workspace_request(EnforcementPhaseV1::Execute, &workspace, 0, 64);
+    let authorization =
+        common::current_for(&original).unwrap_or_else(|error| panic!("authorization: {error}"));
+
+    for mutate in [
+        |projection: &mut SandboxProjectionRefV1| projection.revision += 1,
+        |projection: &mut SandboxProjectionRefV1| {
+            projection.digest = common::digest("other-sandbox-projection");
+        },
+    ] {
+        let mut request = original.clone();
+        mutate(
+            request
+                .sandbox_projection
+                .as_mut()
+                .unwrap_or_else(|| panic!("workspace read projection")),
+        );
+        request = request
+            .seal()
+            .unwrap_or_else(|error| panic!("reseal drifted request: {error}"));
+
+        let mut current = authorization.clone();
+        current.request_digest = request.digest.clone();
+        current.digest = current
+            .calculate_digest()
+            .unwrap_or_else(|error| panic!("reseal authorization: {error}"));
+
+        current
+            .validate_against(&request, now_unix_nano())
+            .expect_err("request-side sandbox projection splice must fail closed");
+    }
 }
 
 fn provider(root: &std::path::Path) -> WorkspaceReadProviderV1 {

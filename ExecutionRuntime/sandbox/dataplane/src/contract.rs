@@ -64,16 +64,22 @@ pub struct SandboxProjectionRefV1 {
 }
 
 impl SandboxProjectionRefV1 {
+    pub fn validate_shape(&self) -> Result<()> {
+        if self.revision == 0 || !valid_digest(&self.digest) || self.expires_unix_nano <= 0 {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidContract,
+                "sandbox projection ref is incomplete",
+            ));
+        }
+        Ok(())
+    }
+
     pub fn validate_current(&self, now_unix_nano: i64) -> Result<()> {
-        if self.revision == 0
-            || !valid_digest(&self.digest)
-            || self.expires_unix_nano <= 0
-            || now_unix_nano <= 0
-            || now_unix_nano >= self.expires_unix_nano
-        {
+        self.validate_shape()?;
+        if now_unix_nano <= 0 || now_unix_nano >= self.expires_unix_nano {
             return Err(ClosedError::new(
                 ClosedReason::CurrentExpired,
-                "sandbox projection ref is incomplete or expired",
+                "sandbox projection ref is expired",
             ));
         }
         Ok(())
@@ -815,6 +821,8 @@ pub struct DispatchRequestV1 {
     pub tenant_id: String,
     pub provider_binding: ProviderBindingV1,
     pub sandbox_attempt: ExactRefV1,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sandbox_projection: Option<SandboxProjectionRefV1>,
     pub execution_binding: ExecutionBindingV1,
     pub runtime_enforcement: RuntimeEnforcementRefV1,
     pub runtime_current_query: serde_json::Value,
@@ -856,6 +864,19 @@ impl DispatchRequestV1 {
                 ClosedReason::BindingDrift,
                 "sandbox attempt ref does not match attempt identity",
             ));
+        }
+        if self.payload.kind() == ProviderKindV1::WorkspaceRead {
+            self.sandbox_projection
+                .as_ref()
+                .ok_or_else(|| {
+                    ClosedError::new(
+                        ClosedReason::InvalidContract,
+                        "workspace read dispatch lacks an exact sandbox projection",
+                    )
+                })?
+                .validate_shape()?;
+        } else if let Some(projection) = &self.sandbox_projection {
+            projection.validate_shape()?;
         }
         self.execution_binding.validate()?;
         if self.execution_binding.tenant_id != self.tenant_id {
@@ -921,6 +942,9 @@ impl DispatchRequestV1 {
         self.validate_shape()?;
         self.sandbox_attempt
             .validate_current("sandbox attempt", now_unix_nano)?;
+        if let Some(projection) = &self.sandbox_projection {
+            projection.validate_current(now_unix_nano)?;
+        }
         self.execution_binding.validate_current(now_unix_nano)?;
         self.runtime_enforcement.validate_current(now_unix_nano)?;
         if now_unix_nano <= 0 || now_unix_nano >= self.requested_not_after_unix_nano {
@@ -988,6 +1012,12 @@ impl CurrentAuthorizationV1 {
             || self.attempt_id != request.attempt_id
             || self.phase != request.phase
             || self.provider_binding != request.provider_binding
+            || request
+                .sandbox_projection
+                .as_ref()
+                .is_some_and(|projection| projection != &self.sandbox_projection)
+            || (request.payload.kind() == ProviderKindV1::WorkspaceRead
+                && request.sandbox_projection.as_ref() != Some(&self.sandbox_projection))
             || self.execution_binding != request.execution_binding
             || self.runtime_enforcement != request.runtime_enforcement
             || self.checked_unix_nano <= 0
