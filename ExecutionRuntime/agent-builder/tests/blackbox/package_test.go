@@ -80,6 +80,48 @@ func TestDeclarativeAndCodeBuildersProduceExistingDefinitionSource(t *testing.T)
 	}
 }
 
+func TestCodeBuilderAddMethodsOwnTheirInputs(t *testing.T) {
+	fixture := testkit.NewFixture()
+	source, catalog := fixture.Definition.AgentDefinitionSourceV1, validationCatalog(fixture)
+
+	componentBase := definitioncontract.CloneSourceV1(source)
+	last := len(componentBase.Components) - 1
+	component := componentBase.Components[last]
+	componentBase.Components = append([]definitioncontract.ComponentRequirementV1{}, componentBase.Components[:last]...)
+	componentBuilder := builder.NewDefinitionSourceBuilderV1(componentBase).AddComponent(component)
+	component.RequiredCapabilities[0] = "example.invalid/mutated"
+	builtComponent, err := componentBuilder.Build(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if builtComponent.Components[len(builtComponent.Components)-1].RequiredCapabilities[0] == component.RequiredCapabilities[0] {
+		t.Fatal("AddComponent retained caller slice alias")
+	}
+
+	secret := definitioncontract.SecretRefV1{SecretID: "secrets/example", Class: "secret/token", RequestedScopeDigest: core.DigestBytes([]byte("scope"))}
+	secretBuilder := builder.NewDefinitionSourceBuilderV1(source).AddSecretRef(secret)
+	secret.SecretID = "secrets/mutated"
+	builtSecret, err := secretBuilder.Build(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if builtSecret.SecretRefs[0].SecretID != "secrets/example" {
+		t.Fatal("AddSecretRef retained caller state")
+	}
+
+	payload := json.RawMessage(`{"mode":"safe"}`)
+	extension := definitioncontract.ExtensionV1{Key: "example/optional", Schema: definitioncontract.SchemaRefV1{Namespace: "example", Name: "extension", Version: "1.0.0", MediaType: "application/json", ContentDigest: core.DigestBytes([]byte("schema"))}, ContentDigest: core.DigestBytes(payload), Payload: payload}
+	extensionBuilder := builder.NewDefinitionSourceBuilderV1(source).AddExtension(extension)
+	extension.Payload[9] = 'x'
+	builtExtension, err := extensionBuilder.Build(catalog)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(builtExtension.Extensions[0].Payload) != `{"mode":"safe"}` {
+		t.Fatal("AddExtension retained caller payload alias")
+	}
+}
+
 func TestResolvedDefinitionCompilesToDeterministicPackage(t *testing.T) {
 	result := resolved(t)
 	first, err := compiler.NewV1().Compile(result)

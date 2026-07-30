@@ -36,21 +36,24 @@ func NewDefinitionSourceBuilderV1(source definitioncontract.AgentDefinitionSourc
 
 func (b *DefinitionSourceBuilderV1) AddComponent(value definitioncontract.ComponentRequirementV1) *DefinitionSourceBuilderV1 {
 	if b != nil {
-		b.source.Components = append(b.source.Components, value)
+		cloned := definitioncontract.CloneSourceV1(definitioncontract.AgentDefinitionSourceV1{Components: []definitioncontract.ComponentRequirementV1{value}})
+		b.source.Components = append(b.source.Components, cloned.Components[0])
 	}
 	return b
 }
 
 func (b *DefinitionSourceBuilderV1) AddSecretRef(value definitioncontract.SecretRefV1) *DefinitionSourceBuilderV1 {
 	if b != nil {
-		b.source.SecretRefs = append(b.source.SecretRefs, value)
+		cloned := definitioncontract.CloneSourceV1(definitioncontract.AgentDefinitionSourceV1{SecretRefs: []definitioncontract.SecretRefV1{value}})
+		b.source.SecretRefs = append(b.source.SecretRefs, cloned.SecretRefs[0])
 	}
 	return b
 }
 
 func (b *DefinitionSourceBuilderV1) AddExtension(value definitioncontract.ExtensionV1) *DefinitionSourceBuilderV1 {
 	if b != nil {
-		b.source.Extensions = append(b.source.Extensions, value)
+		cloned := definitioncontract.CloneSourceV1(definitioncontract.AgentDefinitionSourceV1{Extensions: []definitioncontract.ExtensionV1{value}})
+		b.source.Extensions = append(b.source.Extensions, cloned.Extensions[0])
 	}
 	return b
 }

@@ -2,6 +2,7 @@ package contract
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	assemblercontract "github.com/Proview-China/rax/ExecutionRuntime/agent-assembler/contract"
@@ -55,6 +56,21 @@ func TestPackageIdentityIsOneToOneWithLock(t *testing.T) {
 	forged.Digest, _ = PackageDigestV1(forged)
 	if err := forged.Validate(); !core.HasReason(err, core.ReasonBindingDrift) {
 		t.Fatalf("alternate ID for the same lock accepted: %v", err)
+	}
+}
+
+func TestPackageIDUsesCompleteLockDigest(t *testing.T) {
+	prefix := "sha256:0123456789abcdef01234567"
+	left := core.Digest(prefix + "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+	right := core.Digest(prefix + "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+	if left.Validate() != nil || right.Validate() != nil {
+		t.Fatal("test digests are invalid")
+	}
+	if packageIDV1(left) == packageIDV1(right) {
+		t.Fatal("different lock digest suffixes collapsed to one package ID")
+	}
+	if packageIDV1(left) != "agent-package-"+strings.TrimPrefix(string(left), "sha256:") {
+		t.Fatal("package ID does not preserve the complete normalized lock digest")
 	}
 }
 

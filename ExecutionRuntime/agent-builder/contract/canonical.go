@@ -12,7 +12,7 @@ import (
 const digestDomainV1 = "praxis.agent.package"
 
 func packageIDV1(lockDigest core.Digest) string {
-	return "agent-package-" + strings.TrimPrefix(string(lockDigest), "sha256:")[:24]
+	return "agent-package-" + strings.TrimPrefix(string(lockDigest), "sha256:")
 }
 
 func clone[T any](value T) T {
