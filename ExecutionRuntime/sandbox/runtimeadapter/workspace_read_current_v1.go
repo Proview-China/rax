@@ -86,32 +86,33 @@ func (a *WorkspaceReadCurrentAdapterV1) InspectWorkspaceReadCurrentV1(ctx contex
 		s2.runtime.Dispatch.Record.Permit.LegacyPermit.ExpiresUnixNano,
 	)
 	projection := sandboxports.WorkspaceReadCurrentProjectionV1{
-		QueryDigest:                 query.Digest,
-		StableKeyDigest:             query.StableKeyDigest,
-		AuthorizationDigest:         query.AuthorizationDigest,
-		Association:                 s2.association.Ref,
-		AssociationProjectionDigest: s2.association.ProjectionDigest,
-		DomainCommand:               s2.association.DomainCommand,
-		TenantID:                    s2.command.TenantID,
-		Command:                     s2.command.Meta.Ref(),
-		WorkspaceView:               s2.workspace.Meta.Ref(),
-		FileScopeDigest:             s2.command.FileScopeDigest,
-		RelativePath:                s2.command.RelativePath,
-		ProviderBinding:             s2.runtime.Sandbox.ProviderBinding,
-		ReviewAuthorization:         s2.runtime.Phase.ReviewAuthorization,
-		PermitID:                    s2.runtime.Phase.PermitID,
-		PermitRevision:              s2.runtime.Phase.PermitFactRevision,
-		PermitDigest:                s2.runtime.Phase.PermitDigest,
-		AdmissionDigest:             s2.runtime.Phase.AdmissionDigest,
-		SandboxAttempt:              s2.runtime.Phase.SandboxAttempt,
-		SandboxProjectionRevision:   s2.runtime.Sandbox.ProjectionRevision,
-		SandboxProjectionDigest:     s2.runtime.Sandbox.ProjectionDigest,
-		RuntimeLease:                s2.runtime.Sandbox.RuntimeLease,
-		ExecuteEnforcement:          s2.runtime.Phase,
-		RuntimeEnforcementDigest:    s2.runtime.Digest,
-		S1CheckedUnixNano:           s1Checked.UnixNano(),
-		S2CheckedUnixNano:           s2Checked.UnixNano(),
-		ExpiresUnixNano:             expires,
+		QueryDigest:                      query.Digest,
+		StableKeyDigest:                  query.StableKeyDigest,
+		AuthorizationDigest:              query.AuthorizationDigest,
+		Association:                      s2.association.Ref,
+		AssociationProjectionDigest:      s2.association.ProjectionDigest,
+		DomainCommand:                    s2.association.DomainCommand,
+		TenantID:                         s2.command.TenantID,
+		Command:                          s2.command.Meta.Ref(),
+		WorkspaceView:                    s2.workspace.Meta.Ref(),
+		FileScopeDigest:                  s2.command.FileScopeDigest,
+		RelativePath:                     s2.command.RelativePath,
+		ProviderBinding:                  s2.runtime.Sandbox.ProviderBinding,
+		ReviewAuthorization:              s2.runtime.Phase.ReviewAuthorization,
+		PermitID:                         s2.runtime.Phase.PermitID,
+		PermitRevision:                   s2.runtime.Phase.PermitFactRevision,
+		PermitDigest:                     s2.runtime.Phase.PermitDigest,
+		AdmissionDigest:                  s2.runtime.Phase.AdmissionDigest,
+		SandboxAttempt:                   s2.runtime.Phase.SandboxAttempt,
+		SandboxProjectionRevision:        s2.runtime.Sandbox.ProjectionRevision,
+		SandboxProjectionDigest:          s2.runtime.Sandbox.ProjectionDigest,
+		SandboxProjectionExpiresUnixNano: s2.runtime.Sandbox.ExpiresUnixNano,
+		RuntimeLease:                     s2.runtime.Sandbox.RuntimeLease,
+		ExecuteEnforcement:               s2.runtime.Phase,
+		RuntimeEnforcementDigest:         s2.runtime.Digest,
+		S1CheckedUnixNano:                s1Checked.UnixNano(),
+		S2CheckedUnixNano:                s2Checked.UnixNano(),
+		ExpiresUnixNano:                  expires,
 	}
 	sealed, err := sandboxports.SealWorkspaceReadCurrentProjectionV1(projection)
 	if err != nil {
@@ -215,7 +216,7 @@ func validateWorkspaceReadCurrentBindingsV1(
 	}
 	if !runtimeports.SameOperationSubjectV3(query.Authorization.Operation, current.Sandbox.Operation) ||
 		query.Authorization.OperationDigest != current.Sandbox.OperationDigest ||
-		query.Authorization.Attempt != association.Attempt ||
+		!reflect.DeepEqual(query.Authorization.Attempt, association.Attempt) ||
 		query.Authorization.Prepared != association.Prepared ||
 		query.Authorization.Provider != current.Sandbox.ProviderBinding ||
 		query.Authorization.ExecuteEnforcement != current.Phase {

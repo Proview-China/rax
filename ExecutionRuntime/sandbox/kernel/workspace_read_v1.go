@@ -56,6 +56,7 @@ type WorkspaceReadActualPointRequestV1 struct {
 	Command           contract.WorkspaceReadCommandV1
 	Workspace         contract.WorkspaceView
 	RuntimeCurrent    runtimeports.CurrentOperationDispatchEnforcementV4
+	CurrentQuery      sandboxports.WorkspaceReadCurrentQueryV2
 	S1CheckedUnixNano int64
 	ExpiresUnixNano   int64
 }
@@ -154,7 +155,7 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 		PayloadDigest:       payloadDigest,
 		Command:             command.Meta.Ref(),
 		WorkspaceView:       workspace.Meta.Ref(),
-		AttemptID:           authorization.Attempt.AttemptID,
+		AttemptID:           "workspace-read-attempt-" + trimRuntimeDigestV1(string(authorization.StableKeyDigest)),
 		TTLClosure:          ttlClosure,
 	}, "workspace-read-reservation-"+trimRuntimeDigestV1(string(authorization.StableKeyDigest)), factTime, expires)
 	if err != nil {
@@ -171,7 +172,21 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 	if err != nil {
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
-	projection, created, err := e.store.ReserveWorkspaceReadV1(ctx, reservation, attempt)
+	handoff, err := sandboxports.SealWorkspaceReadAdmissionAttemptBindingV1(sandboxports.WorkspaceReadAdmissionAttemptBindingV1{
+		AdmissionReceipt:    receipt,
+		Attempt:             workspaceReadAttemptRefV1(attempt),
+		Command:             command.Meta.Ref(),
+		AuthorizationDigest: authorization.AuthorizationDigest,
+		StableKeyDigest:     authorization.StableKeyDigest,
+		Association:         association.Ref,
+		DomainCommand:       association.DomainCommand,
+		CreatedUnixNano:     attempt.Meta.CreatedUnixNano,
+		ExpiresUnixNano:     attempt.Meta.ExpiresUnixNano,
+	})
+	if err != nil {
+		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
+	}
+	projection, created, err := e.store.ReserveWorkspaceReadV1(ctx, reservation, attempt, handoff)
 	if err != nil {
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
@@ -187,10 +202,24 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 			return receipt, runtimecore.NewError(runtimecore.ErrorInternal, runtimecore.ReasonInvalidReference, "workspace read projection state is invalid")
 		}
 	}
+	currentQuery, err := workspaceReadCurrentQueryV2(authorization, association, command, workspace, reservation, attempt, admissionBinding, runtimeCurrent, s1, expiresNano)
+	if err != nil {
+		failureDigest, digestErr := contract.Digest("workspace-read-failed", struct {
+			Stage string
+			Cause string
+		}{"exact-current-query", err.Error()})
+		if digestErr != nil {
+			return receipt, digestErr
+		}
+		if _, failErr := e.store.FailWorkspaceReadV1(ctx, attempt.Meta.Ref(), failureDigest); failErr != nil {
+			return receipt, failErr
+		}
+		return receipt, NewWorkspaceReadActualPointErrorV1(WorkspaceReadEffectNotStartedV1, err)
+	}
 
 	result, readErr := e.actualPoint.ReadWorkspaceFileV1(ctx, WorkspaceReadActualPointRequestV1{
 		Reservation: reservation, Command: command, Workspace: workspace,
-		RuntimeCurrent:    runtimeCurrent,
+		RuntimeCurrent: runtimeCurrent, CurrentQuery: currentQuery,
 		S1CheckedUnixNano: s1.UnixNano(), ExpiresUnixNano: expiresNano,
 	})
 	if readErr != nil {
@@ -247,6 +276,65 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 	return receipt, nil
 }
 
+func workspaceReadCurrentQueryV2(
+	authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3,
+	association runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1,
+	command contract.WorkspaceReadCommandV1,
+	workspace contract.WorkspaceView,
+	reservation contract.WorkspaceReadReservationV1,
+	attempt contract.WorkspaceReadAttemptV1,
+	admission contract.WorkspaceReadReceiptBindingV1,
+	current runtimeports.CurrentOperationDispatchEnforcementV4,
+	checked time.Time,
+	expiresUnixNano int64,
+) (sandboxports.WorkspaceReadCurrentQueryV2, error) {
+	if checked.IsZero() || expiresUnixNano <= checked.UnixNano() {
+		return sandboxports.WorkspaceReadCurrentQueryV2{}, runtimecore.NewError(runtimecore.ErrorPreconditionFailed, runtimecore.ReasonBindingExpired, "workspace read exact current query TTL is invalid")
+	}
+	base, err := sandboxports.SealWorkspaceReadCurrentQueryV1(sandboxports.WorkspaceReadCurrentQueryV1{
+		RuntimeInspect: runtimeports.InspectCurrentOperationDispatchEnforcementRequestV4{
+			Inspect: runtimeports.InspectOperationDispatchEnforcementRequestV4{
+				Operation: authorization.Operation,
+				EffectID:  authorization.Attempt.EffectID,
+				PermitID:  current.Phase.PermitID,
+				Phase:     runtimeports.OperationDispatchEnforcementExecuteV4,
+			},
+			PermitDigest:            current.Phase.PermitDigest,
+			AdmissionDigest:         current.Phase.AdmissionDigest,
+			ReviewAuthorization:     current.Phase.ReviewAuthorization,
+			SandboxAttempt:          current.Phase.SandboxAttempt,
+			SandboxProjectionDigest: current.Sandbox.ProjectionDigest,
+		},
+		Authorization:       authorization,
+		StableKeyDigest:     authorization.StableKeyDigest,
+		AuthorizationDigest: authorization.AuthorizationDigest,
+		Association:         association.Ref,
+		DomainCommand:       association.DomainCommand,
+		Command:             command.Meta.Ref(),
+		WorkspaceView:       workspace.Meta.Ref(),
+		FileScopeDigest:     command.FileScopeDigest,
+		RelativePath:        command.RelativePath,
+		CheckedUnixNano:     checked.UnixNano(),
+		ExpiresUnixNano:     expiresUnixNano,
+	})
+	if err != nil {
+		return sandboxports.WorkspaceReadCurrentQueryV2{}, err
+	}
+	sealed, err := sandboxports.SealWorkspaceReadCurrentQueryV2(sandboxports.WorkspaceReadCurrentQueryV2{
+		Base:             base,
+		Reservation:      reservation.Meta.Ref(),
+		Attempt:          workspaceReadAttemptRefV1(attempt),
+		AdmissionReceipt: admission,
+	})
+	if err != nil {
+		return sandboxports.WorkspaceReadCurrentQueryV2{}, err
+	}
+	if err := sealed.ValidateCurrent(checked); err != nil {
+		return sandboxports.WorkspaceReadCurrentQueryV2{}, err
+	}
+	return sealed, nil
+}
+
 func (e *WorkspaceReadPhysicalExecutorV1) readRuntimeCurrentV1(ctx context.Context, authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3, now time.Time) (runtimeports.CurrentOperationDispatchEnforcementV4, error) {
 	sandboxCurrent, err := e.sandboxCurrent.InspectOperationDispatchSandboxCurrentV4(ctx, authorization.Operation, authorization.Attempt.EffectID, authorization.ExecuteEnforcement.SandboxAttempt)
 	if err != nil {
@@ -285,6 +373,13 @@ func (e *WorkspaceReadPhysicalExecutorV1) InspectBoundedWorkspaceReadV1(ctx cont
 		return contract.WorkspaceReadExecutionProjectionV1{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read Inspect is unavailable")
 	}
 	return e.store.InspectBoundedWorkspaceReadV1(ctx, ref)
+}
+
+func (e *WorkspaceReadPhysicalExecutorV1) InspectWorkspaceReadAttemptForAdmissionV1(ctx context.Context, receipt runtimeports.ControlledOperationProviderAdmissionReceiptRefV2) (sandboxports.WorkspaceReadAdmissionAttemptBindingV1, error) {
+	if e == nil || e.store == nil {
+		return sandboxports.WorkspaceReadAdmissionAttemptBindingV1{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read admission handoff Inspect is unavailable")
+	}
+	return e.store.InspectWorkspaceReadAttemptForAdmissionV1(ctx, receipt)
 }
 
 func (e *WorkspaceReadPhysicalExecutorV1) readCurrentClosureV1(ctx context.Context, authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) (runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1, contract.WorkspaceReadCommandV1, contract.WorkspaceView, time.Time, error) {
@@ -424,6 +519,12 @@ func workspaceReadAllowedV1(workspace contract.WorkspaceView, relative string) b
 
 func workspaceReadAdmissionReceiptV1(stable runtimecore.Digest) (runtimeports.ControlledOperationProviderAdmissionReceiptRefV2, error) {
 	return runtimeports.SealControlledOperationProviderAdmissionReceiptRefV2(runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{ID: "workspace-read-admission-" + trimRuntimeDigestV1(string(stable)), Revision: 1, StableKeyDigest: stable, Admitted: true})
+}
+
+func workspaceReadAttemptRefV1(attempt contract.WorkspaceReadAttemptV1) contract.WorkspaceReadAttemptRefV1 {
+	return contract.WorkspaceReadAttemptRefV1{
+		ID: attempt.Meta.ID, Revision: attempt.Meta.Revision, Digest: attempt.Meta.Digest,
+	}
 }
 func trimRuntimeDigestV1(value string) string { return strings.TrimPrefix(value, "sha256:") }
 func minWorkspaceReadExpiryV1(values ...int64) int64 {

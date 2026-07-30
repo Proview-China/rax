@@ -6,6 +6,7 @@ import (
 	"errors"
 	"time"
 
+	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
@@ -48,7 +49,7 @@ func (s *Store) InspectWorkspaceReadCommandCurrentV1(ctx context.Context, exact 
 	return value, value.ValidateCurrent(s.clock())
 }
 
-func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
+func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1, binding ports.WorkspaceReadAdmissionAttemptBindingV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
 	now := s.clock()
 	if err := res.ValidateCurrent(now); err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
@@ -56,12 +57,36 @@ func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.Workspa
 	if err := attempt.ValidateCurrent(now); err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
 	}
+	if err := binding.Validate(); err != nil {
+		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
+	}
 	expectedAttemptExpiry := minWorkspaceReadStoreExpiryV1(res.Meta.ExpiresUnixNano, attempt.AdmissionReceipt.ExpiresUnixNano)
-	if attempt.State != contract.WorkspaceReadStartedV1 || attempt.StableKeyDigest != res.StableKeyDigest || attempt.RequestDigest != res.RequestDigest || attempt.PayloadDigest != res.PayloadDigest || !contract.SameRef(attempt.Reservation, res.Meta.Ref()) || attempt.AdmissionReceipt.StableKeyDigest != res.StableKeyDigest || attempt.Meta.ExpiresUnixNano != expectedAttemptExpiry {
+	if attempt.State != contract.WorkspaceReadStartedV1 ||
+		attempt.StableKeyDigest != res.StableKeyDigest ||
+		attempt.RequestDigest != res.RequestDigest ||
+		attempt.PayloadDigest != res.PayloadDigest ||
+		res.AttemptID != attempt.Meta.ID ||
+		!contract.SameRef(attempt.Reservation, res.Meta.Ref()) ||
+		attempt.AdmissionReceipt.StableKeyDigest != res.StableKeyDigest ||
+		attempt.Meta.ExpiresUnixNano != expectedAttemptExpiry ||
+		binding.Attempt.OwnerRef() != attempt.Meta.Ref() ||
+		binding.Command != res.Command ||
+		string(binding.AuthorizationDigest) != res.AuthorizationDigest ||
+		string(binding.StableKeyDigest) != res.StableKeyDigest ||
+		binding.AdmissionReceipt.ID != attempt.AdmissionReceipt.ID ||
+		uint64(binding.AdmissionReceipt.Revision) != attempt.AdmissionReceipt.Revision ||
+		string(binding.AdmissionReceipt.Digest) != attempt.AdmissionReceipt.Digest ||
+		string(binding.AdmissionReceipt.StableKeyDigest) != attempt.AdmissionReceipt.StableKeyDigest ||
+		binding.DomainCommand.ID != res.Command.ID ||
+		uint64(binding.DomainCommand.Revision) != res.Command.Revision ||
+		string(binding.DomainCommand.Digest) != "sha256:"+res.Command.Digest ||
+		binding.CreatedUnixNano != attempt.Meta.CreatedUnixNano ||
+		binding.ExpiresUnixNano != attempt.Meta.ExpiresUnixNano {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
 	}
 	rb, _ := encode(res)
 	ab, _ := encode(attempt)
+	bb, _ := encode(binding)
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
@@ -75,6 +100,12 @@ func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.Workspa
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, classifyWrite(err)
 	}
 	if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO workspace_read_attempt_owner_incarnation(attempt_id,owner_incarnation_id,reserved_unix_nano) VALUES(?,?,?)`, attempt.Meta.ID, s.workspaceReadOwnerIncarnation, now.UnixNano()); err != nil {
+		return contract.WorkspaceReadExecutionProjectionV1{}, false, classifyWrite(err)
+	}
+	bindingResult, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO workspace_read_admission_attempt_binding(admission_id,admission_revision,admission_digest,attempt_id,attempt_revision,attempt_digest,body) VALUES(?,?,?,?,?,?,?)`,
+		binding.AdmissionReceipt.ID, binding.AdmissionReceipt.Revision, binding.AdmissionReceipt.Digest,
+		binding.Attempt.ID, binding.Attempt.Revision, binding.Attempt.Digest, bb)
+	if err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, classifyWrite(err)
 	}
 	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO workspace_read_attempt_current(stable_digest,attempt_id,revision,digest,body) VALUES(?,?,?,?,?)`, res.StableKeyDigest, attempt.Meta.ID, attempt.Meta.Revision, attempt.Meta.Digest, ab)
@@ -100,7 +131,18 @@ func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.Workspa
 	if projection.Reservation.Meta.Ref() != res.Meta.Ref() || projection.Reservation.RequestDigest != res.RequestDigest || projection.Reservation.PayloadDigest != res.PayloadDigest || projection.Reservation.Command != res.Command || origin.Meta.Ref() != attempt.Meta.Ref() || origin.StableKeyDigest != attempt.StableKeyDigest || origin.RequestDigest != attempt.RequestDigest || origin.PayloadDigest != attempt.PayloadDigest || origin.AdmissionReceipt != attempt.AdmissionReceipt {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
 	}
-	if currentRows, rowsErr := result.RowsAffected(); rowsErr != nil || currentRows != rows {
+	var storedBindingBody []byte
+	if err = tx.QueryRowContext(ctx, `SELECT body FROM workspace_read_admission_attempt_binding WHERE admission_id=? AND admission_revision=? AND admission_digest=?`,
+		binding.AdmissionReceipt.ID, binding.AdmissionReceipt.Revision, binding.AdmissionReceipt.Digest).Scan(&storedBindingBody); err != nil {
+		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
+	}
+	var storedBinding ports.WorkspaceReadAdmissionAttemptBindingV1
+	if err = decode(storedBindingBody, &storedBinding); err != nil || storedBinding.Validate() != nil || storedBinding != binding {
+		return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
+	}
+	currentRows, currentRowsErr := result.RowsAffected()
+	bindingRows, bindingRowsErr := bindingResult.RowsAffected()
+	if currentRowsErr != nil || bindingRowsErr != nil || currentRows != rows || bindingRows != rows {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
 	}
 	if rows == 1 {
@@ -113,6 +155,34 @@ func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.Workspa
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
 	}
 	return projection, rows == 1, nil
+}
+
+func (s *Store) InspectWorkspaceReadAttemptForAdmissionV1(ctx context.Context, admission runtimeports.ControlledOperationProviderAdmissionReceiptRefV2) (ports.WorkspaceReadAdmissionAttemptBindingV1, error) {
+	if err := admission.Validate(); err != nil || !admission.Admitted || admission.NoEffect {
+		if err != nil {
+			return ports.WorkspaceReadAdmissionAttemptBindingV1{}, err
+		}
+		return ports.WorkspaceReadAdmissionAttemptBindingV1{}, ports.ErrConflict
+	}
+	var body []byte
+	if err := s.db.QueryRowContext(ctx, `SELECT body FROM workspace_read_admission_attempt_binding WHERE admission_id=? AND admission_revision=? AND admission_digest=?`,
+		admission.ID, admission.Revision, admission.Digest).Scan(&body); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ports.WorkspaceReadAdmissionAttemptBindingV1{}, ports.ErrNotFound
+		}
+		return ports.WorkspaceReadAdmissionAttemptBindingV1{}, err
+	}
+	var binding ports.WorkspaceReadAdmissionAttemptBindingV1
+	if err := decode(body, &binding); err != nil {
+		return binding, err
+	}
+	if err := binding.Validate(); err != nil {
+		return binding, err
+	}
+	if binding.AdmissionReceipt != admission {
+		return ports.WorkspaceReadAdmissionAttemptBindingV1{}, ports.ErrConflict
+	}
+	return binding, nil
 }
 
 func (s *Store) CompleteWorkspaceReadV1(ctx context.Context, expected contract.Ref, observation contract.WorkspaceReadObservationV1) (contract.WorkspaceReadExecutionProjectionV1, error) {

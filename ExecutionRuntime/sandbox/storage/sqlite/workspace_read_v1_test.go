@@ -8,6 +8,8 @@ import (
 	"testing"
 	"time"
 
+	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
+	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
@@ -42,7 +44,7 @@ func TestWorkspaceReadReserveAcrossHandlesCreatesOnce(t *testing.T) {
 		}
 		go func() {
 			defer group.Done()
-			projection, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt)
+			projection, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt)
 			if reserveErr == nil && (projection.Attempt.Meta.ID != attempt.Meta.ID || projection.AdmissionReceipt != attempt.AdmissionReceipt) {
 				reserveErr = errors.New("projection drifted")
 			}
@@ -65,6 +67,153 @@ func TestWorkspaceReadReserveAcrossHandlesCreatesOnce(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReadAdmissionHandoffReturnsOriginalAttemptAcrossConcurrencyRestartAndExpiry(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Unix(1_900_000_000, 0)
+	expires := now.Add(time.Hour)
+	current := now
+	database := filepath.Join(t.TempDir(), "sandbox.db")
+	store, err := OpenWithClock(ctx, database, func() time.Time { return current })
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "admission-handoff")
+	binding := workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt)
+	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt, binding); reserveErr != nil || !created {
+		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
+	}
+
+	const readers = 64
+	results := make(chan ports.WorkspaceReadAdmissionAttemptBindingV1, readers)
+	errorsFound := make(chan error, readers)
+	var group sync.WaitGroup
+	for range readers {
+		group.Add(1)
+		go func() {
+			defer group.Done()
+			got, inspectErr := store.InspectWorkspaceReadAttemptForAdmissionV1(ctx, binding.AdmissionReceipt)
+			if inspectErr != nil {
+				errorsFound <- inspectErr
+				return
+			}
+			results <- got
+		}()
+	}
+	group.Wait()
+	close(results)
+	close(errorsFound)
+	for inspectErr := range errorsFound {
+		t.Fatal(inspectErr)
+	}
+	for got := range results {
+		if got != binding || got.Attempt != binding.Attempt {
+			t.Fatalf("concurrent admission handoff drifted: %#v", got)
+		}
+	}
+
+	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "admission-handoff-unknown")); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	current = expires.Add(time.Second)
+	reopened, err := OpenWithClock(ctx, database, func() time.Time { return current })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	recovered, err := reopened.InspectWorkspaceReadAttemptForAdmissionV1(ctx, binding.AdmissionReceipt)
+	if err != nil || recovered != binding || recovered.Attempt != binding.Attempt {
+		t.Fatalf("expired historical handoff lost original attempt: %#v err=%v", recovered, err)
+	}
+	projection, err := reopened.InspectBoundedWorkspaceReadV1(ctx, recovered.Attempt)
+	if err != nil || projection.Attempt.State != contract.WorkspaceReadUnknownV1 {
+		t.Fatalf("original attempt did not inspect latest current: %#v err=%v", projection, err)
+	}
+}
+
+func TestWorkspaceReadAdmissionHandoffRejectsEveryReceiptSplice(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Unix(1_900_000_000, 0)
+	expires := now.Add(time.Hour)
+	store, err := OpenWithClock(ctx, filepath.Join(t.TempDir(), "sandbox.db"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "admission-splice")
+	binding := workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt)
+	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt, binding); reserveErr != nil || !created {
+		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
+	}
+
+	splices := []runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{
+		mustWorkspaceReadAdmissionReceiptV1(t, binding.AdmissionReceipt.ID, 2, binding.AdmissionReceipt.StableKeyDigest, true, false),
+		mustWorkspaceReadAdmissionReceiptV1(t, binding.AdmissionReceipt.ID, 1, runtimecore.DigestBytes([]byte("other-stable-key")), true, false),
+		mustWorkspaceReadAdmissionReceiptV1(t, binding.AdmissionReceipt.ID, 1, binding.AdmissionReceipt.StableKeyDigest, false, true),
+	}
+	for _, splice := range splices {
+		if _, inspectErr := store.InspectWorkspaceReadAttemptForAdmissionV1(ctx, splice); inspectErr == nil {
+			t.Fatalf("spliced receipt reached original attempt: %#v", splice)
+		}
+	}
+}
+
+func TestWorkspaceReadExactReservationAndAttemptReadersSurviveRestartAndCurrentAdvance(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Unix(1_900_000_000, 0)
+	expires := now.Add(time.Hour)
+	database := filepath.Join(t.TempDir(), "sandbox.db")
+	store, err := OpenWithClock(ctx, database, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "exact-current-readers")
+	if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); reserveErr != nil || !created {
+		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
+	}
+	originalAttempt := contract.WorkspaceReadAttemptRefV1{
+		ID: attempt.Meta.ID, Revision: attempt.Meta.Revision, Digest: attempt.Meta.Digest,
+	}
+	if got, inspectErr := store.InspectWorkspaceReadReservationExactV1(ctx, reservation.Meta.Ref()); inspectErr != nil || got != reservation {
+		t.Fatalf("exact reservation drifted: %#v err=%v", got, inspectErr)
+	}
+	if got, inspectErr := store.InspectWorkspaceReadAttemptCurrentV1(ctx, originalAttempt); inspectErr != nil || got.State != contract.WorkspaceReadStartedV1 {
+		t.Fatalf("exact attempt current drifted: %#v err=%v", got, inspectErr)
+	}
+	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "exact-current-unknown")); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenWithClock(ctx, database, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if got, inspectErr := reopened.InspectWorkspaceReadReservationExactV1(ctx, reservation.Meta.Ref()); inspectErr != nil || got != reservation {
+		t.Fatalf("restart exact reservation drifted: %#v err=%v", got, inspectErr)
+	}
+	if got, inspectErr := reopened.InspectWorkspaceReadAttemptCurrentV1(ctx, originalAttempt); inspectErr != nil || got.State != contract.WorkspaceReadUnknownV1 {
+		t.Fatalf("restart exact attempt did not return latest current: %#v err=%v", got, inspectErr)
+	}
+	splicedReservation := reservation.Meta.Ref()
+	splicedReservation.Digest = mustWorkspaceReadDigest(t, "other-reservation")
+	if _, err = reopened.InspectWorkspaceReadReservationExactV1(ctx, splicedReservation); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("reservation digest splice was accepted: %v", err)
+	}
+	splicedAttempt := originalAttempt
+	splicedAttempt.Digest = mustWorkspaceReadDigest(t, "other-attempt")
+	if _, err = reopened.InspectWorkspaceReadAttemptCurrentV1(ctx, splicedAttempt); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("attempt digest splice was accepted: %v", err)
+	}
+}
+
 func TestWorkspaceReadOriginalAttemptRecoversLatestCurrent(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -78,7 +227,7 @@ func TestWorkspaceReadOriginalAttemptRecoversLatestCurrent(t *testing.T) {
 
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "request-a")
 	seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
-	started, created, err := store.ReserveWorkspaceReadV1(ctx, reservation, attempt)
+	started, created, err := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt)
 	if err != nil || !created || started.Attempt.State != contract.WorkspaceReadStartedV1 || started.AdmissionReceipt != attempt.AdmissionReceipt {
 		t.Fatalf("reserve: created=%v state=%q err=%v", created, started.Attempt.State, err)
 	}
@@ -116,7 +265,7 @@ func TestWorkspaceReadStartedInspectIsReadOnly(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "request-a")
-	if _, _, err = store.ReserveWorkspaceReadV1(ctx, reservation, attempt); err != nil {
+	if _, _, err = reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); err != nil {
 		t.Fatal(err)
 	}
 	projection, err := store.InspectBoundedWorkspaceReadV1(ctx, contract.WorkspaceReadAttemptRefV1{ID: attempt.Meta.ID, Revision: 1, Digest: attempt.Meta.Digest})
@@ -141,7 +290,7 @@ func TestWorkspaceReadConcurrentInspectCannotPoisonActiveCompletion(t *testing.T
 	t.Cleanup(func() { _ = store.Close() })
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "request-concurrent-inspect")
 	seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
-	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt); reserveErr != nil || !created {
+	if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); reserveErr != nil || !created {
 		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
 	}
 	original := contract.WorkspaceReadAttemptRefV1{ID: attempt.Meta.ID, Revision: attempt.Meta.Revision, Digest: attempt.Meta.Digest}
@@ -210,7 +359,7 @@ func TestWorkspaceReadStartedRecoveryRequiresNewOwnerIncarnation(t *testing.T) {
 		t.Fatal(err)
 	}
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "request-restart")
-	if _, created, reserveErr := first.ReserveWorkspaceReadV1(ctx, reservation, attempt); reserveErr != nil || !created {
+	if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, first, ctx, reservation, attempt); reserveErr != nil || !created {
 		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
 	}
 	original := contract.WorkspaceReadAttemptRefV1{ID: attempt.Meta.ID, Revision: attempt.Meta.Revision, Digest: attempt.Meta.Digest}
@@ -269,9 +418,9 @@ func TestWorkspaceReadStoreEnforcesSealedTTLClosureAtWriteBoundaries(t *testing.
 	if closure.EffectiveExpiresUnixNano != effective.UnixNano() {
 		t.Fatalf("effective expiry=%d, want shortest upstream=%d", closure.EffectiveExpiresUnixNano, effective.UnixNano())
 	}
-	stable := mustWorkspaceReadDigest(t, "ttl-stable")
+	stable := "sha256:" + mustWorkspaceReadDigest(t, "ttl-stable")
 	reservationDraft := contract.WorkspaceReadReservationV1{
-		StableKeyDigest: stable, AuthorizationDigest: mustWorkspaceReadDigest(t, "ttl-authorization"),
+		StableKeyDigest: stable, AuthorizationDigest: "sha256:" + mustWorkspaceReadDigest(t, "ttl-authorization"),
 		RequestDigest: mustWorkspaceReadDigest(t, "ttl-request"), PayloadDigest: mustWorkspaceReadDigest(t, "ttl-payload"),
 		Command:       contract.Ref{ID: "ttl-command", Revision: 1, Digest: mustWorkspaceReadDigest(t, "ttl-command")},
 		WorkspaceView: contract.Ref{ID: "ttl-workspace", Revision: 1, Digest: mustWorkspaceReadDigest(t, "ttl-workspace")},
@@ -289,8 +438,14 @@ func TestWorkspaceReadStoreEnforcesSealedTTLClosureAtWriteBoundaries(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
+	runtimeAdmission, err := runtimeports.SealControlledOperationProviderAdmissionReceiptRefV2(runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{
+		ID: "ttl-admission", Revision: 1, StableKeyDigest: runtimecore.Digest(stable), Admitted: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	admission := contract.WorkspaceReadReceiptBindingV1{
-		ID: "ttl-admission", Revision: 1, Digest: mustWorkspaceReadDigest(t, "ttl-admission"),
+		ID: runtimeAdmission.ID, Revision: uint64(runtimeAdmission.Revision), Digest: string(runtimeAdmission.Digest),
 		StableKeyDigest: stable, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: effective.UnixNano(),
 	}
 	attempt, err := contract.SealWorkspaceReadAttemptV1(contract.WorkspaceReadAttemptV1{
@@ -301,11 +456,11 @@ func TestWorkspaceReadStoreEnforcesSealedTTLClosureAtWriteBoundaries(t *testing.
 		t.Fatal(err)
 	}
 	current = effective
-	if _, _, err = store.ReserveWorkspaceReadV1(ctx, reservation, attempt); err == nil {
+	if _, _, err = reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); err == nil {
 		t.Fatal("now==effective expiry reached the durable reservation")
 	}
 	current = now
-	if _, created, err := store.ReserveWorkspaceReadV1(ctx, reservation, attempt); err != nil || !created {
+	if _, created, err := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); err != nil || !created {
 		t.Fatalf("current shortest-bound reservation: created=%v err=%v", created, err)
 	}
 	content := "ttl"
@@ -342,13 +497,13 @@ func TestWorkspaceReadStoreRejectsFutureReceiptAndObservation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err = store.ReserveWorkspaceReadV1(ctx, reservation, attempt); err == nil {
+	if _, _, err = reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); err == nil {
 		t.Fatal("future admission receipt reached the durable reservation")
 	}
 
 	reservation, attempt = workspaceReadReservationFixture(t, now, expires, "request-observation-future")
 	seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
-	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt); reserveErr != nil || !created {
+	if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); reserveErr != nil || !created {
 		t.Fatalf("reserve observation fixture: created=%v err=%v", created, reserveErr)
 	}
 	future := now.Add(time.Second)
@@ -389,7 +544,7 @@ func TestWorkspaceReadSameAttemptIDDifferentOriginalDigestConflicts(t *testing.T
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "request-a")
-	if _, _, err = store.ReserveWorkspaceReadV1(ctx, reservation, attempt); err != nil {
+	if _, _, err = reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); err != nil {
 		t.Fatal(err)
 	}
 	otherReservation, otherAttempt := workspaceReadReservationFixture(t, now, expires, "request-b")
@@ -410,7 +565,7 @@ func TestWorkspaceReadSameAttemptIDDifferentOriginalDigestConflicts(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = store.ReserveWorkspaceReadV1(ctx, otherReservation, otherAttempt)
+	_, _, err = reserveWorkspaceReadFixtureV1(t, store, ctx, otherReservation, otherAttempt)
 	if !errors.Is(err, ports.ErrConflict) {
 		t.Fatalf("expected conflict, got %v", err)
 	}
@@ -491,7 +646,7 @@ func TestWorkspaceReadCompletionRejectsExactCoordinateSplicesAndMissingInputs(t 
 			t.Cleanup(func() { _ = store.Close() })
 			reservation, attempt := workspaceReadReservationFixture(t, now, expires, "splice-"+testCase.name)
 			seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
-			if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt); reserveErr != nil || !created {
+			if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); reserveErr != nil || !created {
 				t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
 			}
 			observation := workspaceReadCompletionObservationFixtureV1(t, reservation, attempt, now, expires)
@@ -514,8 +669,17 @@ func TestWorkspaceReadCompletionRejectsExactCoordinateSplicesAndMissingInputs(t 
 func workspaceReadReservationFixture(t *testing.T, now, expires time.Time, request string) (contract.WorkspaceReadReservationV1, contract.WorkspaceReadAttemptV1) {
 	t.Helper()
 	workspace, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
-	stable := mustWorkspaceReadDigest(t, "stable")
-	admission := contract.WorkspaceReadReceiptBindingV1{ID: "admission", Revision: 1, Digest: mustWorkspaceReadDigest(t, "admission"), StableKeyDigest: stable, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano()}
+	stable := "sha256:" + mustWorkspaceReadDigest(t, "stable")
+	runtimeAdmission, err := runtimeports.SealControlledOperationProviderAdmissionReceiptRefV2(runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{
+		ID: "admission", Revision: 1, StableKeyDigest: runtimecore.Digest(stable), Admitted: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	admission := contract.WorkspaceReadReceiptBindingV1{
+		ID: runtimeAdmission.ID, Revision: uint64(runtimeAdmission.Revision), Digest: string(runtimeAdmission.Digest),
+		StableKeyDigest: stable, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano(),
+	}
 	ttlClosure, err := contract.SealWorkspaceReadTTLClosureV1(contract.WorkspaceReadTTLClosureV1{
 		UnifiedNotAfterUnixNano:       expires.UnixNano(),
 		RuntimeEnforcementExpiresNano: expires.UnixNano(),
@@ -528,7 +692,7 @@ func workspaceReadReservationFixture(t *testing.T, now, expires time.Time, reque
 	if err != nil {
 		t.Fatal(err)
 	}
-	reservation, err := contract.SealWorkspaceReadReservationV1(contract.WorkspaceReadReservationV1{StableKeyDigest: stable, AuthorizationDigest: mustWorkspaceReadDigest(t, "authorization"), RequestDigest: mustWorkspaceReadDigest(t, request), PayloadDigest: mustWorkspaceReadDigest(t, "payload"), Command: command.Meta.Ref(), WorkspaceView: workspace.Meta.Ref(), AttemptID: "attempt-1", TTLClosure: ttlClosure}, "reservation", now, expires)
+	reservation, err := contract.SealWorkspaceReadReservationV1(contract.WorkspaceReadReservationV1{StableKeyDigest: stable, AuthorizationDigest: "sha256:" + mustWorkspaceReadDigest(t, "authorization"), RequestDigest: mustWorkspaceReadDigest(t, request), PayloadDigest: mustWorkspaceReadDigest(t, "payload"), Command: command.Meta.Ref(), WorkspaceView: workspace.Meta.Ref(), AttemptID: "attempt-1", TTLClosure: ttlClosure}, "reservation", now, expires)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,6 +701,60 @@ func workspaceReadReservationFixture(t *testing.T, now, expires time.Time, reque
 		t.Fatal(err)
 	}
 	return reservation, attempt
+}
+
+func reserveWorkspaceReadFixtureV1(t *testing.T, store *Store, ctx context.Context, reservation contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
+	t.Helper()
+	return store.ReserveWorkspaceReadV1(ctx, reservation, attempt, workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt))
+}
+
+func workspaceReadAdmissionAttemptBindingFixtureV1(t *testing.T, reservation contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1) ports.WorkspaceReadAdmissionAttemptBindingV1 {
+	t.Helper()
+	admission := mustWorkspaceReadAdmissionReceiptV1(t, attempt.AdmissionReceipt.ID, runtimecore.Revision(attempt.AdmissionReceipt.Revision), runtimecore.Digest(attempt.AdmissionReceipt.StableKeyDigest), true, false)
+	if string(admission.Digest) != attempt.AdmissionReceipt.Digest {
+		t.Fatal("fixture Runtime admission digest drifted")
+	}
+	manifest := runtimecore.Digest("sha256:" + mustWorkspaceReadDigest(t, "sandbox-manifest"))
+	domain := runtimeports.OperationDomainCommandRefV1{
+		Owner: runtimeports.EffectOwnerRefV2{
+			Role: runtimeports.OwnerSettlement, ComponentID: "praxis.sandbox/workspace-read",
+			ManifestDigest: manifest,
+		},
+		Kind: runtimeports.NamespacedNameV2(contract.WorkspaceReadCommandKindV1),
+		ID:   reservation.Command.ID, Revision: runtimecore.Revision(reservation.Command.Revision),
+		Digest: runtimecore.Digest("sha256:" + reservation.Command.Digest),
+	}
+	binding, err := ports.SealWorkspaceReadAdmissionAttemptBindingV1(ports.WorkspaceReadAdmissionAttemptBindingV1{
+		AdmissionReceipt: admission,
+		Attempt: contract.WorkspaceReadAttemptRefV1{
+			ID: attempt.Meta.ID, Revision: attempt.Meta.Revision, Digest: attempt.Meta.Digest,
+		},
+		Command:             reservation.Command,
+		AuthorizationDigest: runtimecore.Digest(reservation.AuthorizationDigest),
+		StableKeyDigest:     runtimecore.Digest(reservation.StableKeyDigest),
+		Association: runtimeports.PreparedDomainCommandAssociationRefV1{
+			ID: "workspace-read-association", Revision: 1,
+			Digest: runtimecore.Digest("sha256:" + mustWorkspaceReadDigest(t, "association")),
+		},
+		DomainCommand:   domain,
+		CreatedUnixNano: attempt.Meta.CreatedUnixNano,
+		ExpiresUnixNano: attempt.Meta.ExpiresUnixNano,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return binding
+}
+
+func mustWorkspaceReadAdmissionReceiptV1(t *testing.T, id string, revision runtimecore.Revision, stable runtimecore.Digest, admitted, noEffect bool) runtimeports.ControlledOperationProviderAdmissionReceiptRefV2 {
+	t.Helper()
+	receipt, err := runtimeports.SealControlledOperationProviderAdmissionReceiptRefV2(runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{
+		ID: id, Revision: revision, StableKeyDigest: stable, Admitted: admitted, NoEffect: noEffect,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return receipt
 }
 
 func workspaceReadCompletionInputFixtureV1(t *testing.T, now, expires time.Time) (contract.WorkspaceView, contract.WorkspaceReadCommandV1) {

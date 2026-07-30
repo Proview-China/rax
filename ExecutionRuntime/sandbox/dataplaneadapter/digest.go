@@ -1,14 +1,25 @@
 package dataplaneadapter
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
+	"io"
 )
 
 func canonicalJSON(data []byte) ([]byte, error) {
 	var value any
-	if err := json.Unmarshal(data, &value); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	decoder.UseNumber()
+	if err := decoder.Decode(&value); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return nil, errors.New("canonical JSON contains trailing data")
+		}
 		return nil, err
 	}
 	return json.Marshal(value)

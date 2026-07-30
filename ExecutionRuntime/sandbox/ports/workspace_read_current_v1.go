@@ -97,35 +97,36 @@ func SealWorkspaceReadCurrentQueryV1(q WorkspaceReadCurrentQueryV1) (WorkspaceRe
 // the owner of enforcement, Review and Permit facts; Sandbox remains the owner
 // of command, workspace and physical-read facts.
 type WorkspaceReadCurrentProjectionV1 struct {
-	ContractVersion             string                                              `json:"contract_version"`
-	QueryDigest                 string                                              `json:"query_digest"`
-	StableKeyDigest             runtimecore.Digest                                  `json:"stable_key_digest"`
-	AuthorizationDigest         runtimecore.Digest                                  `json:"authorization_digest"`
-	Association                 runtimeports.PreparedDomainCommandAssociationRefV1  `json:"association"`
-	AssociationProjectionDigest runtimecore.Digest                                  `json:"association_projection_digest"`
-	DomainCommand               runtimeports.OperationDomainCommandRefV1            `json:"domain_command"`
-	TenantID                    string                                              `json:"tenant_id"`
-	Command                     contract.Ref                                        `json:"command"`
-	WorkspaceView               contract.Ref                                        `json:"workspace_view"`
-	FileScopeDigest             string                                              `json:"file_scope_digest"`
-	RelativePath                string                                              `json:"relative_path"`
-	ProviderBinding             runtimeports.ProviderBindingRefV2                   `json:"provider_binding"`
-	ReviewAuthorization         runtimeports.OperationReviewAuthorizationRefV4      `json:"review_authorization"`
-	PermitID                    string                                              `json:"permit_id"`
-	PermitRevision              runtimecore.Revision                                `json:"permit_revision"`
-	PermitDigest                runtimecore.Digest                                  `json:"permit_digest"`
-	AdmissionDigest             runtimecore.Digest                                  `json:"admission_digest"`
-	SandboxAttempt              runtimeports.OperationDispatchSandboxFactRefV4      `json:"sandbox_attempt"`
-	SandboxProjectionRevision   runtimecore.Revision                                `json:"sandbox_projection_revision"`
-	SandboxProjectionDigest     runtimecore.Digest                                  `json:"sandbox_projection_digest"`
-	RuntimeLease                runtimeports.OperationDispatchRuntimeLeaseBindingV4 `json:"runtime_lease"`
-	ExecuteEnforcement          runtimeports.OperationDispatchEnforcementPhaseRefV4 `json:"execute_enforcement"`
-	RuntimeEnforcementDigest    runtimecore.Digest                                  `json:"runtime_enforcement_digest"`
-	S1CheckedUnixNano           int64                                               `json:"s1_checked_unix_nano"`
-	S2CheckedUnixNano           int64                                               `json:"s2_checked_unix_nano"`
-	ExpiresUnixNano             int64                                               `json:"expires_unix_nano"`
-	SemanticDigest              string                                              `json:"semantic_digest"`
-	ProjectionDigest            string                                              `json:"projection_digest"`
+	ContractVersion                  string                                              `json:"contract_version"`
+	QueryDigest                      string                                              `json:"query_digest"`
+	StableKeyDigest                  runtimecore.Digest                                  `json:"stable_key_digest"`
+	AuthorizationDigest              runtimecore.Digest                                  `json:"authorization_digest"`
+	Association                      runtimeports.PreparedDomainCommandAssociationRefV1  `json:"association"`
+	AssociationProjectionDigest      runtimecore.Digest                                  `json:"association_projection_digest"`
+	DomainCommand                    runtimeports.OperationDomainCommandRefV1            `json:"domain_command"`
+	TenantID                         string                                              `json:"tenant_id"`
+	Command                          contract.Ref                                        `json:"command"`
+	WorkspaceView                    contract.Ref                                        `json:"workspace_view"`
+	FileScopeDigest                  string                                              `json:"file_scope_digest"`
+	RelativePath                     string                                              `json:"relative_path"`
+	ProviderBinding                  runtimeports.ProviderBindingRefV2                   `json:"provider_binding"`
+	ReviewAuthorization              runtimeports.OperationReviewAuthorizationRefV4      `json:"review_authorization"`
+	PermitID                         string                                              `json:"permit_id"`
+	PermitRevision                   runtimecore.Revision                                `json:"permit_revision"`
+	PermitDigest                     runtimecore.Digest                                  `json:"permit_digest"`
+	AdmissionDigest                  runtimecore.Digest                                  `json:"admission_digest"`
+	SandboxAttempt                   runtimeports.OperationDispatchSandboxFactRefV4      `json:"sandbox_attempt"`
+	SandboxProjectionRevision        runtimecore.Revision                                `json:"sandbox_projection_revision"`
+	SandboxProjectionDigest          runtimecore.Digest                                  `json:"sandbox_projection_digest"`
+	SandboxProjectionExpiresUnixNano int64                                               `json:"sandbox_projection_expires_unix_nano"`
+	RuntimeLease                     runtimeports.OperationDispatchRuntimeLeaseBindingV4 `json:"runtime_lease"`
+	ExecuteEnforcement               runtimeports.OperationDispatchEnforcementPhaseRefV4 `json:"execute_enforcement"`
+	RuntimeEnforcementDigest         runtimecore.Digest                                  `json:"runtime_enforcement_digest"`
+	S1CheckedUnixNano                int64                                               `json:"s1_checked_unix_nano"`
+	S2CheckedUnixNano                int64                                               `json:"s2_checked_unix_nano"`
+	ExpiresUnixNano                  int64                                               `json:"expires_unix_nano"`
+	SemanticDigest                   string                                              `json:"semantic_digest"`
+	ProjectionDigest                 string                                              `json:"projection_digest"`
 }
 
 func (p WorkspaceReadCurrentProjectionV1) ValidateCurrent(now time.Time) error {
@@ -150,12 +151,14 @@ func (p WorkspaceReadCurrentProjectionV1) ValidateCurrent(now time.Time) error {
 		p.SandboxAttempt.Validate() != nil ||
 		p.SandboxProjectionRevision == 0 ||
 		p.SandboxProjectionDigest.Validate() != nil ||
+		p.SandboxProjectionExpiresUnixNano <= 0 ||
 		p.RuntimeLease.Validate() != nil ||
 		p.ExecuteEnforcement.Validate() != nil ||
 		p.RuntimeEnforcementDigest.Validate() != nil ||
 		p.S1CheckedUnixNano <= 0 ||
 		p.S2CheckedUnixNano < p.S1CheckedUnixNano ||
 		p.ExpiresUnixNano <= p.S2CheckedUnixNano ||
+		p.ExpiresUnixNano > p.SandboxProjectionExpiresUnixNano ||
 		!contract.ValidDigest(p.SemanticDigest) ||
 		!contract.ValidDigest(p.ProjectionDigest) {
 		return errors.New("workspace read current projection is incomplete")

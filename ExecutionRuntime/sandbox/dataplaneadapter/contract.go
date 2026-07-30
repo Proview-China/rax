@@ -325,14 +325,15 @@ type ProviderReceiptV1 struct {
 }
 
 type DispatchInput struct {
-	RequestID            string
-	Current              runtimeports.CurrentOperationDispatchEnforcementV4
-	WorkspaceReadCurrent *sandboxports.WorkspaceReadCurrentQueryV1
-	EffectKind           string
-	PayloadSchema        string
-	PayloadRevision      uint64
-	Payload              ProviderPayloadV1
-	RequestedNotAfter    time.Time
+	RequestID              string
+	Current                runtimeports.CurrentOperationDispatchEnforcementV4
+	WorkspaceReadCurrent   *sandboxports.WorkspaceReadCurrentQueryV1
+	WorkspaceReadCurrentV2 *sandboxports.WorkspaceReadCurrentQueryV2
+	EffectKind             string
+	PayloadSchema          string
+	PayloadRevision        uint64
+	Payload                ProviderPayloadV1
+	RequestedNotAfter      time.Time
 }
 
 func NewContainerPayload(value ContainerPayloadV1) (ProviderPayloadV1, error) {
@@ -540,6 +541,12 @@ func NewDispatchRequestV1(input DispatchInput) (DispatchRequestV1, error) {
 		return DispatchRequestV1{}, fmt.Errorf("runtime current query: %w", err)
 	}
 	var currentQuery any = runtimeQuery
+	if input.WorkspaceReadCurrent != nil && input.WorkspaceReadCurrentV2 != nil {
+		return DispatchRequestV1{}, errors.New("workspace read current query versions are mutually exclusive")
+	}
+	if input.Payload.ProviderKind == "workspace_read" && phase == PhaseExecute && input.WorkspaceReadCurrentV2 == nil {
+		return DispatchRequestV1{}, errors.New("workspace read physical execution requires exact current v2")
+	}
 	if input.WorkspaceReadCurrent != nil {
 		if input.Payload.ProviderKind != "workspace_read" {
 			return DispatchRequestV1{}, errors.New("workspace read exact current query is forbidden for another Provider payload")
@@ -551,6 +558,18 @@ func NewDispatchRequestV1(input DispatchInput) (DispatchRequestV1, error) {
 			return DispatchRequestV1{}, errors.New("workspace read exact current query drifted from Runtime current")
 		}
 		currentQuery = *input.WorkspaceReadCurrent
+	}
+	if input.WorkspaceReadCurrentV2 != nil {
+		if input.Payload.ProviderKind != "workspace_read" {
+			return DispatchRequestV1{}, errors.New("workspace read exact current v2 query is forbidden for another Provider payload")
+		}
+		if err := input.WorkspaceReadCurrentV2.Validate(); err != nil {
+			return DispatchRequestV1{}, fmt.Errorf("workspace read exact current v2 query: %w", err)
+		}
+		if input.WorkspaceReadCurrentV2.Base.RuntimeInspect != runtimeQuery {
+			return DispatchRequestV1{}, errors.New("workspace read exact current v2 query drifted from Runtime current")
+		}
+		currentQuery = *input.WorkspaceReadCurrentV2
 	}
 	queryJSON, err := json.Marshal(currentQuery)
 	if err != nil {

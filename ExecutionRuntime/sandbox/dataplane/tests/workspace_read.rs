@@ -42,6 +42,11 @@ fn workspace_request(
         digest: common::digest("sandbox-projection"),
         expires_unix_nano: request.requested_not_after_unix_nano,
     });
+    if phase == EnforcementPhaseV1::Execute {
+        request.runtime_current_query = serde_json::json!({
+            "contract_version": "praxis.sandbox/workspace-read-current/v2"
+        });
+    }
     request
         .seal()
         .unwrap_or_else(|error| panic!("seal workspace read: {error}"))
@@ -93,6 +98,68 @@ fn provider(root: &std::path::Path) -> WorkspaceReadProviderV1 {
             },
         )]),
     })
+}
+
+#[tokio::test]
+async fn non_v2_execute_never_begins_or_calls_the_provider() {
+    let temporary = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
+    fs::create_dir_all(temporary.path().join("src"))
+        .unwrap_or_else(|error| panic!("mkdir: {error}"));
+    fs::write(temporary.path().join("src/main.txt"), "protected")
+        .unwrap_or_else(|error| panic!("write: {error}"));
+    let workspace = common::exact("workspace-1", now_unix_nano() + 60_000_000_000);
+
+    for (name, query) in [
+        (
+            "v1",
+            serde_json::json!({"contract_version":"praxis.sandbox/workspace-read-current/v1"}),
+        ),
+        (
+            "plain-runtime",
+            serde_json::json!({"inspect":{"effect_id":"read"}}),
+        ),
+    ] {
+        let journal_path = temporary.path().join(format!("{name}.jsonl"));
+        let journal = Arc::new(
+            AttemptJournal::open(&journal_path)
+                .await
+                .unwrap_or_else(|error| panic!("journal: {error}")),
+        );
+        let enforcer = DataPlaneEnforcer::new(common::reader(), Arc::clone(&journal));
+        let provider = provider(temporary.path());
+        let mut request = workspace_request(EnforcementPhaseV1::Execute, &workspace, 0, 64);
+        request.runtime_current_query = query;
+        request.runtime_current_query_digest =
+            praxis_sandbox_dataplane::contract::canonical_digest(
+                "RuntimeCurrentQueryV1",
+                &request.runtime_current_query,
+            )
+            .unwrap_or_else(|error| panic!("query digest: {error}"));
+        request.digest.clear();
+        request.digest = request
+            .calculate_digest()
+            .unwrap_or_else(|error| panic!("request digest: {error}"));
+        let error = enforcer
+            .dispatch(&provider, &request)
+            .await
+            .expect_err("non-v2 workspace read execute must fail closed");
+        assert_eq!(
+            error.effect_boundary,
+            Some(EffectBoundary::EffectNotStarted)
+        );
+        assert_eq!(error.crossed_actual_point, Some(false));
+        assert_eq!(error.physical_read_count, Some(0));
+        assert_eq!(provider.physical_read_count(), 0);
+        let journal_bytes = match fs::read(&journal_path) {
+            Ok(value) => value,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Vec::new(),
+            Err(error) => panic!("read journal: {error}"),
+        };
+        assert!(
+            journal_bytes.is_empty(),
+            "rejected non-v2 execute wrote a Begin record"
+        );
+    }
 }
 
 #[tokio::test]

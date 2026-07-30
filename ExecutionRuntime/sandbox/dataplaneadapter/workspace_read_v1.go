@@ -29,8 +29,23 @@ func (a *WorkspaceReadActualPointAdapterV1) ReadWorkspaceFileV1(ctx context.Cont
 	if a == nil {
 		return kernel.WorkspaceReadActualPointResultV1{}, errors.New("workspace read Data Plane adapter is unavailable")
 	}
-	if input.Reservation.ValidateShape() != nil || input.Command.ValidateShape() != nil || input.Workspace.ValidateShape() != nil || input.RuntimeCurrent.Validate() != nil || input.S1CheckedUnixNano <= 0 || input.ExpiresUnixNano <= input.S1CheckedUnixNano {
+	if input.Reservation.ValidateShape() != nil || input.Command.ValidateShape() != nil || input.Workspace.ValidateShape() != nil || input.RuntimeCurrent.Validate() != nil || input.CurrentQuery.Validate() != nil || input.S1CheckedUnixNano <= 0 || input.ExpiresUnixNano <= input.S1CheckedUnixNano {
 		return kernel.WorkspaceReadActualPointResultV1{}, kernel.NewWorkspaceReadActualPointErrorV1(kernel.WorkspaceReadEffectNotStartedV1, errors.New("workspace read actual-point input is incomplete"))
+	}
+	expectedAttempt := contract.Ref{
+		ID:       "workspace-read-attempt-" + trimWorkspaceReadDigestV1(input.Reservation.StableKeyDigest),
+		Revision: 1,
+		Digest:   input.CurrentQuery.Attempt.Digest,
+	}
+	if input.CurrentQuery.Base.Command != input.Command.Meta.Ref() ||
+		input.CurrentQuery.Base.WorkspaceView != input.Workspace.Meta.Ref() ||
+		input.CurrentQuery.Reservation != input.Reservation.Meta.Ref() ||
+		input.CurrentQuery.Attempt.OwnerRef() != expectedAttempt ||
+		input.CurrentQuery.Base.FileScopeDigest != input.Command.FileScopeDigest ||
+		input.CurrentQuery.Base.RelativePath != input.Command.RelativePath ||
+		input.CurrentQuery.Base.CheckedUnixNano != input.S1CheckedUnixNano ||
+		input.CurrentQuery.Base.ExpiresUnixNano != input.ExpiresUnixNano {
+		return kernel.WorkspaceReadActualPointResultV1{}, kernel.NewWorkspaceReadActualPointErrorV1(kernel.WorkspaceReadEffectNotStartedV1, errors.New("workspace read exact current query drifted from actual-point input"))
 	}
 	workspace := ExactRefV1{
 		ID: input.Workspace.Meta.ID, Revision: input.Workspace.Meta.Revision,
@@ -77,13 +92,14 @@ func (a *WorkspaceReadActualPointAdapterV1) ReadWorkspaceFileV1(ctx context.Cont
 		return kernel.WorkspaceReadActualPointResultV1{}, kernel.NewWorkspaceReadActualPointErrorV1(kernel.WorkspaceReadEffectNotStartedV1, err)
 	}
 	executeRequest, err := NewDispatchRequestV1(DispatchInput{
-		RequestID:         input.Reservation.Meta.ID,
-		Current:           input.RuntimeCurrent,
-		EffectKind:        "praxis.sandbox/workspace-read",
-		PayloadSchema:     input.Command.SourceToolPayloadSchema,
-		PayloadRevision:   input.Command.SourceToolPayloadRevision,
-		Payload:           payload,
-		RequestedNotAfter: time.Unix(0, input.ExpiresUnixNano),
+		RequestID:              input.Reservation.Meta.ID,
+		Current:                input.RuntimeCurrent,
+		WorkspaceReadCurrentV2: &input.CurrentQuery,
+		EffectKind:             "praxis.sandbox/workspace-read",
+		PayloadSchema:          input.Command.SourceToolPayloadSchema,
+		PayloadRevision:        input.Command.SourceToolPayloadRevision,
+		Payload:                payload,
+		RequestedNotAfter:      time.Unix(0, input.ExpiresUnixNano),
 	})
 	if err != nil {
 		return kernel.WorkspaceReadActualPointResultV1{}, kernel.NewWorkspaceReadActualPointErrorV1(kernel.WorkspaceReadEffectNotStartedV1, err)
