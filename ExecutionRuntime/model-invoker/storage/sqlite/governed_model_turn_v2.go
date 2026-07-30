@@ -124,6 +124,13 @@ func (s *Store) casTurnV2(ctx context.Context, request modelinvoker.GovernedMode
 		if !bytes.Equal(stored.wire, wire) {
 			return modelinvoker.GovernedModelTurnMutationV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "cas_turn_v2", "same Ref has different content", nil)
 		}
+		expected, err := loadTurnHistoryV2(ctx, tx, request.Expected.ID, request.Expected.Revision)
+		if err != nil || expected.outcome.RefV2() != request.Expected || expected.attempt != attempt {
+			return modelinvoker.GovernedModelTurnMutationV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "cas_turn_v2", "idempotent replay lost exact Expected history", err)
+		}
+		if err := modelinvoker.ValidateGovernedModelTurnTransitionV2(expected.outcome, stored.outcome); err != nil {
+			return modelinvoker.GovernedModelTurnMutationV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "cas_turn_v2", "idempotent replay transition is invalid", err)
+		}
 		return modelinvoker.GovernedModelTurnMutationV2{Outcome: stored.outcome.CloneV2(), Applied: false}, nil
 	}
 	if stored.outcome.RefV2() != request.Expected || current.digest != request.Expected.Digest || current.highest != request.Expected.Revision {
@@ -225,16 +232,29 @@ func (s *Store) InspectExactGovernedModelTurnToolCallProjectionV2(ctx context.Co
 func loadTurnCurrentV2(ctx context.Context, source interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }, id string) (turnCurrentV2, error) {
-	var revision, highest, history uint64
-	var digest string
-	err := source.QueryRowContext(ctx, `SELECT c.revision,c.fact_digest,c.highest_revision,(SELECT COALESCE(MAX(h.revision),0) FROM governed_model_turn_history h WHERE h.turn_id=c.turn_id) FROM governed_model_turn_current c WHERE c.turn_id=?`, id).Scan(&revision, &digest, &highest, &history)
+	var revision, highest, historyCount, historyMin, historyMax, distinctAttempts, guardCount uint64
+	var digest, historyAttempt, guardAttempt string
+	err := source.QueryRowContext(ctx, `
+SELECT
+  c.revision,
+  c.fact_digest,
+  c.highest_revision,
+  (SELECT COUNT(*) FROM governed_model_turn_history h WHERE h.turn_id=c.turn_id),
+  (SELECT COALESCE(MIN(h.revision),0) FROM governed_model_turn_history h WHERE h.turn_id=c.turn_id),
+  (SELECT COALESCE(MAX(h.revision),0) FROM governed_model_turn_history h WHERE h.turn_id=c.turn_id),
+  (SELECT COUNT(DISTINCT h.attempt_digest) FROM governed_model_turn_history h WHERE h.turn_id=c.turn_id),
+  (SELECT COALESCE(MIN(h.attempt_digest),'') FROM governed_model_turn_history h WHERE h.turn_id=c.turn_id),
+  (SELECT COUNT(*) FROM governed_model_turn_attempt_guard g WHERE g.turn_id=c.turn_id),
+  (SELECT COALESCE(MIN(g.attempt_digest),'') FROM governed_model_turn_attempt_guard g WHERE g.turn_id=c.turn_id)
+FROM governed_model_turn_current c
+WHERE c.turn_id=?`, id).Scan(&revision, &digest, &highest, &historyCount, &historyMin, &historyMax, &distinctAttempts, &historyAttempt, &guardCount, &guardAttempt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return turnCurrentV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorNotFound, "inspect_current_turn_v2", "turn absent", nil)
 	}
 	if err != nil {
 		return turnCurrentV2{}, mapDBErrorV1(ctx, "inspect_current_turn_v2", err, false)
 	}
-	if revision == 0 || revision != highest || highest != history {
+	if revision == 0 || revision != highest || historyMin != 1 || historyMax != highest || historyCount != highest || distinctAttempts != 1 || guardCount != 1 || historyAttempt == "" || guardAttempt != historyAttempt {
 		return turnCurrentV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_current_turn_v2", "current/history drifted", nil)
 	}
 	return turnCurrentV2{core.Revision(revision), core.Revision(highest), core.Digest(digest)}, nil
@@ -259,7 +279,51 @@ func loadTurnHistoryV2(ctx context.Context, source interface {
 	if err != nil || attempt != string(computed) {
 		return turnStoredV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_v2", "stored attempt drifted", err)
 	}
+	if err := validateTurnProjectionV2(ctx, source, outcome); err != nil {
+		return turnStoredV2{}, err
+	}
 	return turnStoredV2{outcome.CloneV2(), append(json.RawMessage(nil), payload...), computed}, nil
+}
+func validateTurnProjectionV2(ctx context.Context, source interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
+	var turnRevision, projectionRevision uint64
+	var projectionID, projectionDigest, observationDigest string
+	var payload []byte
+	err := source.QueryRowContext(ctx, `SELECT turn_revision,projection_id,projection_revision,projection_digest,observation_digest,canonical_json FROM governed_model_turn_tool_call_projection WHERE turn_id=?`, outcome.ID).Scan(&turnRevision, &projectionID, &projectionRevision, &projectionDigest, &observationDigest, &payload)
+	var expected *modelinvoker.ToolCallCandidateObservationProjectionV1
+	if outcome.State == modelinvoker.GovernedModelTurnObservedV2 && outcome.Observation != nil {
+		expected = outcome.Observation.ToolCallProjection
+	}
+	if expected == nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil
+		}
+		if err != nil {
+			return mapDBErrorV1(ctx, "inspect_turn_projection_v2", err, false)
+		}
+		if turnRevision != uint64(outcome.Revision) {
+			return nil
+		}
+		return errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_v2", "turn history has an unexpected tool-call projection", nil)
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_v2", "turn history lost its tool-call projection", nil)
+	}
+	if err != nil {
+		return mapDBErrorV1(ctx, "inspect_turn_projection_v2", err, false)
+	}
+	canonical, marshalErr := json.Marshal(expected)
+	if marshalErr != nil ||
+		turnRevision != uint64(outcome.Revision) ||
+		projectionID != expected.Ref.ID ||
+		projectionRevision != uint64(expected.Ref.Revision) ||
+		projectionDigest != string(expected.Ref.Digest) ||
+		observationDigest != string(expected.Observation.Digest) ||
+		!bytes.Equal(payload, canonical) {
+		return errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_v2", "turn history tool-call projection drifted", marshalErr)
+	}
+	return nil
 }
 func encodeTurnV2(outcome modelinvoker.GovernedModelTurnOutcomeV2) (json.RawMessage, core.Digest, error) {
 	if err := outcome.Validate(); err != nil {

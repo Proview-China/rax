@@ -2,6 +2,7 @@ package routegateway_test
 
 import (
 	"context"
+	"database/sql"
 	"reflect"
 	"strings"
 	"sync"
@@ -49,6 +50,86 @@ func TestGovernedModelTurnV2ToolCallIsAtomicAndRestartReadable(t *testing.T) {
 	projection, err := store.InspectExactGovernedModelTurnToolCallProjectionV2(context.Background(), projectionRef)
 	if err != nil || projection.Ref != projectionRef {
 		t.Fatalf("restart exact projection = %#v, %v", projection, err)
+	}
+}
+
+func TestGovernedModelTurnV2IdempotentCASRequiresExactExpectedHistory(t *testing.T) {
+	fixture := newGovernedFixtureV2(t, t.TempDir()+"/turn-v2.db", nil)
+	defer fixture.close(t)
+	current, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+	if err != nil || current.State != modelinvoker.GovernedModelTurnObservedV2 || current.Observation == nil || current.Observation.ToolCallProjection == nil {
+		t.Fatalf("governed model turn = %#v, %v", current, err)
+	}
+	forgedExpected := current.Observation.TurnRef
+	forgedExpected.Digest = core.DigestBytes([]byte("forged-never-existing-expected"))
+	if err := forgedExpected.Validate(); err != nil {
+		t.Fatalf("forged syntactically valid Expected = %#v, %v", forgedExpected, err)
+	}
+	mutation, err := fixture.store.CompareAndSwapObservedGovernedModelTurnV2(context.Background(), modelinvoker.GovernedModelTurnCASV2{
+		Expected: forgedExpected,
+		Next:     current,
+	})
+	if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorConflict || mutation.Applied {
+		t.Fatalf("forged idempotent CAS = %#v, %v", mutation, err)
+	}
+}
+
+func TestGovernedModelTurnV2ReadsRejectSplicedOwnerIndexes(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  string
+		inspect func(context.Context, *modelsqlite.Store, modelinvoker.GovernedModelTurnOutcomeV2) error
+	}{
+		{
+			name:   "history_gap",
+			mutate: `DELETE FROM governed_model_turn_history WHERE turn_id=? AND revision=2`,
+			inspect: func(ctx context.Context, store *modelsqlite.Store, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
+				_, err := store.InspectCurrentGovernedModelTurnV2(ctx, outcome.ID)
+				return err
+			},
+		},
+		{
+			name:   "attempt_guard_loss",
+			mutate: `DELETE FROM governed_model_turn_attempt_guard WHERE turn_id=?`,
+			inspect: func(ctx context.Context, store *modelsqlite.Store, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
+				_, err := store.InspectCurrentGovernedModelTurnV2(ctx, outcome.ID)
+				return err
+			},
+		},
+		{
+			name:   "tool_call_projection_loss",
+			mutate: `DELETE FROM governed_model_turn_tool_call_projection WHERE turn_id=?`,
+			inspect: func(ctx context.Context, store *modelsqlite.Store, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
+				_, err := store.InspectExactGovernedModelTurnV2(ctx, outcome.RefV2())
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := t.TempDir() + "/turn-v2.db"
+			fixture := newGovernedFixtureV2(t, path, nil)
+			defer fixture.close(t)
+			outcome, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+			if err != nil || outcome.State != modelinvoker.GovernedModelTurnObservedV2 {
+				t.Fatalf("governed model turn = %#v, %v", outcome, err)
+			}
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := db.ExecContext(context.Background(), test.mutate, outcome.ID); err != nil {
+				_ = db.Close()
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			err = test.inspect(context.Background(), fixture.store, outcome)
+			if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorConflict {
+				t.Fatalf("spliced read error = %v", err)
+			}
+		})
 	}
 }
 
@@ -196,6 +277,27 @@ func TestGovernedModelTurnV2ExpiryAndClockRegressionCallNoProvider(t *testing.T)
 	}
 }
 
+func TestGovernedModelTurnV2S3ReadsCrossTTLCallNoProvider(t *testing.T) {
+	var clock atomic.Int64
+	clock.Store(gatewayNow.UnixNano())
+	fixture := newGovernedFixtureV2Configured(t, t.TempDir()+"/turn-v2.db", []routegateway.Option{
+		routegateway.WithClock(func() time.Time { return time.Unix(0, clock.Load()) }),
+	}, func(dependencies *routegateway.GovernedModelTurnDependenciesV2) {
+		dependencies.PreparedCurrent = &advancingPreparedCurrentReaderV2{
+			inner: dependencies.PreparedCurrent,
+			at:    4,
+			advance: func() {
+				clock.Store(gatewayNow.Add(8 * time.Minute).UnixNano())
+			},
+		}
+	})
+	defer fixture.close(t)
+	result, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+	if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorIndeterminate || result.State != modelinvoker.GovernedModelTurnUnknownV2 || fixture.state.invoke.Load() != 0 {
+		t.Fatalf("S3 TTL crossing = %#v, %v provider=%d", result, err, fixture.state.invoke.Load())
+	}
+}
+
 func TestGovernedModelTurnV2ShorterAckNarrowsExpiry(t *testing.T) {
 	fixture := newGovernedFixtureV2(t, t.TempDir()+"/turn-v2.db", nil)
 	defer fixture.close(t)
@@ -267,6 +369,44 @@ func TestGovernedModelTurnV2SealersAreAtomicAndIdempotent(t *testing.T) {
 	}
 }
 
+func TestInvocationMaterialOwnerS1S2BindsEveryFullExactSourceRef(t *testing.T) {
+	fixture := newGovernedFixtureV2(t, t.TempDir()+"/turn-v2.db", nil)
+	defer fixture.close(t)
+	material, err := fixture.store.InspectExactInvocationMaterialV1(context.Background(), fixture.command.MaterialRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := fixture.store.InspectExactPreparedModelInvocationCurrentV1(context.Background(), fixture.command.CurrentRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	closure := modelinvoker.InvocationMaterialExactClosureV1{
+		ContextFrame:      material.Authorization.ContextFrameRef,
+		ToolSurface:       material.Authorization.ToolSurfaceRef,
+		ProviderInjection: material.Authorization.ProviderInjectionRef,
+		Route:             material.Authorization.RouteRef,
+		Profile:           material.Authorization.ProfileRef,
+	}
+	for _, name := range []string{"context", "tool", "provider", "route", "profile"} {
+		t.Run(name, func(t *testing.T) {
+			readers := &invocationMaterialExactReadersV2{driftRole: name}
+			authorizer, createErr := modelinvoker.NewInvocationMaterialAuthorizerV1(modelinvoker.InvocationMaterialAuthorizerConfigV1{
+				ContextFrame: readers, ToolSurface: readers, ProviderInjection: readers, Route: readers, Profile: readers,
+			})
+			if createErr != nil {
+				t.Fatal(createErr)
+			}
+			got, ensureErr := modelinvoker.AuthorizeAndEnsureInvocationMaterialV1(context.Background(), authorizer, fixture.store, fixture.prepared, current, material.Call, closure, func() time.Time { return gatewayNow })
+			if ensureErr == nil || !reflect.DeepEqual(got, modelinvoker.InvocationMaterialV1{}) {
+				t.Fatalf("S1/S2 exact %s drift accepted: %#v, %v", name, got, ensureErr)
+			}
+		})
+	}
+	if _, err := fixture.store.EnsureAuthorizedInvocationMaterialV1(context.Background(), modelinvoker.InvocationMaterialPersistRequestV1{}); err == nil {
+		t.Fatal("zero opaque persist request was accepted")
+	}
+}
+
 type governedFixtureV2 struct {
 	gateway  *routegateway.Gateway
 	store    *modelsqlite.Store
@@ -279,15 +419,23 @@ type governedFixtureV2 struct {
 }
 
 func newGovernedFixtureV2(t *testing.T, path string, options []routegateway.Option) governedFixtureV2 {
+	return newGovernedFixtureV2Configured(t, path, options, nil)
+}
+
+func newGovernedFixtureV2Configured(t *testing.T, path string, options []routegateway.Option, configure func(*routegateway.GovernedModelTurnDependenciesV2)) governedFixtureV2 {
 	t.Helper()
 	store, err := modelsqlite.Open(context.Background(), modelsqlite.Config{Path: path})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return newGovernedFixtureV2WithStore(t, store, store, options)
+	return newGovernedFixtureV2WithStoreConfigured(t, store, store, options, configure)
 }
 
 func newGovernedFixtureV2WithStore(t *testing.T, store *modelsqlite.Store, turns modelinvoker.GovernedModelTurnRepositoryV2, options []routegateway.Option) governedFixtureV2 {
+	return newGovernedFixtureV2WithStoreConfigured(t, store, turns, options, nil)
+}
+
+func newGovernedFixtureV2WithStoreConfigured(t *testing.T, store *modelsqlite.Store, turns modelinvoker.GovernedModelTurnRepositoryV2, options []routegateway.Option, configure func(*routegateway.GovernedModelTurnDependenciesV2)) governedFixtureV2 {
 	t.Helper()
 	call := governedCallV2()
 	tempState := &callState{}
@@ -335,27 +483,17 @@ func newGovernedFixtureV2WithStore(t *testing.T, store *modelsqlite.Store, turns
 	if err != nil {
 		t.Fatal(err)
 	}
-	routeCallDigest, err := modelinvoker.DigestGovernedModelTurnRouteCallV2(call)
-	if err != nil {
-		t.Fatal(err)
+	closure := modelinvoker.InvocationMaterialExactClosureV1{
+		ContextFrame:      exactSourceV2("context", "frame-v2", digestV2(t, "context", call.Request.Input)),
+		ToolSurface:       exactSourceV2("tool", "surface-v2", prepared.ActualToolSurfaceDigest),
+		ProviderInjection: exactSourceV2("model", "provider-v2", prepared.ActualProviderInjectionDigest),
+		Route:             exactSourceV2("model", "route-v2", prepared.RouteDigest),
+		Profile:           exactSourceV2("model", "profile-v2", prepared.ProfileDigest),
 	}
-	authorization, err := modelinvoker.SealInvocationMaterialAuthorizationV1(modelinvoker.InvocationMaterialAuthorizationV1{
-		PreparedRef: prepared.Ref(), CurrentRef: current.Ref(), RouteCallDigest: routeCallDigest,
-		ContextFrameRef:      exactSourceV2("context", "frame-v2", digestV2(t, "context", call.Request.Input)),
-		ToolSurfaceRef:       exactSourceV2("tool", "surface-v2", prepared.ActualToolSurfaceDigest),
-		ProviderInjectionRef: exactSourceV2("model", "provider-v2", prepared.ActualProviderInjectionDigest),
-		RouteRef:             exactSourceV2("model", "route-v2", prepared.RouteDigest),
-		ProfileRef:           exactSourceV2("model", "profile-v2", prepared.ProfileDigest),
-		AuthorizedUnixNano:   gatewayNow.UnixNano(), ExpiresUnixNano: gatewayNow.Add(7 * time.Minute).UnixNano(),
+	readers := &invocationMaterialExactReadersV2{}
+	authorizer, err := modelinvoker.NewInvocationMaterialAuthorizerV1(modelinvoker.InvocationMaterialAuthorizerConfigV1{
+		ContextFrame: readers, ToolSurface: readers, ProviderInjection: readers, Route: readers, Profile: readers,
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := authorization.ValidateAgainstV1(prepared, current, routeCallDigest, gatewayNow); err != nil {
-		t.Fatalf("authorization exact validation: %v\nprepared=%#v\ncurrent=%#v\nauthorization=%#v", err, prepared, current, authorization)
-	}
-	authorizer := fixedInvocationMaterialAuthorizerV2{authorization: authorization}
-	material, err := modelinvoker.NewInvocationMaterialV1(context.Background(), authorizer, prepared, current, call, gatewayNow)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,7 +503,8 @@ func newGovernedFixtureV2WithStore(t *testing.T, store *modelsqlite.Store, turns
 	if _, err = store.EnsurePreparedModelInvocationCurrentV1(context.Background(), current); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.EnsureInvocationMaterialV1(context.Background(), material); err != nil {
+	material, err := modelinvoker.AuthorizeAndEnsureInvocationMaterialV1(context.Background(), authorizer, store, prepared, current, call, closure, func() time.Time { return gatewayNow })
+	if err != nil {
 		t.Fatal(err)
 	}
 	state := &callState{}
@@ -373,6 +512,9 @@ func newGovernedFixtureV2WithStore(t *testing.T, store *modelsqlite.Store, turns
 	gate := &governedGateV1{ack: ack}
 	dependencies := routegateway.GovernedModelTurnDependenciesV2{
 		PreparedHistory: store, PreparedCurrent: store, CommitGate: gate, Materials: store, Turns: turns,
+	}
+	if configure != nil {
+		configure(&dependencies)
 	}
 	allOptions := append([]routegateway.Option{}, options...)
 	allOptions = append(allOptions, routegateway.WithGovernedModelTurnsV2(dependencies))
@@ -418,12 +560,66 @@ func governedCallV2() modelinvoker.RouteCall {
 	}
 }
 
-type fixedInvocationMaterialAuthorizerV2 struct {
-	authorization modelinvoker.InvocationMaterialAuthorizationV1
+type invocationMaterialExactReadersV2 struct {
+	driftRole                               string
+	context, tool, provider, route, profile atomic.Int64
 }
 
-func (authorizer fixedInvocationMaterialAuthorizerV2) AuthorizeInvocationMaterialV1(context.Context, modelinvoker.PreparedModelInvocationFactV1, modelinvoker.PreparedModelInvocationCurrentProjectionV1, modelinvoker.RouteCall, time.Time) (modelinvoker.InvocationMaterialAuthorizationV1, error) {
-	return authorizer.authorization, nil
+type advancingPreparedCurrentReaderV2 struct {
+	inner   modelinvoker.PreparedModelInvocationCurrentReaderV1
+	reads   atomic.Int64
+	at      int64
+	advance func()
+}
+
+func (reader *advancingPreparedCurrentReaderV2) InspectExactPreparedModelInvocationCurrentV1(ctx context.Context, ref modelinvoker.PreparedModelInvocationCurrentRefV1) (modelinvoker.PreparedModelInvocationCurrentProjectionV1, error) {
+	current, err := reader.inner.InspectExactPreparedModelInvocationCurrentV1(ctx, ref)
+	if err == nil && reader.reads.Add(1) == reader.at && reader.advance != nil {
+		reader.advance()
+	}
+	return current, err
+}
+
+func (readers *invocationMaterialExactReadersV2) exact(role string, calls *atomic.Int64, ref modelinvoker.InvocationMaterialExactSourceRefV1) modelinvoker.InvocationMaterialExactSourceRefV1 {
+	if calls.Add(1) == 2 && readers.driftRole == role {
+		switch role {
+		case "context":
+			ref.ID += "-drift"
+		case "tool":
+			ref.Owner.ID = core.OwnerID(string(ref.Owner.ID) + "-drift")
+		case "provider":
+			ref.Kind += "-drift"
+		case "route":
+			ref.Revision++
+		case "profile":
+			ref.ID += "-drift"
+		}
+	}
+	return ref
+}
+
+func (readers *invocationMaterialExactReadersV2) projection(role string, calls *atomic.Int64, ref modelinvoker.InvocationMaterialExactSourceRefV1) modelinvoker.InvocationMaterialExactSourceProjectionV1 {
+	return modelinvoker.InvocationMaterialExactSourceProjectionV1{
+		Ref:             readers.exact(role, calls, ref),
+		CheckedUnixNano: gatewayNow.Add(-time.Minute).UnixNano(),
+		ExpiresUnixNano: gatewayNow.Add(7 * time.Minute).UnixNano(),
+	}
+}
+
+func (readers *invocationMaterialExactReadersV2) InspectExactInvocationContextFrameV1(_ context.Context, ref modelinvoker.InvocationMaterialExactSourceRefV1) (modelinvoker.InvocationMaterialExactSourceProjectionV1, error) {
+	return readers.projection("context", &readers.context, ref), nil
+}
+func (readers *invocationMaterialExactReadersV2) InspectExactInvocationToolSurfaceV1(_ context.Context, ref modelinvoker.InvocationMaterialExactSourceRefV1) (modelinvoker.InvocationMaterialExactSourceProjectionV1, error) {
+	return readers.projection("tool", &readers.tool, ref), nil
+}
+func (readers *invocationMaterialExactReadersV2) InspectExactInvocationProviderInjectionV1(_ context.Context, ref modelinvoker.InvocationMaterialExactSourceRefV1) (modelinvoker.InvocationMaterialExactSourceProjectionV1, error) {
+	return readers.projection("provider", &readers.provider, ref), nil
+}
+func (readers *invocationMaterialExactReadersV2) InspectExactInvocationRouteV1(_ context.Context, ref modelinvoker.InvocationMaterialExactSourceRefV1) (modelinvoker.InvocationMaterialExactSourceProjectionV1, error) {
+	return readers.projection("route", &readers.route, ref), nil
+}
+func (readers *invocationMaterialExactReadersV2) InspectExactInvocationProfileV1(_ context.Context, ref modelinvoker.InvocationMaterialExactSourceRefV1) (modelinvoker.InvocationMaterialExactSourceProjectionV1, error) {
+	return readers.projection("profile", &readers.profile, ref), nil
 }
 
 func exactSourceV2(domain, id string, digest core.Digest) modelinvoker.InvocationMaterialExactSourceRefV1 {
@@ -523,7 +719,11 @@ func (repository *lostObservedReplyRepositoryV2) InspectExactGovernedModelTurnTo
 	return repository.inner.InspectExactGovernedModelTurnToolCallProjectionV2(ctx, ref)
 }
 
-var _ modelinvoker.InvocationMaterialAuthorizerV1 = fixedInvocationMaterialAuthorizerV2{}
+var _ modelinvoker.InvocationMaterialContextFrameExactReaderV1 = (*invocationMaterialExactReadersV2)(nil)
+var _ modelinvoker.InvocationMaterialToolSurfaceExactReaderV1 = (*invocationMaterialExactReadersV2)(nil)
+var _ modelinvoker.InvocationMaterialProviderInjectionExactReaderV1 = (*invocationMaterialExactReadersV2)(nil)
+var _ modelinvoker.InvocationMaterialRouteExactReaderV1 = (*invocationMaterialExactReadersV2)(nil)
+var _ modelinvoker.InvocationMaterialProfileExactReaderV1 = (*invocationMaterialExactReadersV2)(nil)
 var _ modelinvoker.GovernedModelTurnRepositoryV2 = (*lostBoundaryReplyRepositoryV2)(nil)
 var _ modelinvoker.GovernedModelTurnRepositoryV2 = (*lostObservedReplyRepositoryV2)(nil)
 var _ modelinvoker.GovernedModelTurnRepositoryV2 = (*ordinaryObservedCASRepositoryV2)(nil)

@@ -3,6 +3,8 @@ package modelinvoker
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"reflect"
 	"strings"
 	"time"
 
@@ -45,8 +47,61 @@ type InvocationMaterialAuthorizationV1 struct {
 	AuthorizedUnixNano   int64                               `json:"authorized_unix_nano"`
 	ExpiresUnixNano      int64                               `json:"expires_unix_nano"`
 }
-type InvocationMaterialAuthorizerV1 interface {
-	AuthorizeInvocationMaterialV1(context.Context, PreparedModelInvocationFactV1, PreparedModelInvocationCurrentProjectionV1, RouteCall, time.Time) (InvocationMaterialAuthorizationV1, error)
+
+type InvocationMaterialExactClosureV1 struct {
+	ContextFrame      InvocationMaterialExactSourceRefV1 `json:"context_frame"`
+	ToolSurface       InvocationMaterialExactSourceRefV1 `json:"tool_surface"`
+	ProviderInjection InvocationMaterialExactSourceRefV1 `json:"provider_injection"`
+	Route             InvocationMaterialExactSourceRefV1 `json:"route"`
+	Profile           InvocationMaterialExactSourceRefV1 `json:"profile"`
+}
+
+type InvocationMaterialExactSourceProjectionV1 struct {
+	Ref             InvocationMaterialExactSourceRefV1 `json:"ref"`
+	CheckedUnixNano int64                              `json:"checked_unix_nano"`
+	ExpiresUnixNano int64                              `json:"expires_unix_nano"`
+}
+
+func (p InvocationMaterialExactSourceProjectionV1) ValidateCurrentV1(expected InvocationMaterialExactSourceRefV1, now time.Time) error {
+	if expected.Validate() != nil || p.Ref.Validate() != nil || p.Ref != expected || p.CheckedUnixNano <= 0 || p.ExpiresUnixNano <= p.CheckedUnixNano || now.IsZero() || now.UnixNano() < p.CheckedUnixNano || !now.Before(time.Unix(0, p.ExpiresUnixNano)) {
+		return governedConflictV1("invocation material exact source is not current")
+	}
+	return nil
+}
+
+type InvocationMaterialContextFrameExactReaderV1 interface {
+	InspectExactInvocationContextFrameV1(context.Context, InvocationMaterialExactSourceRefV1) (InvocationMaterialExactSourceProjectionV1, error)
+}
+type InvocationMaterialToolSurfaceExactReaderV1 interface {
+	InspectExactInvocationToolSurfaceV1(context.Context, InvocationMaterialExactSourceRefV1) (InvocationMaterialExactSourceProjectionV1, error)
+}
+type InvocationMaterialProviderInjectionExactReaderV1 interface {
+	InspectExactInvocationProviderInjectionV1(context.Context, InvocationMaterialExactSourceRefV1) (InvocationMaterialExactSourceProjectionV1, error)
+}
+type InvocationMaterialRouteExactReaderV1 interface {
+	InspectExactInvocationRouteV1(context.Context, InvocationMaterialExactSourceRefV1) (InvocationMaterialExactSourceProjectionV1, error)
+}
+type InvocationMaterialProfileExactReaderV1 interface {
+	InspectExactInvocationProfileV1(context.Context, InvocationMaterialExactSourceRefV1) (InvocationMaterialExactSourceProjectionV1, error)
+}
+
+type InvocationMaterialAuthorizerConfigV1 struct {
+	ContextFrame      InvocationMaterialContextFrameExactReaderV1
+	ToolSurface       InvocationMaterialToolSurfaceExactReaderV1
+	ProviderInjection InvocationMaterialProviderInjectionExactReaderV1
+	Route             InvocationMaterialRouteExactReaderV1
+	Profile           InvocationMaterialProfileExactReaderV1
+}
+
+type InvocationMaterialAuthorizerV1 struct {
+	config InvocationMaterialAuthorizerConfigV1
+}
+
+func NewInvocationMaterialAuthorizerV1(config InvocationMaterialAuthorizerConfigV1) (*InvocationMaterialAuthorizerV1, error) {
+	if nilLikeInvocationMaterialV1(config.ContextFrame) || nilLikeInvocationMaterialV1(config.ToolSurface) || nilLikeInvocationMaterialV1(config.ProviderInjection) || nilLikeInvocationMaterialV1(config.Route) || nilLikeInvocationMaterialV1(config.Profile) {
+		return nil, governedInvalidV1("invocation material Authorizer requires five exact owner readers")
+	}
+	return &InvocationMaterialAuthorizerV1{config: config}, nil
 }
 
 func (r InvocationMaterialExactSourceRefV1) Validate() error {
@@ -54,6 +109,97 @@ func (r InvocationMaterialExactSourceRefV1) Validate() error {
 		return governedInvalidV1("invocation material exact source Ref is invalid")
 	}
 	return nil
+}
+func (c InvocationMaterialExactClosureV1) ValidateAgainstPreparedV1(prepared PreparedModelInvocationFactV1) error {
+	for _, ref := range []InvocationMaterialExactSourceRefV1{c.ContextFrame, c.ToolSurface, c.ProviderInjection, c.Route, c.Profile} {
+		if ref.Validate() != nil {
+			return governedInvalidV1("invocation material exact closure Ref is invalid")
+		}
+	}
+	if prepared.Validate() != nil ||
+		c.ToolSurface.Digest != prepared.ActualToolSurfaceDigest ||
+		c.ProviderInjection.Digest != prepared.ActualProviderInjectionDigest ||
+		c.Route.Digest != prepared.RouteDigest ||
+		c.Profile.Digest != prepared.ProfileDigest {
+		return governedConflictV1("invocation material exact closure differs from Prepared")
+	}
+	return nil
+}
+
+func (a *InvocationMaterialAuthorizerV1) authorizeV1(ctx context.Context, prepared PreparedModelInvocationFactV1, current PreparedModelInvocationCurrentProjectionV1, call RouteCall, expected InvocationMaterialExactClosureV1, now time.Time) (InvocationMaterialAuthorizationV1, error) {
+	if a == nil || nilLikeInvocationMaterialV1(a.config.ContextFrame) || nilLikeInvocationMaterialV1(a.config.ToolSurface) || nilLikeInvocationMaterialV1(a.config.ProviderInjection) || nilLikeInvocationMaterialV1(a.config.Route) || nilLikeInvocationMaterialV1(a.config.Profile) || ctx == nil || ctx.Err() != nil || now.IsZero() || expected.ValidateAgainstPreparedV1(prepared) != nil || current.ValidateAgainstFact(prepared) != nil || current.ValidateCurrent(current.Ref(), now) != nil {
+		return InvocationMaterialAuthorizationV1{}, governedInvalidV1("invocation material Authorizer input is invalid")
+	}
+	contextFrame, err := a.config.ContextFrame.InspectExactInvocationContextFrameV1(ctx, expected.ContextFrame)
+	if err != nil || contextFrame.ValidateCurrentV1(expected.ContextFrame, now) != nil {
+		if err == nil {
+			err = governedConflictV1("invocation material ContextFrame source is not current")
+		}
+		return InvocationMaterialAuthorizationV1{}, err
+	}
+	toolSurface, err := a.config.ToolSurface.InspectExactInvocationToolSurfaceV1(ctx, expected.ToolSurface)
+	if err != nil || toolSurface.ValidateCurrentV1(expected.ToolSurface, now) != nil {
+		if err == nil {
+			err = governedConflictV1("invocation material ToolSurface source is not current")
+		}
+		return InvocationMaterialAuthorizationV1{}, err
+	}
+	providerInjection, err := a.config.ProviderInjection.InspectExactInvocationProviderInjectionV1(ctx, expected.ProviderInjection)
+	if err != nil || providerInjection.ValidateCurrentV1(expected.ProviderInjection, now) != nil {
+		if err == nil {
+			err = governedConflictV1("invocation material ProviderInjection source is not current")
+		}
+		return InvocationMaterialAuthorizationV1{}, err
+	}
+	route, err := a.config.Route.InspectExactInvocationRouteV1(ctx, expected.Route)
+	if err != nil || route.ValidateCurrentV1(expected.Route, now) != nil {
+		if err == nil {
+			err = governedConflictV1("invocation material Route source is not current")
+		}
+		return InvocationMaterialAuthorizationV1{}, err
+	}
+	profile, err := a.config.Profile.InspectExactInvocationProfileV1(ctx, expected.Profile)
+	if err != nil || profile.ValidateCurrentV1(expected.Profile, now) != nil {
+		if err == nil {
+			err = governedConflictV1("invocation material Profile source is not current")
+		}
+		return InvocationMaterialAuthorizationV1{}, err
+	}
+	observed := InvocationMaterialExactClosureV1{ContextFrame: contextFrame.Ref, ToolSurface: toolSurface.Ref, ProviderInjection: providerInjection.Ref, Route: route.Ref, Profile: profile.Ref}
+	if observed != expected || observed.ValidateAgainstPreparedV1(prepared) != nil {
+		return InvocationMaterialAuthorizationV1{}, governedConflictV1("invocation material exact owner reader drifted")
+	}
+	routeCallDigest, err := DigestGovernedModelTurnRouteCallV2(call)
+	if err != nil {
+		return InvocationMaterialAuthorizationV1{}, err
+	}
+	return SealInvocationMaterialAuthorizationV1(InvocationMaterialAuthorizationV1{
+		PreparedRef: prepared.Ref(), CurrentRef: current.Ref(), RouteCallDigest: routeCallDigest,
+		ContextFrameRef: contextFrame.Ref, ToolSurfaceRef: toolSurface.Ref, ProviderInjectionRef: providerInjection.Ref, RouteRef: route.Ref, ProfileRef: profile.Ref,
+		AuthorizedUnixNano: now.UnixNano(),
+		ExpiresUnixNano: minTimeUnixNanoMaterialV1(
+			prepared.NotAfterUnixNano,
+			current.ExpiresUnixNano,
+			contextFrame.ExpiresUnixNano,
+			toolSurface.ExpiresUnixNano,
+			providerInjection.ExpiresUnixNano,
+			route.ExpiresUnixNano,
+			profile.ExpiresUnixNano,
+		),
+	})
+}
+
+func nilLikeInvocationMaterialV1(value any) bool {
+	if value == nil {
+		return true
+	}
+	rv := reflect.ValueOf(value)
+	switch rv.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return rv.IsNil()
+	default:
+		return false
+	}
 }
 func (a InvocationMaterialAuthorizationV1) RefV1() InvocationMaterialAuthorizationRefV1 {
 	return InvocationMaterialAuthorizationRefV1{ContractVersion: a.ContractVersion, ID: a.ID, Revision: a.Revision, Digest: a.Digest, PreparedRef: a.PreparedRef, CurrentRef: a.CurrentRef, RouteCallDigest: a.RouteCallDigest}
@@ -156,11 +302,33 @@ type InvocationMaterialV1 struct {
 }
 
 type InvocationMaterialRepositoryV1 interface {
-	EnsureInvocationMaterialV1(context.Context, InvocationMaterialV1) (InvocationMaterialV1, error)
-	InspectExactInvocationMaterialV1(context.Context, InvocationMaterialRefV1) (InvocationMaterialV1, error)
+	InvocationMaterialReaderV1
+	EnsureAuthorizedInvocationMaterialV1(context.Context, InvocationMaterialPersistRequestV1) (InvocationMaterialV1, error)
 }
 type InvocationMaterialReaderV1 interface {
 	InspectExactInvocationMaterialV1(context.Context, InvocationMaterialRefV1) (InvocationMaterialV1, error)
+}
+
+// InvocationMaterialPersistRequestV1 is an opaque Model Owner write token.
+// Callers cannot construct a valid value or persist a raw material directly;
+// AuthorizeAndEnsureInvocationMaterialV1 is the sole constructor.
+type InvocationMaterialPersistRequestV1 struct {
+	material      InvocationMaterialV1
+	authorization InvocationMaterialAuthorizationV1
+}
+
+func (r InvocationMaterialPersistRequestV1) ValidateV1() error {
+	if err := r.material.Validate(); err != nil {
+		return err
+	}
+	if err := r.authorization.Validate(); err != nil || r.material.Authorization != r.authorization {
+		return governedConflictV1("invocation material persist request lacks the exact owner authorization")
+	}
+	return nil
+}
+
+func (r InvocationMaterialPersistRequestV1) MaterialV1() InvocationMaterialV1 {
+	return r.material.CloneV1()
 }
 
 func (m InvocationMaterialV1) RefV1() InvocationMaterialRefV1 {
@@ -293,8 +461,8 @@ func SealInvocationMaterialV1(m InvocationMaterialV1) (InvocationMaterialV1, err
 	}
 	return m, nil
 }
-func NewInvocationMaterialV1(ctx context.Context, authorizer InvocationMaterialAuthorizerV1, prepared PreparedModelInvocationFactV1, current PreparedModelInvocationCurrentProjectionV1, call RouteCall, now time.Time) (InvocationMaterialV1, error) {
-	if ctx == nil || ctx.Err() != nil || authorizer == nil || now.IsZero() || prepared.Validate() != nil || current.ValidateAgainstFact(prepared) != nil || current.ValidateCurrent(current.Ref(), now) != nil {
+func AuthorizeAndEnsureInvocationMaterialV1(ctx context.Context, authorizer *InvocationMaterialAuthorizerV1, repository InvocationMaterialRepositoryV1, prepared PreparedModelInvocationFactV1, current PreparedModelInvocationCurrentProjectionV1, call RouteCall, closure InvocationMaterialExactClosureV1, clock func() time.Time) (InvocationMaterialV1, error) {
+	if ctx == nil || ctx.Err() != nil || authorizer == nil || repository == nil || clock == nil || prepared.Validate() != nil || current.ValidateAgainstFact(prepared) != nil || closure.ValidateAgainstPreparedV1(prepared) != nil {
 		return InvocationMaterialV1{}, governedInvalidV1("invocation material clock or Prepared fact is invalid")
 	}
 	var err error
@@ -302,7 +470,11 @@ func NewInvocationMaterialV1(ctx context.Context, authorizer InvocationMaterialA
 	if err != nil {
 		return InvocationMaterialV1{}, err
 	}
-	authorization, err := authorizer.AuthorizeInvocationMaterialV1(ctx, prepared, current, call, now)
+	s1 := clock()
+	if s1.IsZero() || current.ValidateCurrent(current.Ref(), s1) != nil {
+		return InvocationMaterialV1{}, governedConflictV1("invocation material S1 is not current")
+	}
+	authorizationS1, err := authorizer.authorizeV1(ctx, prepared.Clone(), current.Clone(), call, closure, s1)
 	if err != nil {
 		return InvocationMaterialV1{}, err
 	}
@@ -310,19 +482,67 @@ func NewInvocationMaterialV1(ctx context.Context, authorizer InvocationMaterialA
 	if err != nil {
 		return InvocationMaterialV1{}, err
 	}
-	if err := authorization.ValidateAgainstV1(prepared, current, routeCallDigest, now); err != nil {
+	if err := authorizationS1.ValidateAgainstV1(prepared, current, routeCallDigest, s1); err != nil {
 		return InvocationMaterialV1{}, &GovernedModelInvocationErrorV1{
 			Kind:      GovernedModelInvocationErrorConflict,
 			Operation: "new_invocation_material",
-			Message:   "invocation material owner authorization is not exact",
+			Message:   "invocation material owner S1 authorization is not exact",
 			Err:       err,
 		}
+	}
+	s2 := clock()
+	if s2.IsZero() || s2.Before(s1) || current.ValidateCurrent(current.Ref(), s2) != nil {
+		return InvocationMaterialV1{}, governedConflictV1("invocation material S2 is not current")
+	}
+	authorizationS2, err := authorizer.authorizeV1(ctx, prepared.Clone(), current.Clone(), call, closure, s2)
+	if err != nil {
+		return InvocationMaterialV1{}, err
+	}
+	if err := authorizationS2.ValidateAgainstV1(prepared, current, routeCallDigest, s2); err != nil {
+		return InvocationMaterialV1{}, &GovernedModelInvocationErrorV1{Kind: GovernedModelInvocationErrorConflict, Operation: "new_invocation_material", Message: "invocation material owner S2 authorization is not exact", Err: err}
+	}
+	if !sameInvocationMaterialAuthorizationClosureV1(authorizationS1, authorizationS2) || authorizationS2.AuthorizedUnixNano < authorizationS1.AuthorizedUnixNano || authorizationS2.ExpiresUnixNano > authorizationS1.ExpiresUnixNano {
+		return InvocationMaterialV1{}, governedConflictV1("invocation material exact authorization drifted between S1 and S2")
+	}
+	sealedAt := clock()
+	if sealedAt.IsZero() || sealedAt.Before(s2) || current.ValidateCurrent(current.Ref(), sealedAt) != nil || !sealedAt.Before(time.Unix(0, authorizationS2.ExpiresUnixNano)) {
+		return InvocationMaterialV1{}, governedConflictV1("invocation material owner seal crossed current TTL")
 	}
 	model, budget, choice, consumer, err := invocationMaterialComponentDigestsV1(call)
 	if err != nil {
 		return InvocationMaterialV1{}, err
 	}
-	return SealInvocationMaterialV1(InvocationMaterialV1{PreparedRef: prepared.Ref(), Authorization: authorization, Call: call, UnifiedRequestDigest: prepared.UnifiedRequestDigest, PreparedPlanDigest: prepared.PreparedPlanDigest, RouteDigest: prepared.RouteDigest, ProfileDigest: prepared.ProfileDigest, ModelDigest: model, BudgetDigest: budget, ToolChoiceDigest: choice, ConsumerBindingDigest: consumer, CreatedUnixNano: now.UnixNano(), ExpiresUnixNano: minTimeUnixNanoMaterialV1(prepared.NotAfterUnixNano, current.ExpiresUnixNano, authorization.ExpiresUnixNano)})
+	material, err := SealInvocationMaterialV1(InvocationMaterialV1{PreparedRef: prepared.Ref(), Authorization: authorizationS2, Call: call, UnifiedRequestDigest: prepared.UnifiedRequestDigest, PreparedPlanDigest: prepared.PreparedPlanDigest, RouteDigest: prepared.RouteDigest, ProfileDigest: prepared.ProfileDigest, ModelDigest: model, BudgetDigest: budget, ToolChoiceDigest: choice, ConsumerBindingDigest: consumer, CreatedUnixNano: sealedAt.UnixNano(), ExpiresUnixNano: minTimeUnixNanoMaterialV1(prepared.NotAfterUnixNano, current.ExpiresUnixNano, authorizationS2.ExpiresUnixNano)})
+	if err != nil {
+		return InvocationMaterialV1{}, err
+	}
+	request := InvocationMaterialPersistRequestV1{material: material, authorization: authorizationS2}
+	ensured, err := repository.EnsureAuthorizedInvocationMaterialV1(ctx, request)
+	if err != nil {
+		if GovernedModelInvocationErrorKindOfV1(err) != GovernedModelInvocationErrorIndeterminate {
+			return InvocationMaterialV1{}, err
+		}
+		recovered, inspectErr := repository.InspectExactInvocationMaterialV1(context.WithoutCancel(ctx), material.RefV1())
+		if inspectErr != nil {
+			return InvocationMaterialV1{}, errors.Join(err, inspectErr)
+		}
+		ensured = recovered
+	}
+	if ensured.RefV1() != material.RefV1() || !reflect.DeepEqual(ensured, material) {
+		return InvocationMaterialV1{}, governedConflictV1("invocation material repository returned different canonical content")
+	}
+	return ensured.CloneV1(), nil
+}
+
+func sameInvocationMaterialAuthorizationClosureV1(left, right InvocationMaterialAuthorizationV1) bool {
+	return left.PreparedRef == right.PreparedRef &&
+		left.CurrentRef == right.CurrentRef &&
+		left.RouteCallDigest == right.RouteCallDigest &&
+		left.ContextFrameRef == right.ContextFrameRef &&
+		left.ToolSurfaceRef == right.ToolSurfaceRef &&
+		left.ProviderInjectionRef == right.ProviderInjectionRef &&
+		left.RouteRef == right.RouteRef &&
+		left.ProfileRef == right.ProfileRef
 }
 func DigestGovernedModelTurnRouteCallV2(call RouteCall) (core.Digest, error) {
 	if strings.TrimSpace(string(call.RouteID)) == "" || call.Invocation == (upstream.InvocationContext{}) || call.EntitlementState != nil || strings.TrimSpace(call.Request.Model) == "" || len(call.Request.Input) == 0 || call.Request.Stream || call.Request.Provider != "" || call.Request.Protocol != ProtocolAuto || strings.TrimSpace(call.Request.Endpoint) != "" || call.Request.State != nil || len(call.Request.ProviderOptions) != 0 {

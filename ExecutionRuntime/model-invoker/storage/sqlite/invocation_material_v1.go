@@ -9,13 +9,14 @@ import (
 	modelinvoker "github.com/Proview-China/rax/ExecutionRuntime/model-invoker"
 )
 
-func (s *Store) EnsureInvocationMaterialV1(ctx context.Context, material modelinvoker.InvocationMaterialV1) (modelinvoker.InvocationMaterialV1, error) {
+func (s *Store) EnsureAuthorizedInvocationMaterialV1(ctx context.Context, request modelinvoker.InvocationMaterialPersistRequestV1) (modelinvoker.InvocationMaterialV1, error) {
 	if err := contextErrorV1(ctx, "ensure_invocation_material"); err != nil {
 		return modelinvoker.InvocationMaterialV1{}, err
 	}
-	if err := material.Validate(); err != nil {
+	if err := request.ValidateV1(); err != nil {
 		return modelinvoker.InvocationMaterialV1{}, err
 	}
+	material := request.MaterialV1()
 	wire, err := modelinvoker.EncodeInvocationMaterialV1(material)
 	if err != nil {
 		return modelinvoker.InvocationMaterialV1{}, errorV1(modelinvoker.GovernedModelInvocationErrorInvalid, "ensure_invocation_material", "material cannot be encoded", err)

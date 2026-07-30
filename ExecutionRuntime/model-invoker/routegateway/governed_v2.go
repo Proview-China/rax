@@ -163,6 +163,18 @@ func (g *Gateway) StartOrInspectGovernedModelTurnV2(ctx context.Context, command
 	if historical3.Ref() != historical2.Ref() || current3.Ref() != current2.Ref() || material3.RefV1() != material2.RefV1() || ack3.Ref() != ack2.Ref() || current3.ValidateCurrent(command.CurrentRef, physical) != nil || ack3.ValidateCurrent(current3, physical) != nil {
 		return g.finishGovernedTurnAfterBoundaryV2(context.WithoutCancel(ctx), boundary, "physical_owner_drift", physical, nil)
 	}
+	actualPoint := g.now()
+	if actualPoint.IsZero() || actualPoint.Before(physical) ||
+		!actualPoint.Before(time.Unix(0, boundary.ExpiresUnixNano)) ||
+		current3.ValidateCurrent(command.CurrentRef, actualPoint) != nil ||
+		material3.ValidateAgainstPreparedV1(historical3, current3, actualPoint) != nil ||
+		ack3.ValidateCurrent(current3, actualPoint) != nil ||
+		historical3.RouteDigest != material3.RouteDigest ||
+		historical3.ProfileDigest != material3.ProfileDigest ||
+		material3.Call.Request.Model != preparedProvider.request.Model ||
+		actualRouteDigest != material3.RouteDigest {
+		return g.finishGovernedTurnAfterBoundaryV2(context.WithoutCancel(ctx), boundary, "actual_point_s3_not_current", actualPoint, nil)
+	}
 	invokeResult, invokeErr := g.invokePrepared(ctx, preparedProvider)
 	release = false
 	if invokeErr != nil {

@@ -124,10 +124,15 @@ func (s *Store) InspectExactPreparedModelInvocationCurrentV1(ctx context.Context
 	if err := ref.Validate(); err != nil {
 		return modelinvoker.PreparedModelInvocationCurrentProjectionV1{}, preparedStoreError(modelinvoker.PreparedModelInvocationRepositoryErrorInvalid, "inspect_current", "ref is invalid", err)
 	}
-	var digest, preparedID, preparedDigest string
+	var digest, preparedID, preparedDigest, historicalDigest string
 	var revision, preparedRevision uint64
 	var payload []byte
-	err := s.db.QueryRowContext(ctx, `SELECT revision,current_digest,prepared_id,prepared_revision,prepared_digest,canonical_json FROM prepared_model_invocation_current WHERE current_id=?`, ref.ID).Scan(&revision, &digest, &preparedID, &preparedRevision, &preparedDigest, &payload)
+	err := s.db.QueryRowContext(ctx, `
+SELECT c.revision,c.current_digest,c.prepared_id,c.prepared_revision,c.prepared_digest,c.canonical_json,h.fact_digest
+FROM prepared_model_invocation_current c
+JOIN prepared_model_invocation_history h
+  ON h.prepared_id=c.prepared_id AND h.revision=c.prepared_revision
+WHERE c.current_id=?`, ref.ID).Scan(&revision, &digest, &preparedID, &preparedRevision, &preparedDigest, &payload, &historicalDigest)
 	if errors.Is(err, sql.ErrNoRows) {
 		return modelinvoker.PreparedModelInvocationCurrentProjectionV1{}, preparedStoreError(modelinvoker.PreparedModelInvocationRepositoryErrorAuthoritativeAbsent, "inspect_current", "exact current is absent", nil)
 	}
@@ -135,7 +140,7 @@ func (s *Store) InspectExactPreparedModelInvocationCurrentV1(ctx context.Context
 		return modelinvoker.PreparedModelInvocationCurrentProjectionV1{}, preparedStoreError(modelinvoker.PreparedModelInvocationRepositoryErrorRetentionUnreadable, "inspect_current", "current is unreadable", err)
 	}
 	var current modelinvoker.PreparedModelInvocationCurrentProjectionV1
-	if err := core.DecodeStrictJSON(payload, &current); err != nil || current.Validate() != nil || current.Ref() != ref || revision != uint64(ref.Revision) || digest != string(ref.Digest) || preparedID != ref.Prepared.ID || preparedRevision != uint64(ref.Prepared.Revision) || preparedDigest != string(ref.Prepared.Digest) {
+	if err := core.DecodeStrictJSON(payload, &current); err != nil || current.Validate() != nil || current.Ref() != ref || revision != uint64(ref.Revision) || digest != string(ref.Digest) || preparedID != ref.Prepared.ID || preparedRevision != uint64(ref.Prepared.Revision) || preparedDigest != string(ref.Prepared.Digest) || historicalDigest != preparedDigest {
 		return modelinvoker.PreparedModelInvocationCurrentProjectionV1{}, preparedStoreError(modelinvoker.PreparedModelInvocationRepositoryErrorConflict, "inspect_current", "stored current failed exact revalidation", err)
 	}
 	return current.Clone(), nil
