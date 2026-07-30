@@ -10,6 +10,7 @@ import (
 
 	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
+	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
 
 const (
@@ -205,6 +206,7 @@ type DispatchRequestV1 struct {
 	TenantID                  string                  `json:"tenant_id"`
 	ProviderBinding           ProviderBindingV1       `json:"provider_binding"`
 	SandboxAttempt            ExactRefV1              `json:"sandbox_attempt"`
+	SandboxProjection         *SandboxProjectionRefV1 `json:"sandbox_projection,omitempty"`
 	ExecutionBinding          ExecutionBindingV1      `json:"execution_binding"`
 	RuntimeEnforcement        RuntimeEnforcementRefV1 `json:"runtime_enforcement"`
 	RuntimeCurrentQuery       json.RawMessage         `json:"runtime_current_query"`
@@ -323,13 +325,14 @@ type ProviderReceiptV1 struct {
 }
 
 type DispatchInput struct {
-	RequestID         string
-	Current           runtimeports.CurrentOperationDispatchEnforcementV4
-	EffectKind        string
-	PayloadSchema     string
-	PayloadRevision   uint64
-	Payload           ProviderPayloadV1
-	RequestedNotAfter time.Time
+	RequestID            string
+	Current              runtimeports.CurrentOperationDispatchEnforcementV4
+	WorkspaceReadCurrent *sandboxports.WorkspaceReadCurrentQueryV1
+	EffectKind           string
+	PayloadSchema        string
+	PayloadRevision      uint64
+	Payload              ProviderPayloadV1
+	RequestedNotAfter    time.Time
 }
 
 func NewContainerPayload(value ContainerPayloadV1) (ProviderPayloadV1, error) {
@@ -520,7 +523,7 @@ func NewDispatchRequestV1(input DispatchInput) (DispatchRequestV1, error) {
 	if err != nil {
 		return DispatchRequestV1{}, err
 	}
-	query := runtimeports.InspectCurrentOperationDispatchEnforcementRequestV4{
+	runtimeQuery := runtimeports.InspectCurrentOperationDispatchEnforcementRequestV4{
 		Inspect: runtimeports.InspectOperationDispatchEnforcementRequestV4{
 			Operation: input.Current.Sandbox.Operation,
 			EffectID:  input.Current.Sandbox.EffectID,
@@ -533,10 +536,23 @@ func NewDispatchRequestV1(input DispatchInput) (DispatchRequestV1, error) {
 		SandboxAttempt:          input.Current.Phase.SandboxAttempt,
 		SandboxProjectionDigest: input.Current.Sandbox.ProjectionDigest,
 	}
-	if err := query.Validate(); err != nil {
+	if err := runtimeQuery.Validate(); err != nil {
 		return DispatchRequestV1{}, fmt.Errorf("runtime current query: %w", err)
 	}
-	queryJSON, err := json.Marshal(query)
+	var currentQuery any = runtimeQuery
+	if input.WorkspaceReadCurrent != nil {
+		if input.Payload.ProviderKind != "workspace_read" {
+			return DispatchRequestV1{}, errors.New("workspace read exact current query is forbidden for another Provider payload")
+		}
+		if err := input.WorkspaceReadCurrent.Validate(); err != nil {
+			return DispatchRequestV1{}, fmt.Errorf("workspace read exact current query: %w", err)
+		}
+		if input.WorkspaceReadCurrent.RuntimeInspect != runtimeQuery {
+			return DispatchRequestV1{}, errors.New("workspace read exact current query drifted from Runtime current")
+		}
+		currentQuery = *input.WorkspaceReadCurrent
+	}
+	queryJSON, err := json.Marshal(currentQuery)
 	if err != nil {
 		return DispatchRequestV1{}, err
 	}
@@ -569,6 +585,13 @@ func NewDispatchRequestV1(input DispatchInput) (DispatchRequestV1, error) {
 		PayloadRevision:           input.PayloadRevision,
 		Payload:                   input.Payload,
 	}
+	if input.Payload.ProviderKind == "workspace_read" {
+		request.SandboxProjection = &SandboxProjectionRefV1{
+			Revision:        uint64(input.Current.Sandbox.ProjectionRevision),
+			Digest:          string(input.Current.Sandbox.ProjectionDigest),
+			ExpiresUnixNano: input.Current.Sandbox.ExpiresUnixNano,
+		}
+	}
 	request.RuntimeCurrentQueryDigest, err = canonicalDigest("RuntimeCurrentQueryV1", json.RawMessage(queryJSON))
 	if err != nil {
 		return DispatchRequestV1{}, err
@@ -585,7 +608,7 @@ func NewDispatchRequestV1(input DispatchInput) (DispatchRequestV1, error) {
 	if err != nil {
 		return DispatchRequestV1{}, err
 	}
-	return request, request.ValidateCurrent(time.Now())
+	return request, request.Validate()
 }
 
 func validateProviderPayloadBinding(expectedSchema runtimeports.SchemaRefV2, expectedDigest runtimecore.Digest, expectedRevision runtimecore.Revision, schema, digest string, revision uint64) error {
@@ -595,7 +618,7 @@ func validateProviderPayloadBinding(expectedSchema runtimeports.SchemaRefV2, exp
 	return nil
 }
 
-func (r DispatchRequestV1) ValidateCurrent(now time.Time) error {
+func (r DispatchRequestV1) Validate() error {
 	if r.ContractVersion != ContractVersionV1 || strings.TrimSpace(r.RequestID) == "" || !validEffectKind(r.EffectKind) || strings.TrimSpace(r.EffectID) == "" || strings.TrimSpace(r.AttemptID) == "" || strings.TrimSpace(r.TenantID) == "" || r.IntentRevision == 0 || r.PayloadRevision == 0 || strings.TrimSpace(r.PayloadSchema) == "" {
 		return errors.New("data plane dispatch identity is incomplete")
 	}
@@ -604,8 +627,8 @@ func (r DispatchRequestV1) ValidateCurrent(now time.Time) error {
 			return errors.New("data plane dispatch digest is invalid")
 		}
 	}
-	if now.IsZero() || !now.Before(time.Unix(0, r.RequestedNotAfterUnixNano)) || !now.Before(time.Unix(0, r.SandboxAttempt.ExpiresUnixNano)) || !now.Before(time.Unix(0, r.RuntimeEnforcement.ExpiresUnixNano)) {
-		return errors.New("data plane dispatch is expired")
+	if r.RequestedNotAfterUnixNano <= 0 || r.SandboxAttempt.ExpiresUnixNano <= 0 || r.RuntimeEnforcement.ExpiresUnixNano <= 0 {
+		return errors.New("data plane dispatch expiry is incomplete")
 	}
 	if r.RuntimeEnforcement.OperationDigest != r.OperationDigest || r.RuntimeEnforcement.EffectID != r.EffectID || r.RuntimeEnforcement.AttemptID != r.AttemptID || r.RuntimeEnforcement.Phase != r.Phase {
 		return errors.New("runtime enforcement ref drifted from dispatch")
@@ -613,10 +636,15 @@ func (r DispatchRequestV1) ValidateCurrent(now time.Time) error {
 	if r.SandboxAttempt.ID != r.AttemptID || r.SandboxAttempt.Revision == 0 || !validDigest(r.SandboxAttempt.Digest) {
 		return errors.New("sandbox attempt exact ref drifted")
 	}
-	if r.ExecutionBinding.TenantID != r.TenantID || r.ExecutionBinding.InstanceID == "" || r.ExecutionBinding.LeaseID == "" || r.ExecutionBinding.InstanceEpoch == 0 || r.ExecutionBinding.LeaseEpoch == 0 || r.ExecutionBinding.FenceEpoch == 0 || r.ExecutionBinding.ObservedRevision == 0 || !validDigest(r.ExecutionBinding.ScopeDigest) || !now.Before(time.Unix(0, r.ExecutionBinding.ExpiresUnixNano)) {
-		return errors.New("execution binding is incomplete, expired, or drifted")
+	if r.Payload.ProviderKind == "workspace_read" {
+		if r.SandboxProjection == nil || r.SandboxProjection.Revision == 0 || !validDigest(r.SandboxProjection.Digest) || r.SandboxProjection.ExpiresUnixNano <= 0 {
+			return errors.New("workspace read sandbox projection exact ref is incomplete")
+		}
 	}
-	if err := validateInspectionTarget(r.EffectKind, r.TenantID, r.Payload, now); err != nil {
+	if r.ExecutionBinding.TenantID != r.TenantID || r.ExecutionBinding.InstanceID == "" || r.ExecutionBinding.LeaseID == "" || r.ExecutionBinding.InstanceEpoch == 0 || r.ExecutionBinding.LeaseEpoch == 0 || r.ExecutionBinding.FenceEpoch == 0 || r.ExecutionBinding.ObservedRevision == 0 || !validDigest(r.ExecutionBinding.ScopeDigest) || r.ExecutionBinding.ExpiresUnixNano <= 0 {
+		return errors.New("execution binding is incomplete or drifted")
+	}
+	if err := validateInspectionTargetShape(r.EffectKind, r.TenantID, r.Payload); err != nil {
 		return err
 	}
 	queryDigest, err := canonicalDigest("RuntimeCurrentQueryV1", json.RawMessage(r.RuntimeCurrentQuery))
@@ -634,7 +662,29 @@ func (r DispatchRequestV1) ValidateCurrent(now time.Time) error {
 	return nil
 }
 
-func validateInspectionTarget(effectKind, tenantID string, payload ProviderPayloadV1, now time.Time) error {
+func (r DispatchRequestV1) ValidateCurrent(now time.Time) error {
+	if err := r.Validate(); err != nil {
+		return err
+	}
+	if now.IsZero() ||
+		!now.Before(time.Unix(0, r.RequestedNotAfterUnixNano)) ||
+		!now.Before(time.Unix(0, r.SandboxAttempt.ExpiresUnixNano)) ||
+		!now.Before(time.Unix(0, r.RuntimeEnforcement.ExpiresUnixNano)) ||
+		r.SandboxProjection != nil && !now.Before(time.Unix(0, r.SandboxProjection.ExpiresUnixNano)) ||
+		!now.Before(time.Unix(0, r.ExecutionBinding.ExpiresUnixNano)) {
+		return errors.New("data plane dispatch is expired")
+	}
+	target, err := r.Payload.InspectionTarget()
+	if err != nil {
+		return err
+	}
+	if target != nil && !now.Before(time.Unix(0, target.ProviderAttempt.ExpiresUnixNano)) {
+		return errors.New("inspection target is expired")
+	}
+	return nil
+}
+
+func validateInspectionTargetShape(effectKind, tenantID string, payload ProviderPayloadV1) error {
 	target, err := payload.InspectionTarget()
 	if err != nil {
 		return err
@@ -652,8 +702,8 @@ func validateInspectionTarget(effectKind, tenantID string, payload ProviderPaylo
 	if !inspectableOriginalEffectKind(target.OriginalEffectKind) {
 		return errors.New("inspection target effect is unsupported")
 	}
-	if strings.TrimSpace(target.OriginalAttemptID) == "" || target.ProviderAttempt.Revision != 2 || !validDigest(target.ProviderAttempt.Digest) || !now.Before(time.Unix(0, target.ProviderAttempt.ExpiresUnixNano)) || !validDigest(target.OriginalRequestDigest) || !validDigest(target.OriginalPayloadDigest) {
-		return errors.New("inspection target exact coordinates are incomplete or expired")
+	if strings.TrimSpace(target.OriginalAttemptID) == "" || target.ProviderAttempt.Revision != 2 || !validDigest(target.ProviderAttempt.Digest) || target.ProviderAttempt.ExpiresUnixNano <= 0 || !validDigest(target.OriginalRequestDigest) || !validDigest(target.OriginalPayloadDigest) {
+		return errors.New("inspection target exact coordinates are incomplete")
 	}
 	providerName := "containerd"
 	if payload.ProviderKind == "host_workspace" {
@@ -669,6 +719,20 @@ func validateInspectionTarget(effectKind, tenantID string, payload ProviderPaylo
 	}
 	if target.ProviderAttempt.ID != providerName+"/"+tenantID+"/"+target.OriginalAttemptID {
 		return errors.New("inspection target provider attempt identity drifted")
+	}
+	return nil
+}
+
+func validateInspectionTarget(effectKind, tenantID string, payload ProviderPayloadV1, now time.Time) error {
+	if err := validateInspectionTargetShape(effectKind, tenantID, payload); err != nil {
+		return err
+	}
+	target, err := payload.InspectionTarget()
+	if err != nil {
+		return err
+	}
+	if target != nil && (now.IsZero() || !now.Before(time.Unix(0, target.ProviderAttempt.ExpiresUnixNano))) {
+		return errors.New("inspection target is expired")
 	}
 	return nil
 }

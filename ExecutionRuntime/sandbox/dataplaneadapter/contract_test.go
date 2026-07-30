@@ -139,6 +139,28 @@ func TestCurrentServerRejectsMalformedRequestBeforeOwnerReads(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReadSandboxProjectionExactRefRejectsRevisionAndDigestDrift(t *testing.T) {
+	revision := runtimecore.Revision(7)
+	digest := runtimecore.Digest(digestForTest(t, "workspace-read-sandbox-projection"))
+	expires := time.Unix(1_800_000_000, 0).Add(time.Hour).UnixNano()
+	exact := SandboxProjectionRefV1{
+		Revision: uint64(revision), Digest: string(digest), ExpiresUnixNano: expires,
+	}
+	if !sameSandboxProjectionV1(exact, revision, digest, expires) {
+		t.Fatal("exact request sandbox projection was rejected")
+	}
+	driftedRevision := exact
+	driftedRevision.Revision++
+	if sameSandboxProjectionV1(driftedRevision, revision, digest, expires) {
+		t.Fatal("request sandbox projection revision drift was accepted")
+	}
+	driftedDigest := exact
+	driftedDigest.Digest = digestForTest(t, "other-workspace-read-sandbox-projection")
+	if sameSandboxProjectionV1(driftedDigest, revision, digest, expires) {
+		t.Fatal("request sandbox projection digest drift was accepted")
+	}
+}
+
 func TestProviderBindingDigestMatchesRustWireGolden(t *testing.T) {
 	data, err := os.ReadFile("../protocol/v1/golden/provider-binding-v1.json")
 	if err != nil {

@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"time"
 
+	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
@@ -27,6 +28,7 @@ type CurrentServer struct {
 	Governance           runtimeports.OperationDispatchEnforcementGovernancePortV4
 	CheckpointGovernance runtimeports.CheckpointRestoreDispatchEnforcementGovernancePortV1
 	Sandbox              sandboxports.ExactCurrentStore
+	WorkspaceReadCurrent sandboxports.WorkspaceReadCurrentProjectionReaderV1
 	Now                  func() time.Time
 }
 
@@ -105,6 +107,9 @@ func (s CurrentServer) inspect(ctx context.Context, request DispatchRequestV1) (
 	if request.EffectKind == CheckpointEffectKindV1 {
 		return s.inspectCheckpointV1(ctx, request, now)
 	}
+	if request.Payload.ProviderKind == "workspace_read" && workspaceReadCurrentQueryV1(request.RuntimeCurrentQuery) {
+		return s.inspectWorkspaceReadV1(ctx, request, now)
+	}
 	var query runtimeports.InspectCurrentOperationDispatchEnforcementRequestV4
 	decoder := json.NewDecoder(bytesReader(request.RuntimeCurrentQuery))
 	decoder.DisallowUnknownFields()
@@ -145,6 +150,9 @@ func (s CurrentServer) inspect(ctx context.Context, request DispatchRequestV1) (
 	if actualRef != request.RuntimeEnforcement || actualBinding != request.ExecutionBinding || current.Sandbox.Attempt != query.SandboxAttempt || factRef(current.Sandbox.Attempt) != request.SandboxAttempt || string(current.Sandbox.OperationDigest) != request.OperationDigest || string(current.Sandbox.EffectID) != request.EffectID || current.Sandbox.AttemptID != request.AttemptID {
 		return CurrentAuthorizationV1{}, errors.New("actual-point enforcement coordinates drifted")
 	}
+	if request.SandboxProjection != nil && !sameSandboxProjectionV1(*request.SandboxProjection, current.Sandbox.ProjectionRevision, current.Sandbox.ProjectionDigest, current.Sandbox.ExpiresUnixNano) {
+		return CurrentAuthorizationV1{}, errors.New("request sandbox projection drifted from current")
+	}
 	expires := minimum(request.RequestedNotAfterUnixNano, current.ExpiresUnixNano, current.Sandbox.ExpiresUnixNano, current.Phase.ExpiresUnixNano)
 	authorization := CurrentAuthorizationV1{
 		ContractVersion:    ContractVersionV1,
@@ -165,6 +173,114 @@ func (s CurrentServer) inspect(ctx context.Context, request DispatchRequestV1) (
 		return CurrentAuthorizationV1{}, err
 	}
 	return authorization, nil
+}
+
+func workspaceReadCurrentQueryV1(raw json.RawMessage) bool {
+	var header struct {
+		ContractVersion string `json:"contract_version"`
+	}
+	return json.Unmarshal(raw, &header) == nil && header.ContractVersion == sandboxports.WorkspaceReadCurrentContractVersionV1
+}
+
+func (s CurrentServer) inspectWorkspaceReadV1(ctx context.Context, request DispatchRequestV1, now time.Time) (CurrentAuthorizationV1, error) {
+	if s.WorkspaceReadCurrent == nil {
+		return CurrentAuthorizationV1{}, errors.New("workspace read exact current reader is unavailable")
+	}
+	var query sandboxports.WorkspaceReadCurrentQueryV1
+	decoder := json.NewDecoder(bytesReader(request.RuntimeCurrentQuery))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&query); err != nil {
+		return CurrentAuthorizationV1{}, fmt.Errorf("workspace read current query decode: %w", err)
+	}
+	if err := query.ValidateCurrent(now); err != nil {
+		return CurrentAuthorizationV1{}, err
+	}
+	var payload WorkspaceReadPayloadV1
+	decoder = json.NewDecoder(bytesReader(request.Payload.ProviderPayload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&payload); err != nil {
+		return CurrentAuthorizationV1{}, fmt.Errorf("workspace read payload decode: %w", err)
+	}
+	current, err := s.WorkspaceReadCurrent.InspectWorkspaceReadCurrentV1(ctx, query)
+	if err != nil {
+		return CurrentAuthorizationV1{}, err
+	}
+	if err := current.ValidateCurrent(now); err != nil {
+		return CurrentAuthorizationV1{}, err
+	}
+	provider, err := providerFromRuntime(current.ProviderBinding)
+	if err != nil {
+		return CurrentAuthorizationV1{}, err
+	}
+	phase, err := runtimePhase(request.Phase)
+	if err != nil ||
+		current.QueryDigest != query.Digest ||
+		current.ProviderBinding != query.Authorization.Provider ||
+		current.ReviewAuthorization != query.RuntimeInspect.ReviewAuthorization ||
+		current.ExecuteEnforcement.Phase != phase ||
+		current.Command != query.Command ||
+		current.WorkspaceView != query.WorkspaceView ||
+		payload.Workspace.ID != current.WorkspaceView.ID ||
+		payload.Workspace.Revision != current.WorkspaceView.Revision ||
+		payload.Workspace.Digest != prefixedCurrentDigestV1(current.WorkspaceView.Digest) ||
+		current.FileScopeDigest != payload.FileScopeDigest ||
+		current.RelativePath != payload.RelativePath ||
+		provider != request.ProviderBinding {
+		return CurrentAuthorizationV1{}, errors.New("workspace read exact current projection drifted from the dispatch request")
+	}
+	actualBinding := executionBindingFromWorkspaceReadCurrentV1(current)
+	actualRef := enforcementRef(current.ExecuteEnforcement, request.Phase)
+	if actualBinding != request.ExecutionBinding ||
+		actualRef != request.RuntimeEnforcement ||
+		factRef(current.SandboxAttempt) != request.SandboxAttempt ||
+		request.SandboxProjection == nil ||
+		!sameSandboxProjectionV1(*request.SandboxProjection, current.SandboxProjectionRevision, current.SandboxProjectionDigest, current.ExpiresUnixNano) ||
+		string(current.ExecuteEnforcement.OperationDigest) != request.OperationDigest ||
+		string(current.ExecuteEnforcement.EffectID) != request.EffectID ||
+		current.ExecuteEnforcement.AttemptID != request.AttemptID {
+		return CurrentAuthorizationV1{}, errors.New("workspace read actual-point coordinates drifted")
+	}
+	expires := minimum(request.RequestedNotAfterUnixNano, current.ExpiresUnixNano, current.ExecuteEnforcement.ExpiresUnixNano)
+	authorization := CurrentAuthorizationV1{
+		ContractVersion: ContractVersionV1, RequestDigest: request.Digest,
+		OperationDigest: request.OperationDigest, EffectID: request.EffectID, AttemptID: request.AttemptID,
+		Phase: request.Phase, ProviderBinding: provider,
+		SandboxProjection: SandboxProjectionRefV1{
+			Revision: uint64(current.SandboxProjectionRevision), Digest: string(current.SandboxProjectionDigest),
+			ExpiresUnixNano: current.ExpiresUnixNano,
+		},
+		ExecutionBinding: actualBinding, RuntimeEnforcement: actualRef,
+		CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires,
+	}
+	authorization.Digest, err = canonicalDigest("CurrentAuthorizationV1", authorization)
+	if err != nil {
+		return CurrentAuthorizationV1{}, err
+	}
+	return authorization, nil
+}
+
+func sameSandboxProjectionV1(actual SandboxProjectionRefV1, revision runtimecore.Revision, digest runtimecore.Digest, expires int64) bool {
+	return actual.Revision == uint64(revision) &&
+		actual.Digest == string(digest) &&
+		actual.ExpiresUnixNano == expires
+}
+
+func prefixedCurrentDigestV1(value string) string {
+	if len(value) >= len("sha256:") && value[:len("sha256:")] == "sha256:" {
+		return value
+	}
+	return "sha256:" + value
+}
+
+func executionBindingFromWorkspaceReadCurrentV1(current sandboxports.WorkspaceReadCurrentProjectionV1) ExecutionBindingV1 {
+	lease := current.RuntimeLease
+	return ExecutionBindingV1{
+		TenantID:   current.TenantID,
+		InstanceID: string(lease.Instance.ID), InstanceEpoch: uint64(lease.Instance.Epoch),
+		LeaseID: string(lease.Lease.ID), LeaseEpoch: uint64(lease.Lease.Epoch),
+		FenceEpoch: uint64(lease.FenceEpoch), ScopeDigest: string(lease.ScopeDigest),
+		ObservedRevision: uint64(lease.ObservedRevision), ExpiresUnixNano: lease.Ref.ExpiresUnixNano,
+	}
 }
 
 func (s CurrentServer) inspectCheckpointV1(ctx context.Context, request DispatchRequestV1, now time.Time) (CurrentAuthorizationV1, error) {
