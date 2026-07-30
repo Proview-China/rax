@@ -19,8 +19,111 @@ pub struct ProviderObservation {
     pub checkpoint_artifact: Option<CheckpointArtifactObservationV1>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub workspace_commit: Option<WorkspaceCommitObservationV1>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_read: Option<WorkspaceReadObservationV1>,
     pub observed_unix_nano: i64,
     pub digest: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceReadObservationV1 {
+    pub contract_version: String,
+    pub workspace: ExactRefV1,
+    pub file: ExactRefV1,
+    pub relative_path: String,
+    pub start_byte: u64,
+    pub content: String,
+    pub content_digest: String,
+    pub returned_bytes: u64,
+    pub total_bytes: u64,
+    pub complete: bool,
+    pub s1_checked: bool,
+    pub s2_checked: bool,
+    pub physical_read_count: u64,
+    pub recorded_unix_nano: i64,
+    pub expires_unix_nano: i64,
+}
+
+impl WorkspaceReadObservationV1 {
+    pub fn validate(&self, request: &DispatchRequestV1, now: i64) -> Result<()> {
+        let crate::contract::ProviderPayloadV1::WorkspaceRead(payload) = &request.payload else {
+            return Err(ClosedError::new(
+                ClosedReason::BindingDrift,
+                "workspace read observation reached another Provider payload",
+            ));
+        };
+        let expected_expires = request
+            .requested_not_after_unix_nano
+            .min(request.sandbox_attempt.expires_unix_nano)
+            .min(request.execution_binding.expires_unix_nano)
+            .min(request.runtime_enforcement.expires_unix_nano)
+            .min(payload.workspace.expires_unix_nano);
+        if self.contract_version != "praxis.sandbox/workspace-read-observation/v1"
+            || self.workspace != payload.workspace
+            || self.file.validate("workspace file").is_err()
+            || self.relative_path != payload.relative_path
+            || self.returned_bytes > payload.max_bytes
+            || !valid_checkpoint_digest(&self.content_digest)
+            || self.physical_read_count != 1
+            || self.recorded_unix_nano <= 0
+            || self.recorded_unix_nano > now
+            || self.expires_unix_nano != expected_expires
+            || now >= self.expires_unix_nano
+        {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidContract,
+                "workspace read observation is incomplete or stale",
+            ));
+        }
+        if self.start_byte != payload.start_byte
+            || self.returned_bytes != u64::try_from(self.content.len()).unwrap_or(u64::MAX)
+            || self.total_bytes > 1_048_576
+            || self.start_byte > self.total_bytes
+            || self.returned_bytes > self.total_bytes - self.start_byte
+            || self.complete != (self.start_byte + self.returned_bytes == self.total_bytes)
+            || !self.s1_checked
+            || !self.s2_checked
+            || self.file.revision != payload.workspace.revision
+            || self.file.expires_unix_nano != payload.workspace.expires_unix_nano
+            || payload
+                .expected_file_ref
+                .as_ref()
+                .is_some_and(|expected| expected != &self.file)
+            || self.content_digest
+                != workspace_read_content_digest(
+                    self.content.as_bytes(),
+                    self.start_byte,
+                    self.total_bytes,
+                    self.complete,
+                )
+        {
+            return Err(ClosedError::new(
+                ClosedReason::BindingDrift,
+                "workspace read range or exact file ref drifted",
+            ));
+        }
+        Ok(())
+    }
+}
+
+fn workspace_read_content_digest(content: &[u8], start: u64, total: u64, complete: bool) -> String {
+    use sha2::{Digest as _, Sha256};
+    let mut hash = Sha256::new();
+    hash.update(b"praxis.sandbox/workspace-read-range/v1");
+    hash.update([0]);
+    hash.update(start.to_string().as_bytes());
+    hash.update([0]);
+    hash.update(total.to_string().as_bytes());
+    hash.update([0]);
+    hash.update(if complete {
+        &b"true"[..]
+    } else {
+        &b"false"[..]
+    });
+    hash.update([0]);
+    hash.update(content);
+    format!("sha256:{}", hex::encode(hash.finalize()))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -229,23 +332,7 @@ impl ProviderResult {
                 "non-checkpoint Provider result carries artifact observation",
             ));
         }
-        if request.payload.kind() == ProviderKindV1::WorkspaceCommit {
-            self.observation
-                .workspace_commit
-                .as_ref()
-                .ok_or_else(|| {
-                    ClosedError::new(
-                        ClosedReason::InvalidContract,
-                        "workspace commit Provider result lacks exact commit observation",
-                    )
-                })?
-                .validate(request, now)?;
-        } else if self.observation.workspace_commit.is_some() {
-            return Err(ClosedError::new(
-                ClosedReason::InvalidContract,
-                "non-workspace Provider result carries a workspace commit observation",
-            ));
-        }
+        validate_workspace_observations(&self.observation, request, now)?;
         let mut observation = self.observation.clone();
         observation.digest.clear();
         let observation_digest = canonical_digest("ProviderObservationV1", &observation)?;
@@ -260,6 +347,50 @@ impl ProviderResult {
         }
         Ok(())
     }
+}
+
+fn validate_workspace_observations(
+    observation: &ProviderObservation,
+    request: &DispatchRequestV1,
+    now: i64,
+) -> Result<()> {
+    if request.payload.kind() == ProviderKindV1::WorkspaceCommit {
+        observation
+            .workspace_commit
+            .as_ref()
+            .ok_or_else(|| {
+                ClosedError::new(
+                    ClosedReason::InvalidContract,
+                    "workspace commit Provider result lacks exact commit observation",
+                )
+            })?
+            .validate(request, now)?;
+    } else if observation.workspace_commit.is_some() {
+        return Err(ClosedError::new(
+            ClosedReason::InvalidContract,
+            "non-workspace Provider result carries a workspace commit observation",
+        ));
+    }
+    if request.payload.kind() == ProviderKindV1::WorkspaceRead
+        && request.phase == EnforcementPhaseV1::Execute
+    {
+        observation
+            .workspace_read
+            .as_ref()
+            .ok_or_else(|| {
+                ClosedError::new(
+                    ClosedReason::InvalidContract,
+                    "workspace read Provider result lacks exact observation",
+                )
+            })?
+            .validate(request, now)?;
+    } else if observation.workspace_read.is_some() {
+        return Err(ClosedError::new(
+            ClosedReason::InvalidContract,
+            "non-workspace-read Provider result carries a read observation",
+        ));
+    }
+    Ok(())
 }
 
 impl ProviderObservation {
@@ -291,6 +422,18 @@ impl ProviderResult {
         // remains valid without consulting a newer wall clock.
         observation.recorded_unix_nano = self.observation.observed_unix_nano;
         self.observation.workspace_commit = Some(observation);
+        self.observation = self.observation.seal()?;
+        self.receipt.observation_digest = self.observation.digest.clone();
+        self.receipt = self.receipt.seal()?;
+        Ok(self)
+    }
+
+    pub fn with_workspace_read(
+        mut self,
+        mut observation: WorkspaceReadObservationV1,
+    ) -> Result<Self> {
+        observation.recorded_unix_nano = self.observation.observed_unix_nano;
+        self.observation.workspace_read = Some(observation);
         self.observation = self.observation.seal()?;
         self.receipt.observation_digest = self.observation.digest.clone();
         self.receipt = self.receipt.seal()?;
@@ -333,6 +476,7 @@ pub fn provider_result(request: &DispatchRequestV1, state: &str) -> Result<Provi
         payload_digest: request.payload_digest.clone(),
         checkpoint_artifact: None,
         workspace_commit: None,
+        workspace_read: None,
         observed_unix_nano: now,
         digest: String::new(),
     }
@@ -382,6 +526,7 @@ const fn provider_name(provider: ProviderKindV1) -> &'static str {
         ProviderKindV1::WasmtimeComponent => "wasmtime",
         ProviderKindV1::RemoteSandbox => "remote",
         ProviderKindV1::WorkspaceCommit => "workspace-commit",
+        ProviderKindV1::WorkspaceRead => "workspace-read",
     }
 }
 

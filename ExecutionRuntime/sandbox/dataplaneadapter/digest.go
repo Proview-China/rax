@@ -38,7 +38,7 @@ func validDigest(value string) bool {
 
 func validEffectKind(value string) bool {
 	switch value {
-	case "praxis.sandbox/backend-discovery", "praxis.sandbox/allocate", "praxis.sandbox/activate", "praxis.sandbox/open", "praxis.sandbox/cancel", "praxis.sandbox/close", "praxis.sandbox/fence", "praxis.sandbox/release", "praxis.sandbox/inspect", "praxis.sandbox/cleanup", "praxis.sandbox/workspace-commit", CheckpointEffectKindV1:
+	case "praxis.sandbox/backend-discovery", "praxis.sandbox/allocate", "praxis.sandbox/activate", "praxis.sandbox/open", "praxis.sandbox/cancel", "praxis.sandbox/close", "praxis.sandbox/fence", "praxis.sandbox/release", "praxis.sandbox/inspect", "praxis.sandbox/cleanup", "praxis.sandbox/workspace-commit", "praxis.sandbox/workspace-read", CheckpointEffectKindV1:
 		return true
 	default:
 		return false

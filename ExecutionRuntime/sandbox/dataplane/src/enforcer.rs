@@ -65,7 +65,8 @@ impl<R: CurrentFactsReader> DataPlaneEnforcer<R> {
                 "praxis.sandbox/allocate"
                 | "praxis.sandbox/activate"
                 | "praxis.sandbox/open"
-                | "praxis.sandbox/workspace-commit" => provider.execute_prepared(request).await,
+                | "praxis.sandbox/workspace-commit"
+                | "praxis.sandbox/workspace-read" => provider.execute_prepared(request).await,
                 "praxis.sandbox/cancel" | "praxis.sandbox/close" | "praxis.sandbox/fence" => {
                     provider.fence(request).await
                 }

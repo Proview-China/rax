@@ -207,6 +207,11 @@ fn effect_request(
             value.inspection_target = None;
             ProviderPayloadV1::WorkspaceCommit(value)
         }
+        ProviderPayloadV1::WorkspaceRead(value) => {
+            let mut value = value.clone();
+            value.inspection_target = None;
+            ProviderPayloadV1::WorkspaceRead(value)
+        }
     };
     let mut request = common::request_with_payload(phase, bootstrap_payload);
     request.payload = payload;
