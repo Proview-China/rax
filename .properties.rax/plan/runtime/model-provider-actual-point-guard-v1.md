@@ -11,7 +11,8 @@
 - [x] public conformance 保持 `ProductionEligible=false`。
 - [x] ports/control/kernel/conformance owner-local 单元与 fault 反例。
 - [ ] 独立 Runtime 代码审计。
-- [ ] Runtime Run cancel/current 生产 Owner/Store/Adapter。
+- [x] Runtime Run cancel/current owner-local只读Adapter与软件门禁。
+- [ ] Runtime Run/Command生产Owner/Store与composition root。
 - [ ] Model/Harness actual-boundary Adapter 与 original-attempt Inspect。
 - [ ] 真实 direct/stream/continuation/realtime/raw no-bypass、64 并发 winner 黑盒。
 - [ ] production composition root/backend/SLA。

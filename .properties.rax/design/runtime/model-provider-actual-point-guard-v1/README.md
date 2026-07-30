@@ -48,7 +48,7 @@ S1/S2 比较权威 ref、revision、digest、state、TTL；合法变化的 `Chec
 
 ## 当前 NO-GO
 
-基线没有可直接复用且能证明 Run cancel/desired/current absence watermark 的生产实现。本切面只定义注入式 `control.ModelDispatchControlCurrentReaderV1`；缺失、Unavailable、Indeterminate 一律 fail closed。
+Runtime已提供owner-local `ModelDispatchControlCurrentReaderV1` adapter，从Run、Desired State与唯一LastCommand双读派生短TTL current projection；缺失、Unavailable、Indeterminate一律fail closed。当前仍没有生产SQLite Run/Command Owner或composition root，因此该adapter不构成production current实现。
 
 Model/Harness/Provider 尚未接入本 guard，conformance 只核 Owner-local wiring metadata，`ProductionEligible=false`。64 并发 Provider boundary winner、所有 direct/stream/continuation/realtime/raw 路径的真实 no-bypass 仍需跨 Owner Adapter 黑盒证明。
 
