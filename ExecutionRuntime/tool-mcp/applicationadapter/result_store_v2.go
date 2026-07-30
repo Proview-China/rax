@@ -8,6 +8,7 @@ import (
 
 	applicationcontract "github.com/Proview-China/rax/ExecutionRuntime/application/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
+	toolports "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/ports"
 )
 
 // ApplicationResultStoreV2 is the Tool-owned create-once result boundary used
@@ -21,31 +22,7 @@ type ApplicationResultStoreV2 interface {
 // ApplicationResultRecordV2 retains the immutable request needed to validate
 // an Inspect result without guessing a request body from its digest-only key.
 // The record is Tool-owned reference-store data, not a new Application fact.
-type ApplicationResultRecordV2 struct {
-	Request applicationcontract.SingleCallToolActionRequestV2 `json:"request"`
-	Result  applicationcontract.SingleCallToolActionResultV2  `json:"result"`
-}
-
-func (r ApplicationResultRecordV2) ValidateForKey(key applicationcontract.SingleCallToolActionInspectKeyV2) error {
-	if err := key.Validate(); err != nil {
-		return err
-	}
-	if err := r.Request.Validate(); err != nil {
-		return err
-	}
-	expected, err := applicationcontract.SealSingleCallToolActionInspectKeyV2(r.Request)
-	if err != nil {
-		return err
-	}
-	if expected != key {
-		return core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "Application V2 result record belongs to another request")
-	}
-	checked := time.Unix(0, r.Result.Coordinate.AssociationCheckedUnixNano)
-	if err = r.Result.ValidateCurrentFor(r.Request, checked); err != nil {
-		return err
-	}
-	return nil
-}
+type ApplicationResultRecordV2 = toolports.ApplicationResultExactRecordV2
 
 // InMemoryApplicationResultStoreV2 is a reference/test store, not a production
 // backend, durability claim, composition root or SLA.
@@ -111,6 +88,26 @@ func (s *InMemoryApplicationResultStoreV2) InspectSingleCallApplicationResultRec
 	return cloneApplicationResultRecordV2(value)
 }
 
+func (s *InMemoryApplicationResultStoreV2) InspectApplicationResultExactV2(ctx context.Context, original applicationcontract.SingleCallToolActionResultRefV2) (toolports.ApplicationResultExactRecordV2, error) {
+	if s == nil || isNilFlowDependencyV1(ctx) {
+		return toolports.ApplicationResultExactRecordV2{}, core.NewError(core.ErrorUnavailable, core.ReasonComponentMissing, "Application V2 result store is unavailable")
+	}
+	if err := ctx.Err(); err != nil {
+		return toolports.ApplicationResultExactRecordV2{}, err
+	}
+	if err := original.Validate(); err != nil {
+		return toolports.ApplicationResultExactRecordV2{}, err
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, value := range s.values {
+		if value.Result.RefV2() == original {
+			return cloneApplicationResultRecordV2(value)
+		}
+	}
+	return toolports.ApplicationResultExactRecordV2{}, core.NewError(core.ErrorNotFound, core.ReasonInvalidReference, "Application V2 exact result not found")
+}
+
 func applicationResultKeyV2(key applicationcontract.SingleCallToolActionInspectKeyV2) string {
 	return key.RequestID + "\x00" + string(key.RequestDigest) + "\x00" + string(key.ActionCoordinateDigest) + "\x00" + string(key.ScopeDigest)
 }
@@ -140,3 +137,4 @@ func cloneApplicationResultRecordV2(value ApplicationResultRecordV2) (Applicatio
 }
 
 var _ ApplicationResultStoreV2 = (*InMemoryApplicationResultStoreV2)(nil)
+var _ toolports.ApplicationResultExactReaderV2 = (*InMemoryApplicationResultStoreV2)(nil)
