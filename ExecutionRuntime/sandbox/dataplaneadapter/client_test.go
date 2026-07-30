@@ -5,10 +5,11 @@ import (
 	"encoding/json"
 	"net"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/testkit"
 )
 
 func TestClientSendsExplicitDispatchAndInspectEnvelopes(t *testing.T) {
@@ -17,7 +18,7 @@ func TestClientSendsExplicitDispatchAndInspectEnvelopes(t *testing.T) {
 	for _, operation := range []DataPlaneOperationV1{DataPlaneDispatchV1, DataPlaneInspectV1} {
 		t.Run(string(operation), func(t *testing.T) {
 			expectedResponse := acceptedResponseForTest(t, request, now)
-			socket := filepath.Join(t.TempDir(), "sandbox.sock")
+			socket := testkit.ShortUnixSocketPath(t, "sandbox.sock")
 			listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
 			if err != nil {
 				t.Fatal(err)
