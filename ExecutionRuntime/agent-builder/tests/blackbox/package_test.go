@@ -11,6 +11,8 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/builder"
 	"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/compiler"
 	definitioncontract "github.com/Proview-China/rax/ExecutionRuntime/agent-definition/contract"
+	"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycompiler"
+	"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycontract"
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 )
 
@@ -132,7 +134,11 @@ func TestResolvedDefinitionCompilesToDeterministicPackage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(first, second) || first.RefV1().Validate() != nil || first.Lock.ManifestRef.ID != first.Lock.GenerationRef.ID+"/manifest" || first.Lock.GraphRef.ID != first.Lock.GenerationRef.ID+"/graph" || first.Lock.HandoffRef.ID != first.Lock.GenerationRef.ID+"/handoff" {
+	publicationID, err := assemblycontract.DeriveAssemblyPublicationIDV2(first.Lock.AssemblyInputDigest, first.Lock.GenerationRef.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(first, second) || first.RefV1().Validate() != nil || first.Lock.ManifestRef.ID != publicationID+"/manifest" || first.Lock.GraphRef.ID != publicationID+"/graph" || first.Lock.HandoffRef.ID != publicationID+"/handoff" {
 		t.Fatalf("package closure is not deterministic and exact: %#v", first)
 	}
 
@@ -146,6 +152,31 @@ func TestResolvedDefinitionCompilesToDeterministicPackage(t *testing.T) {
 	}
 	if !reflect.DeepEqual(first, third) {
 		t.Fatal("semantic release reorder changed package")
+	}
+}
+
+func TestPackageLocksHarnessPublicationArtifactCoordinates(t *testing.T) {
+	result := resolved(t)
+	pkg, err := compiler.NewV1().Compile(result)
+	if err != nil {
+		t.Fatal(err)
+	}
+	compiled, err := assemblycompiler.New().Compile(result.AssemblyInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication, err := assemblycontract.NewAssemblyPublicationBundleV2("agent-package-blackbox", compiled)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := assemblycontract.AssemblyPublicationArtifactRefsV2{
+		Generation: pkg.Lock.GenerationRef,
+		Manifest:   pkg.Lock.ManifestRef,
+		Graph:      pkg.Lock.GraphRef,
+		Handoff:    pkg.Lock.HandoffRef,
+	}
+	if locked != publication.Publication.Artifacts {
+		t.Fatalf("AgentPackage and Harness Publication exact refs drifted: package=%+v publication=%+v", locked, publication.Publication.Artifacts)
 	}
 }
 
