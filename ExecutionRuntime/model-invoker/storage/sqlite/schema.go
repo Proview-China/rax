@@ -150,3 +150,55 @@ CREATE INDEX IF NOT EXISTS invocation_material_v2_history_exact
     authorization_digest
   );
 `
+
+const schemaV4 = `
+CREATE TABLE IF NOT EXISTS governed_model_turn_v3_history (
+  turn_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision > 0),
+  fact_digest TEXT NOT NULL,
+  attempt_digest TEXT NOT NULL UNIQUE,
+  prepared_id TEXT NOT NULL,
+  prepared_revision INTEGER NOT NULL CHECK(prepared_revision > 0),
+  prepared_digest TEXT NOT NULL,
+  current_id TEXT NOT NULL,
+  current_revision INTEGER NOT NULL CHECK(current_revision > 0),
+  current_digest TEXT NOT NULL,
+  current_checked_unix_nano INTEGER NOT NULL CHECK(current_checked_unix_nano > 0),
+  current_expires_unix_nano INTEGER NOT NULL CHECK(current_expires_unix_nano > 0),
+  current_not_after_unix_nano INTEGER NOT NULL CHECK(current_not_after_unix_nano > 0),
+  material_id TEXT NOT NULL,
+  material_revision INTEGER NOT NULL CHECK(material_revision > 0),
+  material_digest TEXT NOT NULL,
+  attempt_request_digest TEXT NOT NULL,
+  route_call_digest TEXT NOT NULL,
+  dispatch_sequence INTEGER NOT NULL CHECK(dispatch_sequence > 0),
+  provider_attempt_ordinal INTEGER NOT NULL CHECK(provider_attempt_ordinal > 0),
+  expires_unix_nano INTEGER NOT NULL CHECK(expires_unix_nano > 0),
+  canonical_json BLOB NOT NULL,
+  PRIMARY KEY(turn_id, revision)
+);
+CREATE INDEX IF NOT EXISTS governed_model_turn_v3_history_exact
+  ON governed_model_turn_v3_history(
+    turn_id,
+    revision,
+    fact_digest,
+    attempt_digest,
+    prepared_id,
+    prepared_revision,
+    prepared_digest,
+    current_id,
+    current_revision,
+    current_digest,
+    current_checked_unix_nano,
+    current_expires_unix_nano,
+    current_not_after_unix_nano,
+    material_id,
+    material_revision,
+    material_digest,
+    attempt_request_digest,
+    route_call_digest,
+    dispatch_sequence,
+    provider_attempt_ordinal,
+    expires_unix_nano
+  );
+`

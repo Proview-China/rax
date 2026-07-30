@@ -659,52 +659,79 @@ func verifyInvocationMaterialHistoryIndexesV3(ctx context.Context, db *sql.DB) e
 	return nil
 }
 
+// IndexXInfoConformanceRowV4 is a SQLite implementation conformance row. It is
+// not a Model domain fact and grants no runtime authority.
+type IndexXInfoConformanceRowV4 struct {
+	Sequence   int
+	CID        int
+	Column     sql.NullString
+	Descending int
+	Collation  string
+	Key        int
+}
+
 func indexKeyColumnsV3(ctx context.Context, db *sql.DB, name string) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `PRAGMA index_xinfo(`+quoteSQLiteIdentifierV3(name)+`)`)
 	if err != nil {
 		return nil, mapDBErrorV1(ctx, "verify_v3", err, false)
 	}
 	defer rows.Close()
-	var columns []string
-	auxiliaryRows := 0
-	sequence := 0
+	var physical []IndexXInfoConformanceRowV4
 	for rows.Next() {
-		var seqno, cid, descending, key int
-		var column sql.NullString
-		var collation string
+		var row IndexXInfoConformanceRowV4
 		if err := rows.Scan(
-			&seqno,
-			&cid,
-			&column,
-			&descending,
-			&collation,
-			&key,
+			&row.Sequence,
+			&row.CID,
+			&row.Column,
+			&row.Descending,
+			&row.Collation,
+			&row.Key,
 		); err != nil {
 			return nil, mapDBErrorV1(ctx, "verify_v3", err, false)
 		}
-		if seqno != sequence || descending != 0 ||
-			!strings.EqualFold(collation, "BINARY") {
-			return nil, schemaConflictV3("sqlite index column order drifted")
-		}
-		sequence++
-		if key == 1 {
-			if cid < 0 || !column.Valid || strings.TrimSpace(column.String) == "" ||
-				auxiliaryRows != 0 {
-				return nil, schemaConflictV3("sqlite index key expression drifted")
-			}
-			columns = append(columns, column.String)
-			continue
-		}
-		if key != 0 || cid != -1 || column.Valid || auxiliaryRows != 0 {
-			return nil, schemaConflictV3("sqlite index auxiliary column drifted")
-		}
-		auxiliaryRows++
+		physical = append(physical, row)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, mapDBErrorV1(ctx, "verify_v3", err, false)
 	}
+	columns, err := ValidateIndexXInfoRowsForConformanceV4(physical)
+	if err != nil {
+		return nil, schemaConflictV3(err.Error())
+	}
+	return columns, nil
+}
+
+// ValidateIndexXInfoRowsForConformanceV4 freezes the physical index_xinfo
+// shape shared by the SQLite V3 and V4 schema gates.
+func ValidateIndexXInfoRowsForConformanceV4(
+	physical []IndexXInfoConformanceRowV4,
+) ([]string, error) {
+	var columns []string
+	auxiliaryRows := 0
+	for sequence, row := range physical {
+		if row.Sequence != sequence || row.Descending != 0 ||
+			row.Collation != "BINARY" {
+			return nil, fmt.Errorf("sqlite index column order or collation drifted")
+		}
+		switch row.Key {
+		case 1:
+			if row.CID < 0 || !row.Column.Valid ||
+				strings.TrimSpace(row.Column.String) == "" ||
+				auxiliaryRows != 0 {
+				return nil, fmt.Errorf("sqlite index key expression drifted")
+			}
+			columns = append(columns, row.Column.String)
+		case 0:
+			if row.CID != -1 || row.Column.Valid || auxiliaryRows != 0 {
+				return nil, fmt.Errorf("sqlite index auxiliary column drifted")
+			}
+			auxiliaryRows++
+		default:
+			return nil, fmt.Errorf("sqlite index key classification drifted")
+		}
+	}
 	if len(columns) == 0 || auxiliaryRows != 1 {
-		return nil, schemaConflictV3("sqlite index physical shape drifted")
+		return nil, fmt.Errorf("sqlite index physical shape drifted")
 	}
 	return columns, nil
 }
