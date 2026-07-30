@@ -76,31 +76,44 @@ func TestGovernedModelTurnV2IdempotentCASRequiresExactExpectedHistory(t *testing
 
 func TestGovernedModelTurnV2ReadsRejectSplicedOwnerIndexes(t *testing.T) {
 	tests := []struct {
-		name    string
-		mutate  string
-		inspect func(context.Context, *modelsqlite.Store, modelinvoker.GovernedModelTurnOutcomeV2) error
+		name          string
+		completedText bool
+		mutate        func(*sql.DB, modelinvoker.GovernedModelTurnOutcomeV2) error
 	}{
 		{
-			name:   "history_gap",
-			mutate: `DELETE FROM governed_model_turn_history WHERE turn_id=? AND revision=2`,
-			inspect: func(ctx context.Context, store *modelsqlite.Store, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
-				_, err := store.InspectCurrentGovernedModelTurnV2(ctx, outcome.ID)
+			name: "history_gap",
+			mutate: func(db *sql.DB, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
+				_, err := db.ExecContext(context.Background(), `DELETE FROM governed_model_turn_history WHERE turn_id=? AND revision=2`, outcome.ID)
 				return err
 			},
 		},
 		{
-			name:   "attempt_guard_loss",
-			mutate: `DELETE FROM governed_model_turn_attempt_guard WHERE turn_id=?`,
-			inspect: func(ctx context.Context, store *modelsqlite.Store, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
-				_, err := store.InspectCurrentGovernedModelTurnV2(ctx, outcome.ID)
+			name: "attempt_guard_loss",
+			mutate: func(db *sql.DB, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
+				_, err := db.ExecContext(context.Background(), `DELETE FROM governed_model_turn_attempt_guard WHERE turn_id=?`, outcome.ID)
 				return err
 			},
 		},
 		{
-			name:   "tool_call_projection_loss",
-			mutate: `DELETE FROM governed_model_turn_tool_call_projection WHERE turn_id=?`,
-			inspect: func(ctx context.Context, store *modelsqlite.Store, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
-				_, err := store.InspectExactGovernedModelTurnV2(ctx, outcome.RefV2())
+			name: "attempt_guard_splice",
+			mutate: func(db *sql.DB, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
+				_, err := db.ExecContext(context.Background(), `UPDATE governed_model_turn_attempt_guard SET attempt_digest=? WHERE turn_id=?`, string(core.DigestBytes([]byte("spliced-attempt"))), outcome.ID)
+				return err
+			},
+		},
+		{
+			name: "tool_call_projection_loss",
+			mutate: func(db *sql.DB, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
+				_, err := db.ExecContext(context.Background(), `DELETE FROM governed_model_turn_tool_call_projection WHERE turn_id=?`, outcome.ID)
+				return err
+			},
+		},
+		{
+			name:          "completed_text_extra_projection",
+			completedText: true,
+			mutate: func(db *sql.DB, outcome modelinvoker.GovernedModelTurnOutcomeV2) error {
+				digest := string(core.DigestBytes([]byte("extra-projection")))
+				_, err := db.ExecContext(context.Background(), `INSERT INTO governed_model_turn_tool_call_projection(turn_id,turn_revision,projection_id,projection_revision,projection_digest,observation_digest,canonical_json) VALUES(?,?,?,?,?,?,?)`, outcome.ID, 2, "extra-completed-text-projection", 1, digest, digest, []byte(`{}`))
 				return err
 			},
 		},
@@ -109,7 +122,15 @@ func TestGovernedModelTurnV2ReadsRejectSplicedOwnerIndexes(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			path := t.TempDir() + "/turn-v2.db"
 			fixture := newGovernedFixtureV2(t, path, nil)
-			defer fixture.close(t)
+			closed := false
+			defer func() {
+				if !closed {
+					fixture.close(t)
+				}
+			}()
+			if test.completedText {
+				fixture.state.governedV2CompletedText.Store(true)
+			}
 			outcome, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
 			if err != nil || outcome.State != modelinvoker.GovernedModelTurnObservedV2 {
 				t.Fatalf("governed model turn = %#v, %v", outcome, err)
@@ -118,16 +139,32 @@ func TestGovernedModelTurnV2ReadsRejectSplicedOwnerIndexes(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := db.ExecContext(context.Background(), test.mutate, outcome.ID); err != nil {
+			if err := test.mutate(db, outcome); err != nil {
 				_ = db.Close()
 				t.Fatal(err)
 			}
 			if err := db.Close(); err != nil {
 				t.Fatal(err)
 			}
-			err = test.inspect(context.Background(), fixture.store, outcome)
+			_, err = fixture.store.InspectExactGovernedModelTurnV2(context.Background(), outcome.RefV2())
 			if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorConflict {
-				t.Fatalf("spliced read error = %v", err)
+				t.Fatalf("live exact spliced read error = %v", err)
+			}
+			if err := fixture.gateway.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			closed = true
+			restarted, err := modelsqlite.Open(context.Background(), modelsqlite.Config{Path: path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			_, err = restarted.InspectExactGovernedModelTurnV2(context.Background(), outcome.RefV2())
+			if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorConflict {
+				t.Fatalf("restart exact spliced read error = %v", err)
 			}
 		})
 	}
