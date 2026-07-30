@@ -25,8 +25,42 @@ func TestAgentActivationV2ConformanceCandidateNeverClaimsProduction(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !candidate.EightStepOrderClosed || !candidate.VersionClaimAtomicPayload || !candidate.AppendOnlyHistory || !candidate.InvocationWriteAhead || !candidate.UnknownInspectOnly || !candidate.CommittedScopeExact || candidate.ProductionEligible {
+	if !candidate.EightStepOrderClosed || !candidate.InvocationWriteAhead || !candidate.UnknownInspectOnly || !candidate.CommittedScopeExact {
 		t.Fatalf("unexpected candidate: %+v", candidate)
+	}
+	if candidate.VersionClaimAtomicPayload || candidate.AppendOnlyHistory || candidate.ProductionEligible {
+		t.Fatalf("aggregate-only conformance claimed Store or production evidence: %+v", candidate)
+	}
+}
+
+func TestAgentActivationV2ConformanceComparesCommittedScopeByValue(t *testing.T) {
+	fx := newActivationFixtureV2(t)
+	if _, err := fx.coordinator.StartOrInspectAgentActivationV2(context.Background(), fx.request); err != nil {
+		t.Fatal(err)
+	}
+	fact, err := fx.store.InspectAgentActivationCoordinationV2(context.Background(), fx.request.ActivationID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var committed *core.ExecutionScope
+	for _, event := range fact.Events {
+		if event.Step == contract.AgentActivationCommitV2 && event.Result != nil {
+			committed = event.Result.Proof.CommittedScope
+			break
+		}
+	}
+	if committed == nil || committed.SandboxLease == nil || fact.Result == nil || fact.Result.ExecutionScope.SandboxLease == nil {
+		t.Fatal("fixture does not contain the committed scope closure")
+	}
+	if committed.SandboxLease == fact.Result.ExecutionScope.SandboxLease {
+		t.Fatal("fixture did not exercise persistence-cloned lease pointers")
+	}
+	candidate, err := applicationconformance.CheckAgentActivationCoordinationV2(fact, fx.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !candidate.CommittedScopeExact {
+		t.Fatal("value-equivalent committed scope was rejected after persistence cloning")
 	}
 }
 

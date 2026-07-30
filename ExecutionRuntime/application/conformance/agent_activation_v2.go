@@ -5,6 +5,7 @@ import (
 
 	"github.com/Proview-China/rax/ExecutionRuntime/application/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
+	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 )
 
 type AgentActivationCertificationCandidateV2 struct {
@@ -52,13 +53,13 @@ func CheckAgentActivationCoordinationV2(fact contract.AgentActivationCoordinatio
 		if event.State == contract.AgentActivationStepResultRecordedV2 {
 			completed++
 			if event.Step == contract.AgentActivationCommitV2 && event.Result != nil && event.Result.Proof.CommittedScope != nil && fact.Result != nil {
-				committedScopeExact = *event.Result.Proof.CommittedScope == fact.Result.ExecutionScope
+				committedScopeExact = runtimeports.SameExecutionScopeV2(*event.Result.Proof.CommittedScope, fact.Result.ExecutionScope)
 			}
 		}
 	}
 	return AgentActivationCertificationCandidateV2{
-		ContractVersion:           contract.AgentActivationContractVersionV2,
-		EightStepOrderClosed:      completed == len(contract.AgentActivationStepOrderV2()),
+		ContractVersion:      contract.AgentActivationContractVersionV2,
+		EightStepOrderClosed: completed == len(contract.AgentActivationStepOrderV2()),
 		// A single aggregate proves exact payload binding, not the store's atomic
 		// Create or append-only CAS behavior. Those remain store-test evidence.
 		VersionClaimAtomicPayload: false,
