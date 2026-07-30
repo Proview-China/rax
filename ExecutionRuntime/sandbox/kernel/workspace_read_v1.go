@@ -387,6 +387,17 @@ func (e *WorkspaceReadPhysicalExecutorV1) InspectBoundedWorkspaceReadV2(ctx cont
 	return reader.InspectBoundedWorkspaceReadV2(ctx, ref)
 }
 
+func (e *WorkspaceReadPhysicalExecutorV1) InspectWorkspaceReadCommandExactV1(ctx context.Context, ref contract.Ref) (contract.WorkspaceReadCommandV1, error) {
+	if e == nil || e.store == nil {
+		return contract.WorkspaceReadCommandV1{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read exact Command Inspect is unavailable")
+	}
+	reader, ok := e.store.(sandboxports.WorkspaceReadCommandExactReaderV1)
+	if !ok || nilLikeWorkspaceReadInspectionV2(reader) {
+		return contract.WorkspaceReadCommandV1{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read exact Command Inspect is unavailable")
+	}
+	return reader.InspectWorkspaceReadCommandExactV1(ctx, ref)
+}
+
 func (e *WorkspaceReadPhysicalExecutorV1) InspectWorkspaceReadAttemptForAdmissionV1(ctx context.Context, receipt runtimeports.ControlledOperationProviderAdmissionReceiptRefV2) (sandboxports.WorkspaceReadAdmissionAttemptBindingV1, error) {
 	if e == nil || e.store == nil {
 		return sandboxports.WorkspaceReadAdmissionAttemptBindingV1{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read admission handoff Inspect is unavailable")
@@ -564,3 +575,4 @@ func nilLikeWorkspaceReadInspectionV2(value any) bool {
 
 var _ sandboxports.WorkspaceReadExecutionPortV1 = (*WorkspaceReadPhysicalExecutorV1)(nil)
 var _ sandboxports.WorkspaceReadExecutionPortV2 = (*WorkspaceReadPhysicalExecutorV1)(nil)
+var _ sandboxports.WorkspaceReadCommandExactReaderV1 = (*WorkspaceReadPhysicalExecutorV1)(nil)
