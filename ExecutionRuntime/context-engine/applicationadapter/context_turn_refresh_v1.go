@@ -30,7 +30,7 @@ type ContextTurnRefreshAdapterV1 struct {
 var _ applicationports.ContextTurnRefreshPortV1 = (*ContextTurnRefreshAdapterV1)(nil)
 
 func NewContextTurnRefreshAdapterV1(service *kernel.ContextTurnRefreshServiceV1, owner contextports.ContextTurnRefreshOwnerBackendV1, proofs contextports.ContextTurnTransitionProofStoreV1, content kernel.ReferenceStore, memory, knowledge applicationports.ContextOwnerSourceReaderV1, clock func() time.Time) (*ContextTurnRefreshAdapterV1, error) {
-	if service == nil || owner == nil || proofs == nil || content == nil || (memory == nil && knowledge == nil) {
+	if service == nil || owner == nil || proofs == nil || content == nil {
 		return nil, fmt.Errorf("%w: Context Application adapter dependencies", contract.ErrInvalid)
 	}
 	if clock == nil {
