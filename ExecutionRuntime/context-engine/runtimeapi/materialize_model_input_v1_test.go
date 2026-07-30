@@ -206,3 +206,16 @@ func TestMaterializeModelInputS2DriftFailsClosedV1(t *testing.T) {
 		t.Fatalf("got=%+v err=%v tool_calls=%d", got, err, fixture.tools.calls.Load())
 	}
 }
+
+func TestMaterializeModelInputS1TTLDriftFailsClosedV1(t *testing.T) {
+	fixture := newModelInputFixtureV1(t)
+	stable := fixture.frame.Snapshot
+	drift := stable
+	drift.AuthorityExpiresUnixNano--
+	fixture.reader.Snapshots = []kernel.FrameConsumptionCurrentSnapshotV1{stable, stable, stable, stable, drift, drift}
+	fixture.reader.Calls = 2
+	got, err := fixture.service.MaterializeModelInputV1(context.Background(), modelInputRequestV1(fixture))
+	if !errors.Is(err, contract.ErrConflict) || got.Ref.ID != "" || fixture.tools.calls.Load() != 0 {
+		t.Fatalf("got=%+v err=%v tool_calls=%d", got, err, fixture.tools.calls.Load())
+	}
+}

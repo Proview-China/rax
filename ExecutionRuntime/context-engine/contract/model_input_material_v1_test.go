@@ -86,6 +86,19 @@ func TestModelInputClosedEnumsAndCanonicalEncodingV1(t *testing.T) {
 	}
 }
 
+func TestSealModelInputSegmentBindingReturnsZeroOnFailureV1(t *testing.T) {
+	base := contract.ContextModelInputSegmentBindingV1{
+		FragmentRef: modelInputRefV1("invalid-tool-result"), Region: contract.RegionDynamicTail, Position: 1,
+		Kind: contract.FragmentToolResult, Trust: contract.TrustObservation, Channel: contract.ContextModelInputFunctionResultV1,
+		Role: contract.ContextModelInputRoleToolV1, Encoding: contract.ContextModelInputUTF8V1,
+		CallID: "call-invalid-1", Name: "",
+	}
+	got, err := contract.SealContextModelInputSegmentBindingV1(base)
+	if !errors.Is(err, contract.ErrConflict) || got != (contract.ContextModelInputSegmentBindingV1{}) {
+		t.Fatalf("invalid binding leaked a nonzero candidate: got=%+v err=%v", got, err)
+	}
+}
+
 func TestModelInputMaterialResealCannotBlessSemanticBindingDriftV1(t *testing.T) {
 	content := []byte("exact tool output")
 	binding, err := contract.SealContextModelInputSegmentBindingV1(contract.ContextModelInputSegmentBindingV1{

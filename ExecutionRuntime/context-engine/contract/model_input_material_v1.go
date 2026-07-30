@@ -115,7 +115,10 @@ func SealContextModelInputSegmentBindingV1(b ContextModelInputSegmentBindingV1) 
 		return ContextModelInputSegmentBindingV1{}, err
 	}
 	b.Digest = digest
-	return b, b.Validate()
+	if err := b.Validate(); err != nil {
+		return ContextModelInputSegmentBindingV1{}, err
+	}
+	return b, nil
 }
 
 type ContextModelInputSegmentV1 struct {

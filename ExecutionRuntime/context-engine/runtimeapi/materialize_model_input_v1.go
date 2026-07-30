@@ -176,7 +176,7 @@ func (s *ServiceV1) MaterializeModelInputV1(ctx context.Context, request Materia
 var _ ContextModelInputRuntimeAPIV1 = (*ServiceV1)(nil)
 
 func validateModelInputSnapshotV1(request MaterializeModelInputRequestV1, snapshot kernel.FrameConsumptionCurrentSnapshotV1) error {
-	if snapshot.Manifest.Validate() != nil || snapshot.Frame.Validate() != nil || snapshot.Generation.Validate() != nil {
+	if snapshot.Manifest.Validate() != nil || snapshot.Frame.Validate() != nil || snapshot.Generation.Validate() != nil || len(snapshot.FragmentSourceExpires) != len(snapshot.Manifest.Fragments) {
 		return fmt.Errorf("%w: model input current snapshot", contract.ErrInvalid)
 	}
 	manifestDigest, err := snapshot.Manifest.DigestValue()
@@ -208,7 +208,33 @@ func validateModelInputSnapshotV1(request MaterializeModelInputRequestV1, snapsh
 	if snapshot.Frame.ManifestRef != request.Descriptor.ManifestRef || snapshot.Generation.RootFrame != request.Descriptor.FrameRef || snapshot.Frame.GenerationID != snapshot.Generation.ID {
 		return fmt.Errorf("%w: model input frame chain", contract.ErrConflict)
 	}
+	expires := modelInputSnapshotExpiresV1(request.Consumption.NotAfterUnixNano, snapshot)
+	if request.CheckedUnixNano >= expires {
+		return fmt.Errorf("%w: model input current snapshot lifetime", contract.ErrExpired)
+	}
+	if request.Descriptor.ExpiresUnixNano != expires {
+		return fmt.Errorf("%w: model input current snapshot TTL drift", contract.ErrConflict)
+	}
 	return nil
+}
+
+func modelInputSnapshotExpiresV1(notAfter int64, snapshot kernel.FrameConsumptionCurrentSnapshotV1) int64 {
+	expires := notAfter
+	values := append([]int64{
+		snapshot.Frame.ExpiresUnixNano,
+		snapshot.Manifest.ExpiresUnixNano,
+		snapshot.GenerationExpiresUnixNano,
+		snapshot.PromptExpiresUnixNano,
+		snapshot.RecipeExpiresUnixNano,
+		snapshot.DisclosureExpiresUnixNano,
+		snapshot.AuthorityExpiresUnixNano,
+	}, snapshot.FragmentSourceExpires...)
+	for _, value := range values {
+		if value < expires {
+			expires = value
+		}
+	}
+	return expires
 }
 
 func preflightModelInputSegmentsV1(fragments []contract.ContextFragment, limits MaterializeModelInputLimitsV1) error {
