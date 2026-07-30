@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"reflect"
 	"time"
+	"unicode/utf8"
 
 	modelinvoker "github.com/Proview-China/rax/ExecutionRuntime/model-invoker"
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
@@ -19,6 +20,67 @@ type CompiledModelToolsV1 struct {
 	Dialect         string                                       `json:"dialect"`
 	Tools           []modelinvoker.Tool                          `json:"tools"`
 	Digest          core.Digest                                  `json:"digest"`
+}
+
+func (v CompiledModelToolsV1) Validate() error {
+	if v.ContractVersion != CompiledModelToolsContractVersionV1 || v.Surface.Validate() != nil ||
+		v.Dialect != string(toolcontract.ModelToolDialectFunctionCallingV1) ||
+		len(v.Tools) == 0 || len(v.Tools) > toolcontract.MaxSurfaceEntries {
+		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidCanonicalForm, "Compiled Model Tools identity, dialect, or tool count is invalid")
+	}
+	seen := make(map[string]struct{}, len(v.Tools))
+	for index, tool := range v.Tools {
+		if err := toolcontract.ValidatePortableFunctionToolNameV1(tool.Name); err != nil {
+			return err
+		}
+		if _, exists := seen[tool.Name]; exists {
+			return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Compiled Model Tools contain a duplicate Model name")
+		}
+		seen[tool.Name] = struct{}{}
+		if index > 0 && v.Tools[index-1].Name > tool.Name {
+			return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidCanonicalForm, "Compiled Model Tools are not canonically ordered")
+		}
+		if !utf8.ValidString(tool.Description) || len(tool.Description) > toolcontract.MaxStringBytes ||
+			tool.Strict == nil || !*tool.Strict {
+			return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidCanonicalForm, "Compiled Model Tool description or strict flag is invalid")
+		}
+		if err := toolcontract.ValidatePortableFunctionToolSchemaV1(tool.Parameters); err != nil {
+			return err
+		}
+	}
+	if err := v.Digest.Validate(); err != nil {
+		return err
+	}
+	digest, err := digestCompiledModelToolsV1(v)
+	if err != nil || digest != v.Digest {
+		return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Compiled Model Tools digest drifted")
+	}
+	return nil
+}
+
+func (v CompiledModelToolsV1) ValidateAgainstMaterialV1(material toolcontract.ModelToolInjectionMaterialV1) error {
+	if err := v.Validate(); err != nil {
+		return err
+	}
+	if err := material.Validate(); err != nil {
+		return err
+	}
+	if v.Surface != material.Surface || v.Digest != material.CompiledToolsDigest || len(v.Tools) != len(material.Entries) {
+		return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Compiled Model Tools do not close their exact Tool Injection Material")
+	}
+	for index, tool := range v.Tools {
+		entry := material.Entries[index]
+		if tool.Name != entry.ModelName || tool.Strict == nil || !*tool.Strict ||
+			core.DigestBytes([]byte(tool.Description)) != entry.DescriptionDigest ||
+			core.DigestBytes(tool.Parameters) != entry.InputSchemaRef.ContentDigest {
+			return core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "Compiled Model Tool bytes drifted from their exact Tool Injection entry")
+		}
+	}
+	return nil
+}
+
+func (v CompiledModelToolsV1) Clone() CompiledModelToolsV1 {
+	return cloneCompiledModelToolsV1(v)
 }
 
 func CompileModelToolsV1(ctx context.Context, current toolcontract.ToolSurfaceManifestCurrentProjectionV1, materials toolcontract.ToolDefinitionMaterialReaderV1, clock func() time.Time) (CompiledModelToolsV1, error) {

@@ -65,6 +65,32 @@ func TestSealModelToolInjectionMaterialV1ReturnsZeroOnValidationFailure(t *testi
 	}
 }
 
+func TestModelToolInjectionMaterialV1RejectsNonPortableAndDuplicateModelNames(t *testing.T) {
+	t.Run("non-portable", func(t *testing.T) {
+		material := contractMaterialV1(t)
+		material.Ref = toolcontract.ModelToolInjectionMaterialRefV1{}
+		material.Digest = ""
+		material.Entries[0].ModelName = "not.portable"
+		sealed, err := toolcontract.SealModelToolInjectionMaterialV1(material)
+		if err == nil || !reflect.DeepEqual(sealed, toolcontract.ModelToolInjectionMaterialV1{}) {
+			t.Fatalf("non-portable Model name was not rejected with a zero result: sealed=%#v err=%v", sealed, err)
+		}
+	})
+	t.Run("duplicate", func(t *testing.T) {
+		material := contractMaterialV1(t)
+		material.Ref = toolcontract.ModelToolInjectionMaterialRefV1{}
+		material.Digest = ""
+		duplicate := material.Entries[0]
+		duplicate.Order = 1
+		material.Entries = append(material.Entries, duplicate)
+		material.ExpectedInjectionDigest = testkit.Digest("recomputed-later")
+		sealed, err := toolcontract.SealModelToolInjectionMaterialV1(material)
+		if err == nil || !reflect.DeepEqual(sealed, toolcontract.ModelToolInjectionMaterialV1{}) {
+			t.Fatalf("duplicate Model name was not rejected with a zero result: sealed=%#v err=%v", sealed, err)
+		}
+	})
+}
+
 func contractMaterialV1(t *testing.T) toolcontract.ModelToolInjectionMaterialV1 {
 	t.Helper()
 	capability, tool := testkit.Capability(), testkit.Tool()

@@ -246,6 +246,9 @@ func CompileModelToolInjectionMaterialV1(
 	if err != nil {
 		return zero(err)
 	}
+	if err := compiled.ValidateAgainstMaterialV1(material); err != nil {
+		return zero(err)
+	}
 	return cloneCompiledModelToolsV1(compiled), material.Clone(), nil
 }
 

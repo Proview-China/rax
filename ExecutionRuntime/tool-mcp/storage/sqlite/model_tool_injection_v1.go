@@ -17,6 +17,7 @@ import (
 
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	toolcontract "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/contract"
+	toolsurface "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/surface"
 	_ "modernc.org/sqlite"
 )
 
@@ -34,11 +35,13 @@ CREATE TABLE IF NOT EXISTS model_tool_injection_material_v1 (
     revision INTEGER NOT NULL,
     digest TEXT NOT NULL,
     surface_id TEXT NOT NULL,
-    surface_revision INTEGER NOT NULL,
-    surface_digest TEXT NOT NULL,
-    expires_unix_nano INTEGER NOT NULL,
-    body_json BLOB NOT NULL,
-    row_digest TEXT NOT NULL,
+	    surface_revision INTEGER NOT NULL,
+	    surface_digest TEXT NOT NULL,
+	    compiled_tools_digest TEXT NOT NULL,
+	    expires_unix_nano INTEGER NOT NULL,
+	    compiled_tools_json BLOB NOT NULL,
+	    body_json BLOB NOT NULL,
+	    row_digest TEXT NOT NULL,
     UNIQUE(material_id, revision, digest)
 ) STRICT;
 
@@ -136,52 +139,84 @@ func (s *StoreV1) IntegrityCheckV1(ctx context.Context) error {
 	return nil
 }
 
-func (s *StoreV1) EnsureExactModelToolInjectionMaterialV1(ctx context.Context, material toolcontract.ModelToolInjectionMaterialV1) (toolcontract.ModelToolInjectionMaterialV1, error) {
+func (s *StoreV1) CompileAndEnsureModelToolInjectionMaterialV1(
+	ctx context.Context,
+	exactSurface toolcontract.ToolSurfaceManifestCurrentRefV1,
+	surfaces toolcontract.ToolSurfaceManifestCurrentReaderV1,
+	definitions toolcontract.ToolDefinitionMaterialReaderV1,
+	registry toolcontract.ToolRegistryObjectCurrentReaderV1,
+) (toolsurface.CompiledModelToolsV1, toolcontract.ModelToolInjectionMaterialV1, error) {
 	if err := s.writeReadyV1(ctx); err != nil {
-		return toolcontract.ModelToolInjectionMaterialV1{}, err
+		return modelToolClosureZeroV1(err)
 	}
+	compiled, material, err := toolsurface.CompileModelToolInjectionMaterialV1(
+		ctx, exactSurface, surfaces, definitions, registry, s.clock,
+	)
+	if err != nil {
+		return modelToolClosureZeroV1(err)
+	}
+	return s.ensureCompiledModelToolInjectionMaterialV1(ctx, compiled, material)
+}
+
+func (s *StoreV1) ensureCompiledModelToolInjectionMaterialV1(
+	ctx context.Context,
+	compiled toolsurface.CompiledModelToolsV1,
+	material toolcontract.ModelToolInjectionMaterialV1,
+) (toolsurface.CompiledModelToolsV1, toolcontract.ModelToolInjectionMaterialV1, error) {
+	compiled = compiled.Clone()
 	material = material.Clone()
 	now := s.clock()
 	if err := material.ValidateCurrent(material.Ref, now); err != nil {
-		return toolcontract.ModelToolInjectionMaterialV1{}, err
+		return modelToolClosureZeroV1(err)
 	}
-	body, rowDigest, err := encodeRowV1("ModelToolInjectionMaterialV1", material)
+	if err := compiled.ValidateAgainstMaterialV1(material); err != nil {
+		return modelToolClosureZeroV1(err)
+	}
+	rowDigest, err := modelToolClosureRowDigestV1(compiled, material)
 	if err != nil {
-		return toolcontract.ModelToolInjectionMaterialV1{}, err
+		return modelToolClosureZeroV1(err)
+	}
+	compiledBody, err := json.Marshal(compiled)
+	if err != nil {
+		return modelToolClosureZeroV1(invalidV1("Compiled Model Tools JSON encode failed"))
+	}
+	materialBody, err := json.Marshal(material)
+	if err != nil {
+		return modelToolClosureZeroV1(invalidV1("Model Tool Injection Material JSON encode failed"))
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
 	if err != nil {
-		return toolcontract.ModelToolInjectionMaterialV1{}, mapDBErrorV1(ctx, err, true)
+		return modelToolClosureZeroV1(mapDBErrorV1(ctx, err, true))
 	}
 	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `
 INSERT OR IGNORE INTO model_tool_injection_material_v1
-(material_id,revision,digest,surface_id,surface_revision,surface_digest,expires_unix_nano,body_json,row_digest)
-VALUES(?,?,?,?,?,?,?,?,?)`,
+(material_id,revision,digest,surface_id,surface_revision,surface_digest,compiled_tools_digest,expires_unix_nano,compiled_tools_json,body_json,row_digest)
+VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		material.Ref.ID, int64(material.Ref.Revision), string(material.Ref.Digest),
 		material.Surface.ID, int64(material.Surface.Revision), string(material.Surface.Digest),
-		material.ExpiresUnixNano, body, string(rowDigest),
+		string(compiled.Digest), material.ExpiresUnixNano, compiledBody, materialBody, string(rowDigest),
 	)
 	if err != nil {
-		return toolcontract.ModelToolInjectionMaterialV1{}, mapDBErrorV1(ctx, err, true)
+		return modelToolClosureZeroV1(mapDBErrorV1(ctx, err, true))
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
-		return toolcontract.ModelToolInjectionMaterialV1{}, mapDBErrorV1(ctx, err, true)
+		return modelToolClosureZeroV1(mapDBErrorV1(ctx, err, true))
 	}
 	if affected == 0 {
-		winner, err := inspectMaterialTxV1(ctx, tx, material.Ref.ID)
+		winnerCompiled, winnerMaterial, err := inspectMaterialTxV1(ctx, tx, material.Ref.ID)
 		if err != nil {
-			return toolcontract.ModelToolInjectionMaterialV1{}, err
+			return modelToolClosureZeroV1(err)
 		}
-		if !reflect.DeepEqual(winner, material) {
-			return toolcontract.ModelToolInjectionMaterialV1{}, conflictV1("Model Tool Injection Material ID already binds different content")
+		if !reflect.DeepEqual(winnerCompiled, compiled) || !reflect.DeepEqual(winnerMaterial, material) {
+			return modelToolClosureZeroV1(conflictV1("Model Tool Injection Material ID already binds a different compiled closure"))
 		}
 	}
 	if err := tx.Commit(); err != nil {
-		return toolcontract.ModelToolInjectionMaterialV1{}, indeterminateV1("Model Tool Injection Material commit outcome is unknown")
+		return modelToolClosureZeroV1(indeterminateV1("Model Tool Injection Material commit outcome is unknown"))
 	}
-	return material.Clone(), nil
+	return compiled.Clone(), material.Clone(), nil
 }
 
 func (s *StoreV1) InspectExactModelToolInjectionMaterialV1(ctx context.Context, exact toolcontract.ModelToolInjectionMaterialRefV1) (toolcontract.ModelToolInjectionMaterialV1, error) {
@@ -191,7 +226,7 @@ func (s *StoreV1) InspectExactModelToolInjectionMaterialV1(ctx context.Context, 
 	if err := exact.Validate(); err != nil {
 		return toolcontract.ModelToolInjectionMaterialV1{}, err
 	}
-	material, err := inspectMaterialQueryV1(ctx, s.db, exact.ID)
+	_, material, err := inspectMaterialQueryV1(ctx, s.db, exact.ID)
 	if err != nil {
 		return toolcontract.ModelToolInjectionMaterialV1{}, err
 	}
@@ -397,34 +432,36 @@ type queryRowerV1 interface {
 	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
-func inspectMaterialTxV1(ctx context.Context, tx *sql.Tx, id string) (toolcontract.ModelToolInjectionMaterialV1, error) {
+func inspectMaterialTxV1(ctx context.Context, tx *sql.Tx, id string) (toolsurface.CompiledModelToolsV1, toolcontract.ModelToolInjectionMaterialV1, error) {
 	return inspectMaterialQueryV1(ctx, tx, id)
 }
 
-func inspectMaterialQueryV1(ctx context.Context, query queryRowerV1, id string) (toolcontract.ModelToolInjectionMaterialV1, error) {
-	var body []byte
-	var storedID, storedDigest, surfaceID, surfaceDigest, rowDigest string
+func inspectMaterialQueryV1(ctx context.Context, query queryRowerV1, id string) (toolsurface.CompiledModelToolsV1, toolcontract.ModelToolInjectionMaterialV1, error) {
+	var compiledBody, materialBody []byte
+	var storedID, storedDigest, surfaceID, surfaceDigest, compiledDigest, rowDigest string
 	var storedRevision, surfaceRevision, expiresUnixNano int64
 	if err := query.QueryRowContext(ctx, `
-SELECT material_id,revision,digest,surface_id,surface_revision,surface_digest,expires_unix_nano,body_json,row_digest
+SELECT material_id,revision,digest,surface_id,surface_revision,surface_digest,compiled_tools_digest,expires_unix_nano,compiled_tools_json,body_json,row_digest
 FROM model_tool_injection_material_v1 WHERE material_id=?`, id).Scan(
 		&storedID, &storedRevision, &storedDigest, &surfaceID, &surfaceRevision, &surfaceDigest,
-		&expiresUnixNano, &body, &rowDigest,
+		&compiledDigest, &expiresUnixNano, &compiledBody, &materialBody, &rowDigest,
 	); err != nil {
-		return toolcontract.ModelToolInjectionMaterialV1{}, mapDBErrorV1(ctx, err, false)
+		return modelToolClosureZeroV1(mapDBErrorV1(ctx, err, false))
 	}
+	var compiled toolsurface.CompiledModelToolsV1
 	var material toolcontract.ModelToolInjectionMaterialV1
-	if err := core.DecodeStrictJSON(body, &material); err != nil {
-		return toolcontract.ModelToolInjectionMaterialV1{}, conflictV1("stored Model Tool Injection Material JSON is non-canonical")
+	if core.DecodeStrictJSON(compiledBody, &compiled) != nil || core.DecodeStrictJSON(materialBody, &material) != nil {
+		return modelToolClosureZeroV1(conflictV1("stored Model Tool Injection closure JSON is non-canonical"))
 	}
-	expected, err := rowDigestV1("ModelToolInjectionMaterialV1", material)
-	if err != nil || string(expected) != rowDigest || material.Validate() != nil ||
+	expected, err := modelToolClosureRowDigestV1(compiled, material)
+	if err != nil || string(expected) != rowDigest || compiled.ValidateAgainstMaterialV1(material) != nil ||
 		storedID != material.Ref.ID || storedRevision != int64(material.Ref.Revision) || storedDigest != string(material.Ref.Digest) ||
 		surfaceID != material.Surface.ID || surfaceRevision != int64(material.Surface.Revision) ||
-		surfaceDigest != string(material.Surface.Digest) || expiresUnixNano != material.ExpiresUnixNano {
-		return toolcontract.ModelToolInjectionMaterialV1{}, conflictV1("stored Model Tool Injection Material row drifted")
+		surfaceDigest != string(material.Surface.Digest) || compiledDigest != string(compiled.Digest) ||
+		expiresUnixNano != material.ExpiresUnixNano {
+		return modelToolClosureZeroV1(conflictV1("stored Model Tool Injection closure row drifted"))
 	}
-	return material.Clone(), nil
+	return compiled.Clone(), material.Clone(), nil
 }
 
 func inspectBindingTxByIDV1(ctx context.Context, tx *sql.Tx, id string) (toolcontract.ToolSurfaceInvocationBindingV1, toolcontract.ToolSurfaceInvocationBindingAckV1, error) {
@@ -478,6 +515,13 @@ func rowDigestV1(discriminator string, value any) (core.Digest, error) {
 	return core.CanonicalJSONDigest("praxis.tool-mcp.sqlite-row", "v1", discriminator, value)
 }
 
+func modelToolClosureRowDigestV1(compiled toolsurface.CompiledModelToolsV1, material toolcontract.ModelToolInjectionMaterialV1) (core.Digest, error) {
+	return rowDigestV1("ModelToolInjectionClosureV1", struct {
+		Compiled toolsurface.CompiledModelToolsV1          `json:"compiled"`
+		Material toolcontract.ModelToolInjectionMaterialV1 `json:"material"`
+	}{Compiled: compiled, Material: material})
+}
+
 func bindingRowDigestV1(binding toolcontract.ToolSurfaceInvocationBindingV1, ack toolcontract.ToolSurfaceInvocationBindingAckV1) (core.Digest, error) {
 	return rowDigestV1("ToolSurfaceInvocationBindingRowV1", struct {
 		Binding toolcontract.ToolSurfaceInvocationBindingV1    `json:"binding"`
@@ -516,6 +560,10 @@ func bindingZeroV1(err error) (toolcontract.ToolSurfaceInvocationBindingV1, tool
 	return toolcontract.ToolSurfaceInvocationBindingV1{}, toolcontract.ToolSurfaceInvocationBindingAckV1{}, err
 }
 
+func modelToolClosureZeroV1(err error) (toolsurface.CompiledModelToolsV1, toolcontract.ModelToolInjectionMaterialV1, error) {
+	return toolsurface.CompiledModelToolsV1{}, toolcontract.ModelToolInjectionMaterialV1{}, err
+}
+
 func invalidV1(message string) error {
 	return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidCanonicalForm, message)
 }
@@ -532,5 +580,5 @@ func indeterminateV1(message string) error {
 	return core.NewError(core.ErrorIndeterminate, core.ReasonEffectUnknownOutcome, message)
 }
 
-var _ toolcontract.ModelToolInjectionMaterialRepositoryV1 = (*StoreV1)(nil)
+var _ toolcontract.ModelToolInjectionMaterialReaderV1 = (*StoreV1)(nil)
 var _ toolcontract.ToolSurfaceInvocationBindingReaderV1 = (*StoreV1)(nil)

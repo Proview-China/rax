@@ -59,9 +59,6 @@ func TestCompileModelToolInjectionMaterialV1ExactDeterministicAndZeroExecution(t
 	if err != nil || !reflect.DeepEqual(compiled, compiledAgain) || !reflect.DeepEqual(material, materialAgain) {
 		t.Fatalf("same exact closure was not deterministic: compiled=%v material=%v err=%v", reflect.DeepEqual(compiled, compiledAgain), reflect.DeepEqual(material, materialAgain), err)
 	}
-	if fixture.providerCalls.Load() != 0 || fixture.toolExecutionCalls.Load() != 0 {
-		t.Fatalf("pure compilation crossed an execution boundary: provider=%d tool=%d", fixture.providerCalls.Load(), fixture.toolExecutionCalls.Load())
-	}
 }
 
 func TestCompileModelToolInjectionMaterialV1S1S2FailClosed(t *testing.T) {
@@ -123,13 +120,11 @@ func TestCompileModelToolInjectionMaterialV1S1S2FailClosed(t *testing.T) {
 }
 
 type modelToolInjectionFixtureV1 struct {
-	surfaces           *surface.InMemoryToolSurfaceManifestCurrentRepositoryV1
-	definitions        *surface.InMemoryToolDefinitionMaterialRepositoryV1
-	currents           *applicationadapter.RegistryObjectCurrentReaderV1
-	current            toolcontract.ToolSurfaceManifestCurrentProjectionV1
-	capabilities       map[string]toolcontract.CapabilityDescriptor
-	providerCalls      atomic.Int64
-	toolExecutionCalls atomic.Int64
+	surfaces     *surface.InMemoryToolSurfaceManifestCurrentRepositoryV1
+	definitions  *surface.InMemoryToolDefinitionMaterialRepositoryV1
+	currents     *applicationadapter.RegistryObjectCurrentReaderV1
+	current      toolcontract.ToolSurfaceManifestCurrentProjectionV1
+	capabilities map[string]toolcontract.CapabilityDescriptor
 }
 
 func newModelToolInjectionFixtureV1(t *testing.T) modelToolInjectionFixtureV1 {

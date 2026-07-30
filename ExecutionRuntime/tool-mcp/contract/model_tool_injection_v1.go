@@ -46,7 +46,7 @@ type ModelToolInjectionEntryV1 struct {
 }
 
 func (e ModelToolInjectionEntryV1) Validate() error {
-	if strings.TrimSpace(e.ModelName) == "" || len(e.ModelName) > 128 || e.CapabilityRef.Validate() != nil || e.ToolRef.Validate() != nil || e.DefinitionMaterialRef.Validate() != nil || e.InputSchemaRef.Validate() != nil || e.DescriptionDigest.Validate() != nil {
+	if ValidatePortableFunctionToolNameV1(e.ModelName) != nil || e.CapabilityRef.Validate() != nil || e.ToolRef.Validate() != nil || e.DefinitionMaterialRef.Validate() != nil || e.InputSchemaRef.Validate() != nil || e.DescriptionDigest.Validate() != nil {
 		return invalid("Model Tool Injection entry identity or references are invalid")
 	}
 	if e.DefinitionMaterialRef.Tool != e.ToolRef || e.DefinitionMaterialRef.InputSchema != e.InputSchemaRef || e.DefinitionMaterialRef.DescriptionDigest != e.DescriptionDigest {
@@ -97,10 +97,15 @@ func (m ModelToolInjectionMaterialV1) Validate() error {
 	if m.Ref.Revision != 1 || m.Digest != m.Ref.Digest || m.ExpectedInjectionDigest.Validate() != nil || m.CompiledToolsDigest.Validate() != nil {
 		return conflict("Model Tool Injection Material repeated digest or revision fields drifted")
 	}
+	seenModelNames := make(map[string]struct{}, len(m.Entries))
 	for index, entry := range m.Entries {
 		if err := entry.Validate(); err != nil {
 			return err
 		}
+		if _, exists := seenModelNames[entry.ModelName]; exists {
+			return conflict("Model Tool Injection entries contain a duplicate Model name")
+		}
+		seenModelNames[entry.ModelName] = struct{}{}
 		if entry.Order != uint32(index) {
 			return invalid("Model Tool Injection entries are not consecutively ordered")
 		}
@@ -224,11 +229,6 @@ func (m ModelToolInjectionMaterialV1) Clone() ModelToolInjectionMaterialV1 {
 
 type ModelToolInjectionMaterialReaderV1 interface {
 	InspectExactModelToolInjectionMaterialV1(context.Context, ModelToolInjectionMaterialRefV1) (ModelToolInjectionMaterialV1, error)
-}
-
-type ModelToolInjectionMaterialRepositoryV1 interface {
-	ModelToolInjectionMaterialReaderV1
-	EnsureExactModelToolInjectionMaterialV1(context.Context, ModelToolInjectionMaterialV1) (ModelToolInjectionMaterialV1, error)
 }
 
 func modelToolInjectionSurfaceEntriesV1(entries []ModelToolInjectionEntryV1) []ToolSurfaceEntry {
