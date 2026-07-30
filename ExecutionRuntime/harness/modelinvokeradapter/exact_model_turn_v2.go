@@ -13,9 +13,22 @@ import (
 )
 
 type ExactModelTurnClosureReadersV2 struct {
-	Materials   modelinvoker.InvocationMaterialReaderV2
-	ContextPair modelinvoker.InvocationMaterialContextPairExactReaderV2
-	ToolPair    modelinvoker.InvocationMaterialToolPairExactReaderV2
+	PreparedHistory modelinvoker.PreparedModelInvocationReaderV1
+	PreparedCurrent modelinvoker.PreparedModelInvocationCurrentReaderV1
+	AckHistory      PreparedModelInvocationCommitAckExactReaderV2
+	Materials       modelinvoker.InvocationMaterialReaderV2
+	ContextPair     modelinvoker.InvocationMaterialContextPairExactReaderV2
+	ToolPair        modelinvoker.InvocationMaterialToolPairExactReaderV2
+}
+
+// PreparedModelInvocationCommitAckExactReaderV2 is a Harness-local structural
+// read seam over Model-owned public exact Ref/Fact types. It grants no Commit
+// method and does not introduce a Harness ACK fact.
+type PreparedModelInvocationCommitAckExactReaderV2 interface {
+	InspectExactAck(
+		context.Context,
+		modelinvoker.PreparedModelInvocationCommitAckRefV1,
+	) (modelinvoker.PreparedModelInvocationCommitAckV1, error)
 }
 
 type ExactModelTurnAdapterConfigV2 struct {
@@ -26,9 +39,10 @@ type ExactModelTurnAdapterConfigV2 struct {
 }
 
 // ExactModelTurnAdapterV2 is a Harness-owned owner-local bridge. It verifies
-// four immutable Context/Tool source roles around the Model Owner call and
-// persists only Harness dispatch references. It cannot call a Provider,
-// execute a Tool, create PendingAction, or advance a Harness Turn.
+// exact Prepared/Current/ACK facts plus four immutable Context/Tool source
+// roles around the Model Owner call and persists only Harness dispatch
+// references. It cannot call a Provider, execute a Tool, create PendingAction,
+// or advance a Harness Turn.
 type ExactModelTurnAdapterV2 struct {
 	readers    ExactModelTurnClosureReadersV2
 	dispatches harnessports.ModelTurnDispatchRepositoryV2
@@ -38,6 +52,9 @@ type ExactModelTurnAdapterV2 struct {
 
 func NewExactModelTurnAdapterV2(config ExactModelTurnAdapterConfigV2) (*ExactModelTurnAdapterV2, error) {
 	for _, dependency := range []any{
+		config.Readers.PreparedHistory,
+		config.Readers.PreparedCurrent,
+		config.Readers.AckHistory,
 		config.Readers.Materials,
 		config.Readers.ContextPair,
 		config.Readers.ToolPair,
@@ -187,9 +204,12 @@ func (a *ExactModelTurnAdapterV2) resumeV2(
 		return bridgecontract.ModelTurnDispatchFactV2{}, err
 	}
 	if s1.ClosureDigest != s2.ClosureDigest ||
+		s1.PreparedRef != s2.PreparedRef ||
+		s1.CurrentRef != s2.CurrentRef ||
+		s1.AckRef != s2.AckRef ||
 		s1.MaterialRef != s2.MaterialRef ||
 		s1.SourceLineage != s2.SourceLineage {
-		return bridgecontract.ModelTurnDispatchFactV2{}, exactModelTurnErrorV2(core.ErrorConflict, core.ReasonBindingDrift, "exact model-turn V2 four-source closure drifted between S1 and S2")
+		return bridgecontract.ModelTurnDispatchFactV2{}, exactModelTurnErrorV2(core.ErrorConflict, core.ReasonBindingDrift, "exact model-turn V2 Prepared/ACK/Invocation/Context/Tool closure drifted between S1 and S2")
 	}
 	finalNow, err := freshExactModelTurnTimeV2(a.clock, s2Time)
 	if err != nil {
@@ -249,6 +269,9 @@ func (a *ExactModelTurnAdapterV2) resumeV2(
 }
 
 type exactModelTurnClosureSnapshotV2 struct {
+	PreparedRef     modelinvoker.PreparedModelInvocationRefV1
+	CurrentRef      modelinvoker.PreparedModelInvocationCurrentRefV1
+	AckRef          modelinvoker.PreparedModelInvocationCommitAckRefV1
 	MaterialRef     modelinvoker.InvocationMaterialRefV2
 	SourceLineage   modelinvoker.InvocationMaterialSourceLineageV2
 	ClosureDigest   core.Digest
@@ -263,6 +286,45 @@ func (a *ExactModelTurnAdapterV2) inspectClosureV2(
 	if err := exactModelTurnContextV2(ctx); err != nil {
 		return exactModelTurnClosureSnapshotV2{}, err
 	}
+	prepared, err := a.readers.PreparedHistory.InspectExactPreparedModelInvocationV1(
+		ctx,
+		envelope.Command.PreparedRef,
+	)
+	if err != nil {
+		return exactModelTurnClosureSnapshotV2{}, err
+	}
+	if err = prepared.Validate(); err != nil || prepared.Ref() != envelope.Command.PreparedRef {
+		if err != nil {
+			return exactModelTurnClosureSnapshotV2{}, err
+		}
+		return exactModelTurnClosureSnapshotV2{}, exactModelTurnErrorV2(core.ErrorConflict, core.ReasonBindingDrift, "exact Prepared historical Fact drifted")
+	}
+	current, err := a.readers.PreparedCurrent.InspectExactPreparedModelInvocationCurrentV1(
+		ctx,
+		envelope.Command.CurrentRef,
+	)
+	if err != nil {
+		return exactModelTurnClosureSnapshotV2{}, err
+	}
+	if err = current.ValidateAgainstFact(prepared); err != nil {
+		return exactModelTurnClosureSnapshotV2{}, err
+	}
+	if err = current.ValidateCurrent(envelope.Command.CurrentRef, now); err != nil {
+		return exactModelTurnClosureSnapshotV2{}, err
+	}
+	ack, err := a.readers.AckHistory.InspectExactAck(ctx, envelope.AckRef)
+	if err != nil {
+		return exactModelTurnClosureSnapshotV2{}, err
+	}
+	if err = ack.Validate(); err != nil || ack.Ref() != envelope.AckRef {
+		if err != nil {
+			return exactModelTurnClosureSnapshotV2{}, err
+		}
+		return exactModelTurnClosureSnapshotV2{}, exactModelTurnErrorV2(core.ErrorConflict, core.ReasonBindingDrift, "exact Prepared commit ACK drifted")
+	}
+	if err = ack.ValidateCurrent(current, now); err != nil {
+		return exactModelTurnClosureSnapshotV2{}, err
+	}
 	material, err := a.readers.Materials.InspectExactInvocationMaterialV2(ctx, envelope.Material)
 	if err != nil {
 		return exactModelTurnClosureSnapshotV2{}, err
@@ -274,6 +336,29 @@ func (a *ExactModelTurnAdapterV2) inspectClosureV2(
 			return exactModelTurnClosureSnapshotV2{}, err
 		}
 		return exactModelTurnClosureSnapshotV2{}, exactModelTurnErrorV2(core.ErrorConflict, core.ReasonBindingDrift, "exact InvocationMaterialV2 is not current")
+	}
+	if err = material.ValidateAgainstPreparedV2(prepared, current, now); err != nil {
+		return exactModelTurnClosureSnapshotV2{}, err
+	}
+	if _, err = modelinvoker.SealPreparedModelInvocationDispatchReceiptAgainstV1(
+		prepared,
+		current,
+		ack,
+		modelinvoker.PreparedModelInvocationDispatchValidationReceiptV1{
+			PreparedRef:                   prepared.Ref(),
+			CurrentRef:                    current.Ref(),
+			AckRef:                        ack.Ref(),
+			DispatchSequence:              envelope.Command.DispatchSequence,
+			BoundaryKind:                  "praxis.harness.exact-model-turn-validation/v2",
+			ProviderAttemptOrdinal:        envelope.Command.ProviderAttemptOrdinal,
+			AttemptRequestDigest:          envelope.Command.AttemptRequestDigest,
+			ActualToolSurfaceDigest:       prepared.ActualToolSurfaceDigest,
+			ActualProviderInjectionDigest: prepared.ActualProviderInjectionDigest,
+			CheckedUnixNano:               now.UnixNano(),
+		},
+		now,
+	); err != nil {
+		return exactModelTurnClosureSnapshotV2{}, err
 	}
 	lineage := material.Authorization.SourceLineage
 	contextPair, err := a.readers.ContextPair.InspectExactInvocationContextPairV2(
@@ -314,6 +399,11 @@ func (a *ExactModelTurnAdapterV2) inspectClosureV2(
 	}
 	expires := minExactModelTurnExpiryV2(
 		envelope.RequestedNotAfterUnixNano,
+		prepared.NotAfterUnixNano,
+		current.ExpiresUnixNano,
+		current.NotAfterUnixNano,
+		ack.ExpiresUnixNano,
+		ack.NotAfterUnixNano,
 		material.ExpiresUnixNano,
 		contextPair.ExpiresUnixNano,
 		toolPair.ExpiresUnixNano,
@@ -324,21 +414,27 @@ func (a *ExactModelTurnAdapterV2) inspectClosureV2(
 	closureDigest, err := core.CanonicalJSONDigest(
 		"praxis.harness.exact-model-turn",
 		bridgecontract.ModelTurnDispatchContractVersionV2,
-		"ExactModelTurnFourSourceClosureV2",
+		"ExactModelTurnPreparedAckOwnerClosureV2",
 		struct {
-			Material                 modelinvoker.InvocationMaterialRefV2           `json:"material"`
-			SourceLineage            modelinvoker.InvocationMaterialSourceLineageV2 `json:"source_lineage"`
-			ContextProjectionDigest  core.Digest                                    `json:"context_projection_digest"`
-			ContextCheckedUnixNano   int64                                          `json:"context_checked_unix_nano"`
-			ContextExpiresUnixNano   int64                                          `json:"context_expires_unix_nano"`
-			ToolProjectionDigest     core.Digest                                    `json:"tool_projection_digest"`
-			ToolCheckedUnixNano      int64                                          `json:"tool_checked_unix_nano"`
-			ToolExpiresUnixNano      int64                                          `json:"tool_expires_unix_nano"`
-			ContextMappedInputDigest core.Digest                                    `json:"context_mapped_input_digest"`
-			ExpectedInjectionDigest  core.Digest                                    `json:"expected_injection_digest"`
-			CompiledToolsDigest      core.Digest                                    `json:"compiled_tools_digest"`
-			RequestToolsDigest       core.Digest                                    `json:"request_tools_digest"`
+			Prepared                 modelinvoker.PreparedModelInvocationRefV1          `json:"prepared"`
+			Current                  modelinvoker.PreparedModelInvocationCurrentRefV1   `json:"current"`
+			Ack                      modelinvoker.PreparedModelInvocationCommitAckRefV1 `json:"ack"`
+			Material                 modelinvoker.InvocationMaterialRefV2               `json:"material"`
+			SourceLineage            modelinvoker.InvocationMaterialSourceLineageV2     `json:"source_lineage"`
+			ContextProjectionDigest  core.Digest                                        `json:"context_projection_digest"`
+			ContextCheckedUnixNano   int64                                              `json:"context_checked_unix_nano"`
+			ContextExpiresUnixNano   int64                                              `json:"context_expires_unix_nano"`
+			ToolProjectionDigest     core.Digest                                        `json:"tool_projection_digest"`
+			ToolCheckedUnixNano      int64                                              `json:"tool_checked_unix_nano"`
+			ToolExpiresUnixNano      int64                                              `json:"tool_expires_unix_nano"`
+			ContextMappedInputDigest core.Digest                                        `json:"context_mapped_input_digest"`
+			ExpectedInjectionDigest  core.Digest                                        `json:"expected_injection_digest"`
+			CompiledToolsDigest      core.Digest                                        `json:"compiled_tools_digest"`
+			RequestToolsDigest       core.Digest                                        `json:"request_tools_digest"`
 		}{
+			Prepared:                 prepared.Ref(),
+			Current:                  current.Ref(),
+			Ack:                      ack.Ref(),
 			Material:                 material.RefV2(),
 			SourceLineage:            lineage,
 			ContextProjectionDigest:  contextPair.ProjectionDigest,
@@ -357,6 +453,9 @@ func (a *ExactModelTurnAdapterV2) inspectClosureV2(
 		return exactModelTurnClosureSnapshotV2{}, err
 	}
 	return exactModelTurnClosureSnapshotV2{
+		PreparedRef:     prepared.Ref(),
+		CurrentRef:      current.Ref(),
+		AckRef:          ack.Ref(),
 		MaterialRef:     material.RefV2(),
 		SourceLineage:   lineage,
 		ClosureDigest:   closureDigest,
@@ -368,7 +467,10 @@ func (a *ExactModelTurnAdapterV2) preflightV2(
 	ctx context.Context,
 	envelope bridgecontract.ModelTurnExactEnvelopeV2,
 ) error {
-	if a == nil || nilLikeExactModelTurnV2(a.readers.Materials) ||
+	if a == nil || nilLikeExactModelTurnV2(a.readers.PreparedHistory) ||
+		nilLikeExactModelTurnV2(a.readers.PreparedCurrent) ||
+		nilLikeExactModelTurnV2(a.readers.AckHistory) ||
+		nilLikeExactModelTurnV2(a.readers.Materials) ||
 		nilLikeExactModelTurnV2(a.readers.ContextPair) ||
 		nilLikeExactModelTurnV2(a.readers.ToolPair) ||
 		nilLikeExactModelTurnV2(a.dispatches) ||

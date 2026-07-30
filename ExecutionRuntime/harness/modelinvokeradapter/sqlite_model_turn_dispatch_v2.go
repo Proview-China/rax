@@ -28,6 +28,7 @@ CREATE TABLE IF NOT EXISTS harness_model_turn_dispatch_schema_v2 (
 CREATE TABLE IF NOT EXISTS harness_model_turn_dispatch_v2 (
   dispatch_id TEXT PRIMARY KEY,
   dispatch_ref_digest TEXT NOT NULL,
+  ack_ref_digest TEXT NOT NULL,
   fact_digest TEXT NOT NULL,
   revision INTEGER NOT NULL CHECK(revision > 0),
   state TEXT NOT NULL,
@@ -35,7 +36,7 @@ CREATE TABLE IF NOT EXISTS harness_model_turn_dispatch_v2 (
   canonical_json BLOB NOT NULL
 );
 CREATE INDEX IF NOT EXISTS harness_model_turn_dispatch_v2_exact
-  ON harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,fact_digest,revision,state,not_after_unix_nano);
+  ON harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,ack_ref_digest,fact_digest,revision,state,not_after_unix_nano);
 `
 
 const (
@@ -47,6 +48,7 @@ const (
 	sqliteModelTurnDispatchFactTableDDLV2 = `CREATE TABLE harness_model_turn_dispatch_v2 (
 	  dispatch_id TEXT PRIMARY KEY,
 	  dispatch_ref_digest TEXT NOT NULL,
+	  ack_ref_digest TEXT NOT NULL,
 	  fact_digest TEXT NOT NULL,
 	  revision INTEGER NOT NULL CHECK(revision > 0),
 	  state TEXT NOT NULL,
@@ -54,7 +56,7 @@ const (
 	  canonical_json BLOB NOT NULL
 	)`
 	sqliteModelTurnDispatchExactIndexDDLV2 = `CREATE INDEX harness_model_turn_dispatch_v2_exact
-	  ON harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,fact_digest,revision,state,not_after_unix_nano)`
+	  ON harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,ack_ref_digest,fact_digest,revision,state,not_after_unix_nano)`
 )
 
 type sqliteModelTurnDispatchColumnV2 struct {
@@ -74,6 +76,7 @@ var sqliteModelTurnDispatchLedgerColumnsV2 = []sqliteModelTurnDispatchColumnV2{
 var sqliteModelTurnDispatchFactColumnsV2 = []sqliteModelTurnDispatchColumnV2{
 	{name: "dispatch_id", kind: "TEXT", pk: 1},
 	{name: "dispatch_ref_digest", kind: "TEXT", notNull: 1},
+	{name: "ack_ref_digest", kind: "TEXT", notNull: 1},
 	{name: "fact_digest", kind: "TEXT", notNull: 1},
 	{name: "revision", kind: "INTEGER", notNull: 1},
 	{name: "state", kind: "TEXT", notNull: 1},
@@ -198,9 +201,10 @@ func (s *SQLiteModelTurnDispatchV2) EnsureModelTurnDispatchAttemptV2(
 	}
 	_, err = tx.ExecContext(
 		ctx,
-		`INSERT INTO harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,fact_digest,revision,state,not_after_unix_nano,canonical_json) VALUES(?,?,?,?,?,?,?)`,
+		`INSERT INTO harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,ack_ref_digest,fact_digest,revision,state,not_after_unix_nano,canonical_json) VALUES(?,?,?,?,?,?,?,?)`,
 		fact.Ref.ID,
 		string(fact.Ref.Digest),
+		string(fact.Ref.Envelope.AckRef.Digest),
 		string(fact.Digest),
 		fact.Revision,
 		string(fact.State),
@@ -691,10 +695,11 @@ func verifySQLiteModelTurnDispatchIndexesV2(ctx context.Context, db *sql.DB) err
 		[]sqliteModelTurnDispatchIndexColumnV2{
 			{cid: 0, name: "dispatch_id", key: 1},
 			{cid: 1, name: "dispatch_ref_digest", key: 1},
-			{cid: 2, name: "fact_digest", key: 1},
-			{cid: 3, name: "revision", key: 1},
-			{cid: 4, name: "state", key: 1},
-			{cid: 5, name: "not_after_unix_nano", key: 1},
+			{cid: 2, name: "ack_ref_digest", key: 1},
+			{cid: 3, name: "fact_digest", key: 1},
+			{cid: 4, name: "revision", key: 1},
+			{cid: 5, name: "state", key: 1},
+			{cid: 6, name: "not_after_unix_nano", key: 1},
 			{cid: -1, key: 0},
 		},
 	); err != nil {
@@ -789,17 +794,17 @@ func probeSQLiteModelTurnDispatchConstraintsV2(ctx context.Context, db *sql.DB) 
 	); err != nil {
 		return mapSQLiteModelTurnDispatchErrorV2(ctx, err, true)
 	}
-	insert := `INSERT INTO harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,fact_digest,revision,state,not_after_unix_nano,canonical_json) VALUES(?,?,?,?,?,?,?)`
-	if _, err = tx.ExecContext(ctx, insert, probeID, "ref", "fact", 1, "attempt_bound", 1, []byte(`{}`)); err != nil {
+	insert := `INSERT INTO harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,ack_ref_digest,fact_digest,revision,state,not_after_unix_nano,canonical_json) VALUES(?,?,?,?,?,?,?,?)`
+	if _, err = tx.ExecContext(ctx, insert, probeID, "ref", "ack", "fact", 1, "attempt_bound", 1, []byte(`{}`)); err != nil {
 		return exactModelTurnErrorV2(core.ErrorConflict, core.ReasonInvalidCanonicalForm, "model-turn V2 SQLite positive constraint probe failed")
 	}
-	if _, err = tx.ExecContext(ctx, insert, probeID, "ref", "fact", 1, "attempt_bound", 1, []byte(`{}`)); err == nil {
+	if _, err = tx.ExecContext(ctx, insert, probeID, "ref", "ack", "fact", 1, "attempt_bound", 1, []byte(`{}`)); err == nil {
 		return exactModelTurnErrorV2(core.ErrorConflict, core.ReasonInvalidCanonicalForm, "model-turn V2 SQLite primary-key constraint is inactive")
 	}
-	if _, err = tx.ExecContext(ctx, insert, probeID+"/revision", "ref", "fact", 0, "attempt_bound", 1, []byte(`{}`)); err == nil {
+	if _, err = tx.ExecContext(ctx, insert, probeID+"/revision", "ref", "ack", "fact", 0, "attempt_bound", 1, []byte(`{}`)); err == nil {
 		return exactModelTurnErrorV2(core.ErrorConflict, core.ReasonInvalidCanonicalForm, "model-turn V2 SQLite revision constraint is inactive")
 	}
-	if _, err = tx.ExecContext(ctx, insert, probeID+"/not-after", "ref", "fact", 1, "attempt_bound", 0, []byte(`{}`)); err == nil {
+	if _, err = tx.ExecContext(ctx, insert, probeID+"/not-after", "ref", "ack", "fact", 1, "attempt_bound", 0, []byte(`{}`)); err == nil {
 		return exactModelTurnErrorV2(core.ErrorConflict, core.ReasonInvalidCanonicalForm, "model-turn V2 SQLite not-after constraint is inactive")
 	}
 	if _, err = tx.ExecContext(
@@ -829,15 +834,15 @@ func inspectSQLiteModelTurnDispatchTxV2(
 	tx *sql.Tx,
 	id string,
 ) (bridgecontract.ModelTurnDispatchFactV2, bool, error) {
-	var refDigest, factDigest, state string
+	var refDigest, ackDigest, factDigest, state string
 	var revision uint64
 	var notAfter int64
 	var payload []byte
 	err := tx.QueryRowContext(
 		ctx,
-		`SELECT dispatch_ref_digest,fact_digest,revision,state,not_after_unix_nano,canonical_json FROM harness_model_turn_dispatch_v2 WHERE dispatch_id=?`,
+		`SELECT dispatch_ref_digest,ack_ref_digest,fact_digest,revision,state,not_after_unix_nano,canonical_json FROM harness_model_turn_dispatch_v2 WHERE dispatch_id=?`,
 		id,
-	).Scan(&refDigest, &factDigest, &revision, &state, &notAfter, &payload)
+	).Scan(&refDigest, &ackDigest, &factDigest, &revision, &state, &notAfter, &payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return bridgecontract.ModelTurnDispatchFactV2{}, false, nil
 	}
@@ -848,6 +853,7 @@ func inspectSQLiteModelTurnDispatchTxV2(
 	if err != nil ||
 		fact.Ref.ID != id ||
 		string(fact.Ref.Digest) != refDigest ||
+		string(fact.Ref.Envelope.AckRef.Digest) != ackDigest ||
 		string(fact.Digest) != factDigest ||
 		uint64(fact.Revision) != revision ||
 		string(fact.State) != state ||

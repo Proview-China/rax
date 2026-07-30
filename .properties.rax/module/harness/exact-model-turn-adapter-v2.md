@@ -26,12 +26,20 @@ Prompt、Provider 回包或 Tool payload。
 
 构造 Adapter 时必须注入：
 
+- Model `PreparedModelInvocationReaderV1`；
+- Model `PreparedModelInvocationCurrentReaderV1`；
+- Harness 窄 structural ACK exact reader（只复用 Model 公共 ACK Ref/Fact 类型，
+  不向 Model Owner 新增接口）；
 - Model `InvocationMaterialReaderV2`；
 - Model neutral Context Pair Reader；
 - Model neutral Tool Pair Reader；
 - Harness `ModelTurnDispatchRepositoryV2`；
 - Model `GovernedModelTurnPortV3`；
 - 单调、可信的时钟。
+
+每次 S1/S2 都 exact-read Prepared Historical、Prepared Current、Commit ACK、
+InvocationMaterial 与 Context/Tool Pair，并通过 Model 公共 dispatch receipt
+guard 闭合 lineage/currentness；Harness 不创建 ACK 或 permit。
 
 Unknown 恢复 Inspect 会移除 caller cancel，但始终重新附加对应
 Envelope/S1/共同最短 TTL deadline。SQLite Open 同时验证 schema ledger 的精确
@@ -54,7 +62,8 @@ fresh trusted clock；clock regression、共同 TTL 到点或 Outcome 不再 cur
 - Harness 全量 vet；
 - gofmt、diff-check 与 import 边界扫描。
 
-当前状态是代码候选，仍等待独立终审；未提交、未创建 PR。
+当前状态是 PR #62 的唯一 Prepared/ACK S1/S2 P1 已返修，等待更新后的独立终审；
+production composition 仍为 NO-GO。
 
 详细设计见
 [design](../../design/harness/exact-model-turn-adapter-v2/README.md)，落地计划见

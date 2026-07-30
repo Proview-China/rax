@@ -23,8 +23,93 @@ import (
 var exactModelTurnNowV2 = time.Unix(1_900_000_000, 0)
 
 type exactModelTurnFixtureV2 struct {
+	prepared modelinvoker.PreparedModelInvocationFactV1
+	current  modelinvoker.PreparedModelInvocationCurrentProjectionV1
+	ack      modelinvoker.PreparedModelInvocationCommitAckV1
 	material modelinvoker.InvocationMaterialV2
 	envelope bridgecontract.ModelTurnExactEnvelopeV2
+}
+
+type preparedClosureReadersV2 struct {
+	mu sync.Mutex
+
+	prepared modelinvoker.PreparedModelInvocationFactV1
+	current  modelinvoker.PreparedModelInvocationCurrentProjectionV1
+	ack      modelinvoker.PreparedModelInvocationCommitAckV1
+
+	preparedCalls int
+	currentCalls  int
+	ackCalls      int
+
+	preparedDriftAt int
+	currentDriftAt  int
+	ackDriftAt      int
+
+	preparedDrift modelinvoker.PreparedModelInvocationFactV1
+	currentDrift  modelinvoker.PreparedModelInvocationCurrentProjectionV1
+	ackDrift      modelinvoker.PreparedModelInvocationCommitAckV1
+
+	unavailableRole string
+}
+
+func (r *preparedClosureReadersV2) InspectExactPreparedModelInvocationV1(
+	_ context.Context,
+	_ modelinvoker.PreparedModelInvocationRefV1,
+) (modelinvoker.PreparedModelInvocationFactV1, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.preparedCalls++
+	if r.unavailableRole == "prepared" {
+		return modelinvoker.PreparedModelInvocationFactV1{}, core.NewError(
+			core.ErrorUnavailable,
+			core.ReasonComponentMissing,
+			"prepared history unavailable",
+		)
+	}
+	if r.preparedDriftAt == r.preparedCalls {
+		return r.preparedDrift.Clone(), nil
+	}
+	return r.prepared.Clone(), nil
+}
+
+func (r *preparedClosureReadersV2) InspectExactPreparedModelInvocationCurrentV1(
+	_ context.Context,
+	_ modelinvoker.PreparedModelInvocationCurrentRefV1,
+) (modelinvoker.PreparedModelInvocationCurrentProjectionV1, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.currentCalls++
+	if r.unavailableRole == "current" {
+		return modelinvoker.PreparedModelInvocationCurrentProjectionV1{}, core.NewError(
+			core.ErrorUnavailable,
+			core.ReasonComponentMissing,
+			"prepared current unavailable",
+		)
+	}
+	if r.currentDriftAt == r.currentCalls {
+		return r.currentDrift.Clone(), nil
+	}
+	return r.current.Clone(), nil
+}
+
+func (r *preparedClosureReadersV2) InspectExactAck(
+	_ context.Context,
+	_ modelinvoker.PreparedModelInvocationCommitAckRefV1,
+) (modelinvoker.PreparedModelInvocationCommitAckV1, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.ackCalls++
+	if r.unavailableRole == "ack" {
+		return modelinvoker.PreparedModelInvocationCommitAckV1{}, core.NewError(
+			core.ErrorUnavailable,
+			core.ReasonComponentMissing,
+			"prepared ACK unavailable",
+		)
+	}
+	if r.ackDriftAt == r.ackCalls {
+		return r.ackDrift.Clone(), nil
+	}
+	return r.ack.Clone(), nil
 }
 
 type materialReaderV2 struct {
@@ -308,6 +393,12 @@ func (p *governedModelTurnPortV3) InspectExactGovernedModelTurnV3(
 	return outcome, nil
 }
 
+func (p *governedModelTurnPortV3) startCountV2() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.starts
+}
+
 func modelNotFoundV2(subject string) error {
 	return &modelinvoker.GovernedModelInvocationErrorV1{
 		Kind:      modelinvoker.GovernedModelInvocationErrorNotFound,
@@ -375,6 +466,27 @@ func TestExactModelTurnV2ContractRejectsSpliceAndNonCanonicalJSON(t *testing.T) 
 	expired.RequestedNotAfterUnixNano = expired.Material.ExpiresUnixNano + 1
 	if _, err := bridgecontract.SealModelTurnExactEnvelopeV2(expired); err == nil {
 		t.Fatal("Envelope accepted a requested lifetime beyond the exact Material")
+	}
+	ackSplice := fixture.envelope
+	ackSplice.AckRef.Digest = digestV2("spliced-ack")
+	if err := ackSplice.Validate(); err == nil {
+		t.Fatal("Envelope accepted a spliced ACK Ref under the old digest")
+	}
+	shortAck := fixture.ack
+	shortAck.ID, shortAck.Digest = "", ""
+	shortAck.ExpiresUnixNano = exactModelTurnNowV2.Add(7 * time.Minute).UnixNano()
+	shortAck, err := modelinvoker.SealPreparedModelInvocationCommitAckV1(shortAck)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ackExpiredEnvelope := fixture.envelope
+	ackExpiredEnvelope.ContractVersion = ""
+	ackExpiredEnvelope.ID = ""
+	ackExpiredEnvelope.Revision = 0
+	ackExpiredEnvelope.Digest = ""
+	ackExpiredEnvelope.AckRef = shortAck.Ref()
+	if _, err := bridgecontract.SealModelTurnExactEnvelopeV2(ackExpiredEnvelope); err == nil {
+		t.Fatal("Envelope accepted a requested lifetime beyond the exact ACK")
 	}
 
 	ref, err := bridgecontract.DeriveModelTurnDispatchRefV2(fixture.envelope)
@@ -494,6 +606,277 @@ func TestExactModelTurnV2RejectsFourSourceS2Drift(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestExactModelTurnV2RejectsPreparedCurrentAckBeforeModel(t *testing.T) {
+	testCases := []struct {
+		name      string
+		configure func(*testing.T, exactModelTurnFixtureV2, *preparedClosureReadersV2)
+	}{
+		{
+			name: "prepared historical splice",
+			configure: func(t *testing.T, fixture exactModelTurnFixtureV2, readers *preparedClosureReadersV2) {
+				readers.preparedDriftAt = 1
+				readers.preparedDrift = alternatePreparedHistoricalV2(t, fixture)
+			},
+		},
+		{
+			name: "current revision splice",
+			configure: func(_ *testing.T, fixture exactModelTurnFixtureV2, readers *preparedClosureReadersV2) {
+				readers.currentDriftAt = 1
+				readers.currentDrift = fixture.current
+				readers.currentDrift.Revision++
+			},
+		},
+		{
+			name: "current digest splice",
+			configure: func(_ *testing.T, fixture exactModelTurnFixtureV2, readers *preparedClosureReadersV2) {
+				readers.currentDriftAt = 1
+				readers.currentDrift = fixture.current
+				readers.currentDrift.Digest = digestV2("spliced-current-digest")
+			},
+		},
+		{
+			name: "current TTL drift",
+			configure: func(t *testing.T, fixture exactModelTurnFixtureV2, readers *preparedClosureReadersV2) {
+				readers.currentDriftAt = 1
+				readers.currentDrift = alternatePreparedCurrentV2(
+					t,
+					fixture,
+					exactModelTurnNowV2.Add(25*time.Minute),
+				)
+			},
+		},
+		{
+			name: "ACK body splice",
+			configure: func(_ *testing.T, fixture exactModelTurnFixtureV2, readers *preparedClosureReadersV2) {
+				readers.ackDriftAt = 1
+				readers.ackDrift = fixture.ack
+				readers.ackDrift.GateImplementationRef.ID += "-spliced"
+			},
+		},
+		{
+			name: "ACK commit-gate drift",
+			configure: func(t *testing.T, fixture exactModelTurnFixtureV2, readers *preparedClosureReadersV2) {
+				readers.ackDriftAt = 1
+				readers.ackDrift = alternatePreparedAckV2(
+					t,
+					fixture,
+					exactModelTurnNowV2.Add(11*time.Minute),
+					"drifted-gate",
+				)
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newExactModelTurnFixtureV2(t)
+			store := openDispatchStoreV2(t, filepath.Join(t.TempDir(), "prepared-negative.db"))
+			defer store.Close()
+			readers := newPreparedClosureReadersV2(fixture)
+			testCase.configure(t, fixture, readers)
+			model := newGovernedModelTurnPortV3(t)
+			adapter := mustExactModelTurnAdapterWithPreparedReadersV2(
+				t,
+				fixture,
+				store,
+				model,
+				readers,
+				newPairReadersV2(fixture),
+				constantClockV2(exactModelTurnNowV2),
+			)
+			if _, err := adapter.StartOrInspectExactModelTurnV2(
+				context.Background(),
+				fixture.envelope,
+			); err == nil {
+				t.Fatal("Prepared/Current/ACK negative was accepted")
+			}
+			if got := model.startCountV2(); got != 0 {
+				t.Fatalf("Model V3 starts=%d, want 0 before exact closure", got)
+			}
+		})
+	}
+	t.Run("ACK exact Ref splice", func(t *testing.T) {
+		fixture := newExactModelTurnFixtureV2(t)
+		fixture.envelope.ContractVersion = ""
+		fixture.envelope.ID = ""
+		fixture.envelope.Revision = 0
+		fixture.envelope.Digest = ""
+		fixture.envelope.AckRef.Digest = digestV2("alternate-ack-coordinate")
+		envelope, err := bridgecontract.SealModelTurnExactEnvelopeV2(fixture.envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.envelope = envelope
+		store := openDispatchStoreV2(t, filepath.Join(t.TempDir(), "ack-ref-splice.db"))
+		defer store.Close()
+		model := newGovernedModelTurnPortV3(t)
+		adapter := newExactModelTurnAdapterV2(
+			t,
+			fixture,
+			store,
+			model,
+			constantClockV2(exactModelTurnNowV2),
+		)
+		if _, err = adapter.StartOrInspectExactModelTurnV2(
+			context.Background(),
+			fixture.envelope,
+		); err == nil {
+			t.Fatal("alternate ACK exact Ref was not rejected by exact read")
+		}
+		if got := model.startCountV2(); got != 0 {
+			t.Fatalf("Model V3 starts=%d, want 0", got)
+		}
+	})
+}
+
+func TestExactModelTurnV2RejectsPreparedCurrentAckS2Drift(t *testing.T) {
+	testCases := []struct {
+		name      string
+		configure func(*testing.T, exactModelTurnFixtureV2, *preparedClosureReadersV2)
+	}{
+		{
+			name: "prepared historical",
+			configure: func(t *testing.T, fixture exactModelTurnFixtureV2, readers *preparedClosureReadersV2) {
+				readers.preparedDriftAt = 2
+				readers.preparedDrift = alternatePreparedHistoricalV2(t, fixture)
+			},
+		},
+		{
+			name: "prepared current",
+			configure: func(t *testing.T, fixture exactModelTurnFixtureV2, readers *preparedClosureReadersV2) {
+				readers.currentDriftAt = 2
+				readers.currentDrift = alternatePreparedCurrentV2(
+					t,
+					fixture,
+					exactModelTurnNowV2.Add(25*time.Minute),
+				)
+			},
+		},
+		{
+			name: "commit ACK",
+			configure: func(t *testing.T, fixture exactModelTurnFixtureV2, readers *preparedClosureReadersV2) {
+				readers.ackDriftAt = 2
+				readers.ackDrift = alternatePreparedAckV2(
+					t,
+					fixture,
+					exactModelTurnNowV2.Add(11*time.Minute),
+					"drifted-gate",
+				)
+			},
+		},
+	}
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			fixture := newExactModelTurnFixtureV2(t)
+			store := openDispatchStoreV2(t, filepath.Join(t.TempDir(), "prepared-s2-drift.db"))
+			defer store.Close()
+			readers := newPreparedClosureReadersV2(fixture)
+			testCase.configure(t, fixture, readers)
+			model := newGovernedModelTurnPortV3(t)
+			adapter := mustExactModelTurnAdapterWithPreparedReadersV2(
+				t,
+				fixture,
+				store,
+				model,
+				readers,
+				newPairReadersV2(fixture),
+				constantClockV2(exactModelTurnNowV2),
+			)
+			if _, err := adapter.StartOrInspectExactModelTurnV2(
+				context.Background(),
+				fixture.envelope,
+			); err == nil {
+				t.Fatal("Prepared/Current/ACK S2 drift was accepted")
+			}
+			if got := model.startCountV2(); got != 1 {
+				t.Fatalf("Model V3 starts=%d, want the single call between S1 and S2", got)
+			}
+			ref, err := bridgecontract.DeriveModelTurnDispatchRefV2(fixture.envelope)
+			if err != nil {
+				t.Fatal(err)
+			}
+			stored, err := store.InspectExactModelTurnDispatchV2(context.Background(), ref)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if stored.State != bridgecontract.ModelTurnDispatchAttemptBoundV2 {
+				t.Fatal("S2 drift advanced the durable Harness outcome")
+			}
+		})
+	}
+}
+
+func TestExactModelTurnV2RejectsPreparedClosureUnavailableAndAckExpiry(t *testing.T) {
+	for _, role := range []string{"prepared", "current", "ack"} {
+		t.Run(role+" unavailable", func(t *testing.T) {
+			fixture := newExactModelTurnFixtureV2(t)
+			store := openDispatchStoreV2(t, filepath.Join(t.TempDir(), "prepared-unavailable.db"))
+			defer store.Close()
+			readers := newPreparedClosureReadersV2(fixture)
+			readers.unavailableRole = role
+			model := newGovernedModelTurnPortV3(t)
+			adapter := mustExactModelTurnAdapterWithPreparedReadersV2(
+				t,
+				fixture,
+				store,
+				model,
+				readers,
+				newPairReadersV2(fixture),
+				constantClockV2(exactModelTurnNowV2),
+			)
+			if _, err := adapter.StartOrInspectExactModelTurnV2(
+				context.Background(),
+				fixture.envelope,
+			); !core.HasCategory(err, core.ErrorUnavailable) {
+				t.Fatalf("error=%v, want unavailable", err)
+			}
+			if got := model.startCountV2(); got != 0 {
+				t.Fatalf("Model V3 starts=%d, want 0", got)
+			}
+		})
+	}
+
+	t.Run("ACK now equals expiry", func(t *testing.T) {
+		fixture := newExactModelTurnFixtureV2(t)
+		expiringAck := alternatePreparedAckV2(
+			t,
+			fixture,
+			exactModelTurnNowV2,
+			"expiring-gate",
+		)
+		fixture.ack = expiringAck
+		fixture.envelope.ContractVersion = ""
+		fixture.envelope.ID = ""
+		fixture.envelope.Revision = 0
+		fixture.envelope.Digest = ""
+		fixture.envelope.AckRef = expiringAck.Ref()
+		fixture.envelope.RequestedNotAfterUnixNano = exactModelTurnNowV2.UnixNano()
+		envelope, err := bridgecontract.SealModelTurnExactEnvelopeV2(fixture.envelope)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.envelope = envelope
+		store := openDispatchStoreV2(t, filepath.Join(t.TempDir(), "ack-expired.db"))
+		defer store.Close()
+		model := newGovernedModelTurnPortV3(t)
+		adapter := newExactModelTurnAdapterV2(
+			t,
+			fixture,
+			store,
+			model,
+			constantClockV2(exactModelTurnNowV2),
+		)
+		if _, err = adapter.StartOrInspectExactModelTurnV2(
+			context.Background(),
+			fixture.envelope,
+		); err == nil {
+			t.Fatal("ACK exact-expiry was accepted")
+		}
+		if got := model.startCountV2(); got != 0 {
+			t.Fatalf("Model V3 starts=%d, want 0", got)
+		}
+	})
 }
 
 func TestExactModelTurnV2RestartRecoversAttemptBoundWithoutRedispatchIdentity(t *testing.T) {
@@ -688,6 +1071,39 @@ func TestExactModelTurnV2TypedNilAndCancellationFailClosed(t *testing.T) {
 	if err == nil {
 		t.Fatal("typed-nil Material reader was accepted")
 	}
+	validPrepared := newPreparedClosureReadersV2(fixture)
+	var nilPrepared *preparedClosureReadersV2
+	for _, role := range []string{"prepared_history", "prepared_current", "ack_history"} {
+		t.Run("typed nil "+role, func(t *testing.T) {
+			readers := modelinvokeradapter.ExactModelTurnClosureReadersV2{
+				PreparedHistory: validPrepared,
+				PreparedCurrent: validPrepared,
+				AckHistory:      validPrepared,
+				Materials:       &materialReaderV2{material: fixture.material},
+				ContextPair:     newPairReadersV2(fixture),
+				ToolPair:        newPairReadersV2(fixture),
+			}
+			switch role {
+			case "prepared_history":
+				readers.PreparedHistory = nilPrepared
+			case "prepared_current":
+				readers.PreparedCurrent = nilPrepared
+			case "ack_history":
+				readers.AckHistory = nilPrepared
+			}
+			adapter, constructorErr := modelinvokeradapter.NewExactModelTurnAdapterV2(
+				modelinvokeradapter.ExactModelTurnAdapterConfigV2{
+					Readers:    readers,
+					Dispatches: store,
+					Model:      newGovernedModelTurnPortV3(t),
+					Clock:      constantClockV2(exactModelTurnNowV2),
+				},
+			)
+			if constructorErr == nil || adapter != nil {
+				t.Fatal("typed-nil Prepared/ACK reader was accepted")
+			}
+		})
+	}
 	adapter := newExactModelTurnAdapterV2(t, fixture, store, newGovernedModelTurnPortV3(t), constantClockV2(exactModelTurnNowV2))
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -804,6 +1220,7 @@ func TestSQLiteModelTurnDispatchV2RejectsWeakPhysicalSchemaOnReopen(t *testing.T
 	const factTable = `CREATE TABLE harness_model_turn_dispatch_v2 (
 	  dispatch_id TEXT PRIMARY KEY,
 	  dispatch_ref_digest TEXT NOT NULL,
+	  ack_ref_digest TEXT NOT NULL,
 	  fact_digest TEXT NOT NULL,
 	  revision INTEGER NOT NULL CHECK(revision > 0),
 	  state TEXT NOT NULL,
@@ -811,7 +1228,7 @@ func TestSQLiteModelTurnDispatchV2RejectsWeakPhysicalSchemaOnReopen(t *testing.T
 	  canonical_json BLOB NOT NULL
 	)`
 	const exactIndex = `CREATE INDEX harness_model_turn_dispatch_v2_exact
-	  ON harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,fact_digest,revision,state,not_after_unix_nano)`
+	  ON harness_model_turn_dispatch_v2(dispatch_id,dispatch_ref_digest,ack_ref_digest,fact_digest,revision,state,not_after_unix_nano)`
 	testCases := []struct {
 		name   string
 		mutate func(*testing.T, *sql.DB)
@@ -835,6 +1252,17 @@ func TestSQLiteModelTurnDispatchV2RejectsWeakPhysicalSchemaOnReopen(t *testing.T
 					db,
 					strings.Replace(factTable, "canonical_json BLOB NOT NULL", "canonical_json BLOB NOT NULL,\nextra_column TEXT", 1),
 					exactIndex,
+				)
+			},
+		},
+		{
+			name: "missing ACK digest column",
+			mutate: func(t *testing.T, db *sql.DB) {
+				rebuildSQLiteModelTurnDispatchFactTableV2(
+					t,
+					db,
+					strings.Replace(factTable, "\n\t  ack_ref_digest TEXT NOT NULL,", "", 1),
+					strings.Replace(exactIndex, ",ack_ref_digest", "", 1),
 				)
 			},
 		},
@@ -933,6 +1361,48 @@ func TestSQLiteModelTurnDispatchV2RejectsWeakPhysicalSchemaOnReopen(t *testing.T
 	}
 }
 
+func TestSQLiteModelTurnDispatchV2RejectsAckDigestRowSplice(t *testing.T) {
+	fixture := newExactModelTurnFixtureV2(t)
+	path := filepath.Join(t.TempDir(), "ack-row-splice.db")
+	store := openDispatchStoreV2(t, path)
+	ref, err := bridgecontract.DeriveModelTurnDispatchRefV2(fixture.envelope)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attempt, err := bridgecontract.NewModelTurnDispatchAttemptFactV2(ref)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.EnsureModelTurnDispatchAttemptV2(context.Background(), attempt); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err := sql.Open("sqlite", "file:"+path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = db.Exec(
+		`UPDATE harness_model_turn_dispatch_v2 SET ack_ref_digest=? WHERE dispatch_id=?`,
+		string(digestV2("spliced-ack-row")),
+		ref.ID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened := openDispatchStoreV2(t, path)
+	defer reopened.Close()
+	if _, err = reopened.InspectExactModelTurnDispatchV2(
+		context.Background(),
+		ref,
+	); !core.HasCategory(err, core.ErrorConflict) {
+		t.Fatalf("ack digest row splice error=%v, want Conflict", err)
+	}
+}
+
 func TestSQLiteModelTurnDispatchV2PhysicalVerificationSupportsOneConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
@@ -998,11 +1468,35 @@ func mustExactModelTurnAdapterV2(
 	clock func() time.Time,
 ) *modelinvokeradapter.ExactModelTurnAdapterV2 {
 	t.Helper()
+	return mustExactModelTurnAdapterWithPreparedReadersV2(
+		t,
+		fixture,
+		store,
+		model,
+		newPreparedClosureReadersV2(fixture),
+		pairs,
+		clock,
+	)
+}
+
+func mustExactModelTurnAdapterWithPreparedReadersV2(
+	t *testing.T,
+	fixture exactModelTurnFixtureV2,
+	store harnessports.ModelTurnDispatchRepositoryV2,
+	model modelinvoker.GovernedModelTurnPortV3,
+	prepared *preparedClosureReadersV2,
+	pairs *pairReadersV2,
+	clock func() time.Time,
+) *modelinvokeradapter.ExactModelTurnAdapterV2 {
+	t.Helper()
 	adapter, err := modelinvokeradapter.NewExactModelTurnAdapterV2(modelinvokeradapter.ExactModelTurnAdapterConfigV2{
 		Readers: modelinvokeradapter.ExactModelTurnClosureReadersV2{
-			Materials:   &materialReaderV2{material: fixture.material},
-			ContextPair: pairs,
-			ToolPair:    pairs,
+			PreparedHistory: prepared,
+			PreparedCurrent: prepared,
+			AckHistory:      prepared,
+			Materials:       &materialReaderV2{material: fixture.material},
+			ContextPair:     pairs,
+			ToolPair:        pairs,
 		},
 		Dispatches: store,
 		Model:      model,
@@ -1012,6 +1506,75 @@ func mustExactModelTurnAdapterV2(
 		t.Fatal(err)
 	}
 	return adapter
+}
+
+func newPreparedClosureReadersV2(fixture exactModelTurnFixtureV2) *preparedClosureReadersV2 {
+	return &preparedClosureReadersV2{
+		prepared: fixture.prepared,
+		current:  fixture.current,
+		ack:      fixture.ack,
+	}
+}
+
+func alternatePreparedHistoricalV2(
+	t *testing.T,
+	fixture exactModelTurnFixtureV2,
+) modelinvoker.PreparedModelInvocationFactV1 {
+	t.Helper()
+	prepared := fixture.prepared
+	prepared.ContractVersion = ""
+	prepared.ID = ""
+	prepared.Revision = 0
+	prepared.Digest = ""
+	prepared.InvocationID += "-drift"
+	prepared.InvocationDigest = digestV2("drifted-prepared-request")
+	prepared.UnifiedRequestDigest = prepared.InvocationDigest
+	sealed, err := modelinvoker.SealPreparedModelInvocationFactV1(prepared)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealed
+}
+
+func alternatePreparedCurrentV2(
+	t *testing.T,
+	fixture exactModelTurnFixtureV2,
+	expires time.Time,
+) modelinvoker.PreparedModelInvocationCurrentProjectionV1 {
+	t.Helper()
+	current := fixture.current
+	current.ContractVersion = ""
+	current.ID = ""
+	current.Revision = 0
+	current.Digest = ""
+	current.ExpiresUnixNano = expires.UnixNano()
+	sealed, err := modelinvoker.SealPreparedModelInvocationCurrentV1(current)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealed
+}
+
+func alternatePreparedAckV2(
+	t *testing.T,
+	fixture exactModelTurnFixtureV2,
+	expires time.Time,
+	gateID string,
+) modelinvoker.PreparedModelInvocationCommitAckV1 {
+	t.Helper()
+	ack := fixture.ack
+	ack.ContractVersion = ""
+	ack.ID = ""
+	ack.Revision = 0
+	ack.Digest = ""
+	ack.ExpiresUnixNano = expires.UnixNano()
+	ack.GateImplementationRef.ID = gateID
+	ack.GateImplementationRef.Digest = digestV2(gateID)
+	sealed, err := modelinvoker.SealPreparedModelInvocationCommitAckV1(ack)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sealed
 }
 
 func openDispatchStoreV2(t *testing.T, path string) *modelinvokeradapter.SQLiteModelTurnDispatchV2 {
@@ -1140,6 +1703,36 @@ func newExactModelTurnFixtureAtV2(t *testing.T, sequence uint64, now time.Time) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	ack, err := modelinvoker.SealPreparedModelInvocationCommitAckV1(
+		modelinvoker.PreparedModelInvocationCommitAckV1{
+			PreparedRef: prepared.Ref(),
+			CurrentRef:  current.Ref(),
+			GateImplementationRef: modelinvoker.PreparedModelInvocationGateImplementationRefV1{
+				Owner:           ownerV2("harness", "prepared-commit-gate"),
+				ContractVersion: "1.0.0",
+				ID:              "prepared-commit-gate",
+				Revision:        1,
+				Digest:          digestV2("prepared-commit-gate"),
+			},
+			SurfaceBindingRef: modelinvoker.PreparedModelInvocationSurfaceBindingRefV1{
+				Owner:           ownerV2("tool", "surface-binding-owner"),
+				ContractVersion: "1.0.0",
+				ID:              "surface-binding",
+				Revision:        1,
+				Digest:          digestV2("surface-binding"),
+			},
+			CheckedUnixNano:  now.Add(-time.Minute).UnixNano(),
+			ExpiresUnixNano:  now.Add(12 * time.Minute).UnixNano(),
+			NotAfterUnixNano: current.NotAfterUnixNano,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if prepared.Digest == current.Digest || prepared.Digest == ack.Digest ||
+		current.Digest == ack.Digest {
+		t.Fatal("Prepared, Current, and ACK fixture digests must be distinct")
+	}
 	contextOwner, toolOwner := ownerV2("context", "context-owner"), ownerV2("tool", "tool-owner")
 	lineage, err := modelinvoker.SealInvocationMaterialSourceLineageV2(modelinvoker.InvocationMaterialSourceLineageV2{
 		ContextFrame:             exactOwnedRefV2(contextOwner, modelinvoker.InvocationMaterialContextFrameKindV2, "frame", digestV2("frame")),
@@ -1198,12 +1791,19 @@ func newExactModelTurnFixtureAtV2(t *testing.T, sequence uint64, now time.Time) 
 	envelope, err := bridgecontract.SealModelTurnExactEnvelopeV2(bridgecontract.ModelTurnExactEnvelopeV2{
 		Material:                  material.RefV2(),
 		Command:                   command,
+		AckRef:                    ack.Ref(),
 		RequestedNotAfterUnixNano: now.Add(8 * time.Minute).UnixNano(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	return exactModelTurnFixtureV2{material: material, envelope: envelope}
+	return exactModelTurnFixtureV2{
+		prepared: prepared,
+		current:  current,
+		ack:      ack,
+		material: material,
+		envelope: envelope,
+	}
 }
 
 func mustDigestRequestToolsV2(t *testing.T, call modelinvoker.RouteCall) core.Digest {

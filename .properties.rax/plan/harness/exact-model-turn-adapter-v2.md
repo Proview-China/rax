@@ -1,6 +1,6 @@
 # Harness Exact Model Turn Adapter V2 落地计划
 
-状态：**owner-local 代码候选的 post-bind fresh-clock P1 已返修并通过机械门；等待独立返修复审。**
+状态：**PR #62 的 Prepared/Current/ACK S1/S2 唯一 P1 已返修；等待完整门禁与独立复审。**
 
 设计入口：
 [Harness Exact Model Turn Adapter V2](../../design/harness/exact-model-turn-adapter-v2/README.md)。
@@ -11,12 +11,16 @@
 - [x] 新增 Harness additive Port，不修改旧 `ModelTurnPort`。
 - [x] 新增单节点 durable SQLite sidecar。
 - [x] 用 Model 公共四源 Pair Reader 做 S1/S2。
+- [x] Envelope exact 绑定 Model Commit ACK Ref 与共同最短 TTL。
+- [x] S1/S2 exact 重读 Prepared Historical、Prepared Current、Commit ACK，
+  并复用 Model 公共 dispatch receipt guard 闭合 currentness。
 - [x] 接入 `GovernedModelTurnPortV3` 的 owner-local start-or-inspect。
 - [x] 覆盖 TTL、时钟回退、typed-nil、漂移、重启、丢回包和 64 并发。
 - [x] Unknown 恢复统一使用 `WithDeadline(WithoutCancel(ctx), exactTTL)`。
 - [x] outcome Bind 正常/恢复返回前统一重取 fresh clock 并复核共同 TTL 与
   Outcome currentness。
 - [x] SQLite ledger 与物理 DDL/列/index/约束形成 reopen fail-closed 门禁。
+- [x] SQLite canonical 行与物理 schema 交叉绑定 `ack_ref_digest`。
 - [x] 区分 fresh 与已应用 schema：已应用 V2 禁止 Open 时静默 repair，
   partial no-ledger 必须 fail closed。
 - [ ] 独立代码终审。

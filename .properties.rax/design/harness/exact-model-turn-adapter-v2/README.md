@@ -20,6 +20,8 @@ composition adapter，本切面不得宣称 production root 已闭合。
 - 输入：`bridgecontract.ModelTurnExactEnvelopeV2`
   - 精确绑定 `InvocationMaterialRefV2`；
   - 精确绑定 `GovernedModelTurnCommandV3`；
+  - 精确绑定 `PreparedModelInvocationCommitAckRefV1`，且 ACK 必须与 Command
+    的 Prepared/Current 坐标一致；
   - `RequestedNotAfterUnixNano` 只能缩短所有 Owner current 窗口。
 - 输出：`bridgecontract.ModelTurnDispatchFactV2`
   - `attempt_bound`：Harness 已持久绑定唯一 Model attempt；
@@ -35,13 +37,19 @@ composition adapter，本切面不得宣称 production root 已闭合。
 2. 从 SQLite sidecar 精确 Inspect；不存在时 create-once 写入
    `attempt_bound`。
 3. S1 依次读取：
+   - Model Prepared Historical；
+   - Model Prepared Current；
+   - Model Commit ACK；
    - Model `InvocationMaterialV2`；
    - ContextFrame + ContextMaterial Pair；
    - ToolInjectionMaterial + ToolSurface Pair。
 4. 调用 Model Owner 的 `StartOrInspectGovernedModelTurnV3`。该 V3 首切面只产生
    Model owner-local `prepared` outcome，不包含 Provider 调用。
-5. S2 重读完整四源闭包；任一 Ref、摘要、current projection 或 TTL 漂移均
-   fail closed。
+5. S2 重读完整 Prepared/Current/ACK/Invocation/Context/Tool 闭包；任一
+   Ref、摘要、current projection、Gate implementation 或 TTL 漂移均 fail
+   closed。Prepared/Current/ACK 闭合复用 Model 公共
+   `SealPreparedModelInvocationDispatchReceiptAgainstV1` guard，不创建可复用
+   permit。
 6. 使用新鲜时钟检查共同最短 TTL，CAS 写入 `outcome_bound`；无论 Bind
    正常返回还是 Unknown 后 exact Inspect 恢复，返回前都必须再次取得 fresh
    trusted clock，拒绝 clock regression、`now == common expiry` 和不再 current
@@ -72,7 +80,8 @@ Harness modelinvokeradapter
 ## 5. 持久化不变量
 
 - Dispatch ID 由完整 Envelope 与 Model attempt 确定性派生。
-- SQLite 行保存完整 canonical Fact，并在每次读取时交叉校验索引列。
+- SQLite 行保存完整 canonical Fact，并在每次读取时交叉校验索引列；物理行
+  额外交叉绑定 `ack_ref_digest`，使新增 ACK canonical 合同进入 schema ledger。
 - 状态只允许 `attempt_bound -> outcome_bound`，不能回退或覆盖。
 - 相同 ID、不同 canonical 内容必须 Conflict。
 - fresh 数据库只在三个 owner schema 对象全部不存在时创建；一旦 V2 ledger
@@ -88,7 +97,10 @@ Harness modelinvokeradapter
 测试必须覆盖：
 
 - Envelope/DispatchRef 摘要漂移与非 canonical JSON；
-- 四个 source role 分别在 S2 漂移；
+- Prepared Historical、Prepared Current、Commit ACK 与四个 Context/Tool
+  source role 分别在 S2 漂移；
+- Prepared/Current/ACK splice、revision/digest/TTL、Gate implementation
+  漂移与 unavailable/typed-nil；
 - `now == expiry`、调用途中 TTL crossing、clock rollback；
 - typed-nil、cancel；
 - 三条 Unknown 恢复 Inspect 均等待 `ctx.Done()`，且 deadline 精确绑定各自 TTL；

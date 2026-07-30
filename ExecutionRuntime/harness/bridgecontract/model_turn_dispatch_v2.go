@@ -22,13 +22,14 @@ const (
 // a caller-selected upper lifetime bound. It carries no prompt, Tool payload,
 // Provider response, PendingAction, Turn mutation, or authority.
 type ModelTurnExactEnvelopeV2 struct {
-	ContractVersion           string                                  `json:"contract_version"`
-	ID                        string                                  `json:"id"`
-	Revision                  core.Revision                           `json:"revision"`
-	Digest                    core.Digest                             `json:"digest"`
-	Material                  modelinvoker.InvocationMaterialRefV2    `json:"material"`
-	Command                   modelinvoker.GovernedModelTurnCommandV3 `json:"command"`
-	RequestedNotAfterUnixNano int64                                   `json:"requested_not_after_unix_nano"`
+	ContractVersion           string                                             `json:"contract_version"`
+	ID                        string                                             `json:"id"`
+	Revision                  core.Revision                                      `json:"revision"`
+	Digest                    core.Digest                                        `json:"digest"`
+	Material                  modelinvoker.InvocationMaterialRefV2               `json:"material"`
+	Command                   modelinvoker.GovernedModelTurnCommandV3            `json:"command"`
+	AckRef                    modelinvoker.PreparedModelInvocationCommitAckRefV1 `json:"ack_ref"`
+	RequestedNotAfterUnixNano int64                                              `json:"requested_not_after_unix_nano"`
 }
 
 func (e ModelTurnExactEnvelopeV2) Validate() error {
@@ -53,9 +54,12 @@ func (e ModelTurnExactEnvelopeV2) Validate() error {
 
 func (e ModelTurnExactEnvelopeV2) validateBodyV2() error {
 	if e.Material.Validate() != nil || e.Command.Validate() != nil ||
+		e.AckRef.Validate() != nil ||
 		e.Command.MaterialRef != e.Material ||
 		e.Command.PreparedRef != e.Material.PreparedRef ||
 		e.Command.CurrentRef != e.Material.AuthorizationRef.CurrentRef ||
+		e.AckRef.PreparedRef != e.Command.PreparedRef ||
+		e.AckRef.CurrentRef != e.Command.CurrentRef ||
 		e.Command.AttemptRequestDigest != e.Material.UnifiedRequestDigest ||
 		e.Command.RouteCallDigest != e.Material.RouteCallDigest {
 		return exactModelTurnContractErrorV2(core.ErrorConflict, core.ReasonInvalidReference, "exact model-turn V2 Model lineage drifted")
@@ -63,7 +67,9 @@ func (e ModelTurnExactEnvelopeV2) validateBodyV2() error {
 	if e.RequestedNotAfterUnixNano <= 0 ||
 		e.RequestedNotAfterUnixNano > e.Material.ExpiresUnixNano ||
 		e.RequestedNotAfterUnixNano > e.Command.CurrentRef.ExpiresUnixNano ||
-		e.RequestedNotAfterUnixNano > e.Command.CurrentRef.NotAfterUnixNano {
+		e.RequestedNotAfterUnixNano > e.Command.CurrentRef.NotAfterUnixNano ||
+		e.RequestedNotAfterUnixNano > e.AckRef.ExpiresUnixNano ||
+		e.RequestedNotAfterUnixNano > e.AckRef.NotAfterUnixNano {
 		return exactModelTurnContractErrorV2(core.ErrorInvalidArgument, core.ReasonBindingExpired, "exact model-turn V2 requested lifetime is invalid")
 	}
 	return nil
