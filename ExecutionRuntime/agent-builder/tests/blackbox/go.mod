@@ -6,11 +6,11 @@ require (
 	github.com/Proview-China/rax/ExecutionRuntime/agent-assembler v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/agent-builder v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/agent-definition v0.0.0
+	github.com/Proview-China/rax/ExecutionRuntime/harness v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/runtime v0.0.0
 )
 
 require (
-	github.com/Proview-China/rax/ExecutionRuntime/harness v0.0.0 // indirect
 	github.com/dustin/go-humanize v1.0.1 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/mattn/go-isatty v0.0.20 // indirect
