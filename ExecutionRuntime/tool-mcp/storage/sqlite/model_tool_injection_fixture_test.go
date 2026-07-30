@@ -19,7 +19,7 @@ import (
 type sqliteModelToolCompileFixtureV1 struct {
 	Surfaces                *surface.InMemoryToolSurfaceManifestCurrentRepositoryV1
 	Definitions             *surface.InMemoryToolDefinitionMaterialRepositoryV1
-	Currents                *applicationadapter.RegistryObjectCurrentReaderV1
+	Currents                toolcontract.ToolRegistryObjectCurrentReaderV1
 	Current                 toolcontract.ToolSurfaceManifestCurrentProjectionV1
 	ExpectedExpiresUnixNano int64
 }
@@ -129,30 +129,9 @@ func sqliteCompileFixtureV1(t *testing.T, clock *testkit.ManualClock) sqliteMode
 	if strings.TrimSpace(current.Ref.ID) == "" {
 		t.Fatal("Model Tool Injection fixture Surface current is absent")
 	}
-	_, capabilityCurrent, err := currents.ResolveExactToolCapabilityCurrentV1(context.Background(), tool.Capability)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, toolCurrent, err := currents.ResolveExactToolDescriptorCurrentV1(context.Background(), toolcontract.ObjectRef{
-		ID: string(tool.ID), Revision: tool.Revision, Digest: tool.Digest,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	expectedExpires := current.ExpiresUnixNano
-	for _, candidate := range []int64{
-		capabilityCurrent.ExpiresUnixNano,
-		capabilityCurrent.Source.UpdatedUnixNano + int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
-		toolCurrent.ExpiresUnixNano,
-		toolCurrent.Source.UpdatedUnixNano + int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
-	} {
-		if candidate < expectedExpires {
-			expectedExpires = candidate
-		}
-	}
 	return sqliteModelToolCompileFixtureV1{
 		Surfaces: surfaces, Definitions: definitions, Currents: currents, Current: current,
-		ExpectedExpiresUnixNano: expectedExpires,
+		ExpectedExpiresUnixNano: current.Manifest.ExpiresUnixNano,
 	}
 }
 

@@ -124,14 +124,6 @@ func CompileModelToolInjectionMaterialV1(
 		if err := validateModelToolInjectionDescriptorClosureV1(entry, capability, tool); err != nil {
 			return zero(err)
 		}
-		expires = minimumUnixNanoV2(
-			expires,
-			capabilityCurrent.ExpiresUnixNano,
-			capabilityCurrent.Source.UpdatedUnixNano+int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
-			toolCurrent.ExpiresUnixNano,
-			toolCurrent.Source.UpdatedUnixNano+int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
-		)
-		created = maximumUnixNanoV2(created, capabilityCurrent.Source.UpdatedUnixNano, toolCurrent.Source.UpdatedUnixNano)
 		closures = append(closures, modelToolInjectionClosureV1{
 			entry: entry, definition: definition, capability: capability, capabilityCurrent: capabilityCurrent,
 			tool: tool, toolCurrent: toolCurrent,
@@ -206,14 +198,6 @@ func CompileModelToolInjectionMaterialV1(
 			return zero(err)
 		}
 		nowS2 = toolNowS2
-		expires = minimumUnixNanoV2(
-			expires,
-			capabilityCurrentS2.ExpiresUnixNano,
-			capabilityCurrentS2.Source.UpdatedUnixNano+int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
-			toolCurrentS2.ExpiresUnixNano,
-			toolCurrentS2.Source.UpdatedUnixNano+int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
-		)
-		created = maximumUnixNanoV2(created, capabilityCurrentS2.Source.UpdatedUnixNano, toolCurrentS2.Source.UpdatedUnixNano)
 		closures[index].definition = definitionS2
 	}
 	if err := ctx.Err(); err != nil {
@@ -290,26 +274,6 @@ func dependencyUnavailableV2(value any) bool {
 	default:
 		return false
 	}
-}
-
-func minimumUnixNanoV2(values ...int64) int64 {
-	minimum := values[0]
-	for _, value := range values[1:] {
-		if value < minimum {
-			minimum = value
-		}
-	}
-	return minimum
-}
-
-func maximumUnixNanoV2(values ...int64) int64 {
-	maximum := values[0]
-	for _, value := range values[1:] {
-		if value > maximum {
-			maximum = value
-		}
-	}
-	return maximum
 }
 
 func sameRegistryCurrentStableV2(left, right toolcontract.ToolRegistryObjectCurrentProjectionV1) bool {

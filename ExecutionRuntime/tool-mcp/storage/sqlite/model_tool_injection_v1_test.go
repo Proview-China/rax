@@ -146,6 +146,98 @@ func TestSQLiteModelToolInjectionMaterialV1AdvancingClockConcurrentConverges(t *
 	}
 }
 
+func TestSQLiteModelToolInjectionMaterialV1RefreshingCurrentsConvergeAcrossStores(t *testing.T) {
+	path := t.TempDir() + "/tool-owner.db"
+	sourceClock := testkit.NewManualClock(testkit.FixedTime.Add(time.Second))
+	fixture := sqliteCompileFixtureV1(t, sourceClock)
+	clock := &advancingModelToolClockV1{base: testkit.FixedTime.Add(2 * time.Second)}
+	currents := &refreshingRegistryCurrentReaderV1{base: fixture.Currents, clock: clock.Now}
+	first, err := toolsqlite.OpenV1(context.Background(), toolsqlite.ConfigV1{
+		Path: path, Clock: clock.Now, Owner: testkit.Owner(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	second, err := toolsqlite.OpenV1(context.Background(), toolsqlite.ConfigV1{
+		Path: path, Clock: clock.Now, Owner: testkit.Owner(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+
+	const workers = 64
+	var wg sync.WaitGroup
+	values := make(chan toolcontract.ModelToolInjectionMaterialV1, workers)
+	errs := make(chan error, workers)
+	for index := range workers {
+		wg.Add(1)
+		go func(store *toolsqlite.StoreV1) {
+			defer wg.Done()
+			_, material, err := store.CompileAndEnsureModelToolInjectionMaterialV1(
+				context.Background(), fixture.Current.Ref, fixture.Surfaces, fixture.Definitions, currents,
+			)
+			if err == nil {
+				values <- material
+			}
+			errs <- err
+		}([]*toolsqlite.StoreV1{first, second}[index%2])
+	}
+	wg.Wait()
+	close(values)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var winner toolcontract.ModelToolInjectionMaterialV1
+	for material := range values {
+		if winner.Ref == (toolcontract.ModelToolInjectionMaterialRefV1{}) {
+			winner = material
+		} else if !reflect.DeepEqual(winner, material) {
+			t.Fatal("refreshing Current projections changed immutable Material identity")
+		}
+	}
+	if winner.CreatedUnixNano != fixture.Current.Manifest.CreatedUnixNano ||
+		winner.ExpiresUnixNano != fixture.Current.Manifest.ExpiresUnixNano {
+		t.Fatalf("Material lifetime did not bind exact Surface Manifest: created=%d expires=%d", winner.CreatedUnixNano, winner.ExpiresUnixNano)
+	}
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var rows int
+	if err = db.QueryRow(`SELECT COUNT(*) FROM model_tool_injection_material_v1`).Scan(&rows); err != nil {
+		t.Fatal(err)
+	}
+	if rows != 1 {
+		t.Fatalf("refreshing Current projections produced %d Material rows, want 1", rows)
+	}
+}
+
+func TestSQLiteModelToolInjectionMaterialV1ExpiredDynamicCurrentFailsClosed(t *testing.T) {
+	path := t.TempDir() + "/tool-owner.db"
+	sourceClock := testkit.NewManualClock(testkit.FixedTime.Add(time.Second))
+	fixture := sqliteCompileFixtureV1(t, sourceClock)
+	clock := &advancingModelToolClockV1{base: testkit.FixedTime.Add(2 * time.Second)}
+	currents := &refreshingRegistryCurrentReaderV1{base: fixture.Currents, clock: clock.Now, expired: true}
+	store, err := toolsqlite.OpenV1(context.Background(), toolsqlite.ConfigV1{
+		Path: path, Clock: clock.Now, Owner: testkit.Owner(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	if _, _, err = store.CompileAndEnsureModelToolInjectionMaterialV1(
+		context.Background(), fixture.Current.Ref, fixture.Surfaces, fixture.Definitions, currents,
+	); err == nil || !core.HasCategory(err, core.ErrorPreconditionFailed) {
+		t.Fatalf("expired dynamic Registry Current did not fail closed: %v", err)
+	}
+}
+
 func TestSQLiteModelToolInjectionMaterialV1SpliceFailClosed(t *testing.T) {
 	for _, test := range []struct {
 		name          string
@@ -344,6 +436,60 @@ func TestSQLiteToolSurfaceInvocationBindingV1SpliceFailClosed(t *testing.T) {
 			}
 		})
 	}
+}
+
+type advancingModelToolClockV1 struct {
+	base  time.Time
+	ticks atomic.Int64
+}
+
+func (c *advancingModelToolClockV1) Now() time.Time {
+	return c.base.Add(time.Duration(c.ticks.Add(1)) * time.Nanosecond)
+}
+
+type refreshingRegistryCurrentReaderV1 struct {
+	base    toolcontract.ToolRegistryObjectCurrentReaderV1
+	clock   func() time.Time
+	expired bool
+}
+
+func (r *refreshingRegistryCurrentReaderV1) ResolveExactToolCapabilityCurrentV1(ctx context.Context, object toolcontract.ObjectRef) (toolcontract.CapabilityDescriptor, toolcontract.ToolRegistryObjectCurrentProjectionV1, error) {
+	value, current, err := r.base.ResolveExactToolCapabilityCurrentV1(ctx, object)
+	current, err = r.refresh(current, err)
+	return value, current, err
+}
+
+func (r *refreshingRegistryCurrentReaderV1) InspectExactToolCapabilityCurrentV1(ctx context.Context, object toolcontract.ObjectRef, expected toolcontract.ToolRegistryObjectCurrentRefV1) (toolcontract.CapabilityDescriptor, toolcontract.ToolRegistryObjectCurrentProjectionV1, error) {
+	value, current, err := r.base.InspectExactToolCapabilityCurrentV1(ctx, object, expected)
+	current, err = r.refresh(current, err)
+	return value, current, err
+}
+
+func (r *refreshingRegistryCurrentReaderV1) ResolveExactToolDescriptorCurrentV1(ctx context.Context, object toolcontract.ObjectRef) (toolcontract.ToolDescriptor, toolcontract.ToolRegistryObjectCurrentProjectionV1, error) {
+	value, current, err := r.base.ResolveExactToolDescriptorCurrentV1(ctx, object)
+	current, err = r.refresh(current, err)
+	return value, current, err
+}
+
+func (r *refreshingRegistryCurrentReaderV1) InspectExactToolDescriptorCurrentV1(ctx context.Context, object toolcontract.ObjectRef, expected toolcontract.ToolRegistryObjectCurrentRefV1) (toolcontract.ToolDescriptor, toolcontract.ToolRegistryObjectCurrentProjectionV1, error) {
+	value, current, err := r.base.InspectExactToolDescriptorCurrentV1(ctx, object, expected)
+	current, err = r.refresh(current, err)
+	return value, current, err
+}
+
+func (r *refreshingRegistryCurrentReaderV1) refresh(current toolcontract.ToolRegistryObjectCurrentProjectionV1, readErr error) (toolcontract.ToolRegistryObjectCurrentProjectionV1, error) {
+	if readErr != nil {
+		return toolcontract.ToolRegistryObjectCurrentProjectionV1{}, readErr
+	}
+	now := r.clock()
+	current.CheckedUnixNano = now.UnixNano()
+	current.ExpiresUnixNano = now.Add(toolcontract.MaxToolRegistryObjectCurrentTTLV1).UnixNano()
+	if r.expired {
+		current.CheckedUnixNano = now.Add(-2 * time.Second).UnixNano()
+		current.ExpiresUnixNano = now.Add(-time.Second).UnixNano()
+	}
+	current.ProjectionDigest = ""
+	return toolcontract.SealToolRegistryObjectCurrentProjectionV1(current)
 }
 
 func sqliteMaterialV1(t *testing.T) toolcontract.ModelToolInjectionMaterialV1 {
