@@ -1,0 +1,118 @@
+[
+  {
+    "code": "INVALID_ARGUMENT",
+    "reason": "fixture_invalid_argument",
+    "message": "stable conformance fixture",
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "NONE"
+  },
+  {
+    "code": "UNAUTHENTICATED",
+    "reason": "fixture_unauthenticated",
+    "message": "stable conformance fixture",
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "NONE"
+  },
+  {
+    "code": "FORBIDDEN",
+    "reason": "fixture_forbidden",
+    "message": "stable conformance fixture",
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "NONE"
+  },
+  {
+    "code": "NOT_FOUND",
+    "reason": "fixture_not_found",
+    "message": "stable conformance fixture",
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "NONE"
+  },
+  {
+    "code": "REVISION_CONFLICT",
+    "reason": "fixture_revision_conflict",
+    "message": "stable conformance fixture",
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "NONE"
+  },
+  {
+    "code": "IDEMPOTENCY_CONFLICT",
+    "reason": "fixture_idempotency_conflict",
+    "message": "stable conformance fixture",
+    "command_ref": {
+      "kind": "praxis.agent-run-service/command",
+      "id": "command-cancel-1",
+      "revision": "1",
+      "digest": "sha256:3554f74e58c3e6d4acc9185a12c0b8b6662b86c96caeedcbf977354320559c3c"
+    },
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "NONE"
+  },
+  {
+    "code": "PRECONDITION_FAILED",
+    "reason": "fixture_precondition_failed",
+    "message": "stable conformance fixture",
+    "current_ref": {
+      "kind": "praxis.agent-run-service/event-retention-current",
+      "id": "retention-1",
+      "revision": "4",
+      "digest": "sha256:27d93242dc2ba9d8b747a80f8e5e08283c62fdf97531938e0917daecd1d87489"
+    },
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "INSPECT"
+  },
+  {
+    "code": "CAPABILITY_UNAVAILABLE",
+    "reason": "fixture_capability_unavailable",
+    "message": "stable conformance fixture",
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "NONE"
+  },
+  {
+    "code": "UNAVAILABLE",
+    "reason": "fixture_unavailable",
+    "message": "stable conformance fixture",
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "NONE"
+  },
+  {
+    "code": "RATE_LIMITED",
+    "reason": "fixture_rate_limited",
+    "message": "stable conformance fixture",
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "RETRY",
+    "retry_after_unix_nano": "1900000000000000500"
+  },
+  {
+    "code": "UNKNOWN_OUTCOME",
+    "reason": "fixture_unknown_outcome",
+    "message": "stable conformance fixture",
+    "command_ref": {
+      "kind": "praxis.agent-run-service/command",
+      "id": "command-cancel-1",
+      "revision": "1",
+      "digest": "sha256:3554f74e58c3e6d4acc9185a12c0b8b6662b86c96caeedcbf977354320559c3c"
+    },
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "INSPECT"
+  },
+  {
+    "code": "INDETERMINATE",
+    "reason": "fixture_indeterminate",
+    "message": "stable conformance fixture",
+    "command_ref": {
+      "kind": "praxis.agent-run-service/command",
+      "id": "command-cancel-1",
+      "revision": "1",
+      "digest": "sha256:3554f74e58c3e6d4acc9185a12c0b8b6662b86c96caeedcbf977354320559c3c"
+    },
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "INSPECT"
+  },
+  {
+    "code": "INTERNAL",
+    "reason": "fixture_internal",
+    "message": "stable conformance fixture",
+    "trace_id": "trace-fault-map-1",
+    "retry_directive": "NONE"
+  }
+]

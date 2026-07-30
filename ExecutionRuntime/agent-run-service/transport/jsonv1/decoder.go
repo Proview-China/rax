@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"io"
 	"reflect"
+	"strings"
 
 	"github.com/Proview-China/rax/ExecutionRuntime/agent-run-service/contract"
 )
@@ -38,6 +39,9 @@ func (d DecoderV1) DecodeStrictV1(payload []byte, target any) error {
 	if err := rejectDuplicateKeysV1(payload); err != nil {
 		return err
 	}
+	if err := rejectExplicitOptionalNullV1(payload, reflect.TypeOf(target).Elem()); err != nil {
+		return err
+	}
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
@@ -46,6 +50,78 @@ func (d DecoderV1) DecodeStrictV1(payload []byte, target any) error {
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return contract.NewError(contract.FaultInvalidArgumentV1, "json_trailing_document", "JSON payload contains a trailing document")
+	}
+	return nil
+}
+
+// rejectExplicitOptionalNullV1 keeps optional wire fields binary: a field is
+// either absent or contains a value. Explicit JSON null is rejected for
+// pointer fields tagged omitempty so generated clients cannot collapse
+// "absent" and "present but null" into one ambiguous state.
+func rejectExplicitOptionalNullV1(payload []byte, targetType reflect.Type) error {
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.UseNumber()
+	var document any
+	if err := decoder.Decode(&document); err != nil {
+		return contract.NewError(contract.FaultInvalidArgumentV1, "json_syntax_invalid", err.Error())
+	}
+	return rejectOptionalNullValueV1(document, targetType, "$")
+}
+
+func rejectOptionalNullValueV1(value any, targetType reflect.Type, path string) error {
+	for targetType.Kind() == reflect.Pointer {
+		targetType = targetType.Elem()
+	}
+	switch targetType.Kind() {
+	case reflect.Struct:
+		object, ok := value.(map[string]any)
+		if !ok {
+			return nil
+		}
+		for index := 0; index < targetType.NumField(); index++ {
+			field := targetType.Field(index)
+			if field.PkgPath != "" {
+				continue
+			}
+			tag := field.Tag.Get("json")
+			parts := strings.Split(tag, ",")
+			name := parts[0]
+			if name == "-" {
+				continue
+			}
+			if name == "" {
+				name = field.Name
+			}
+			child, present := object[name]
+			if !present {
+				continue
+			}
+			optional := false
+			for _, option := range parts[1:] {
+				optional = optional || option == "omitempty"
+			}
+			childPath := path + "." + name
+			if child == nil && optional && field.Type.Kind() == reflect.Pointer {
+				return contract.NewError(contract.FaultInvalidArgumentV1, "json_optional_null_forbidden", "optional JSON field must be absent instead of null: "+childPath)
+			}
+			if child != nil {
+				if err := rejectOptionalNullValueV1(child, field.Type, childPath); err != nil {
+					return err
+				}
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		array, ok := value.([]any)
+		if !ok {
+			return nil
+		}
+		for _, child := range array {
+			if child != nil {
+				if err := rejectOptionalNullValueV1(child, targetType.Elem(), path+"[]"); err != nil {
+					return err
+				}
+			}
+		}
 	}
 	return nil
 }

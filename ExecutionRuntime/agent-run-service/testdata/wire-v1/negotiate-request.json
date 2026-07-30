@@ -1,0 +1,20 @@
+{
+  "wire_contract_version": "praxis.cross-language-wire/v1",
+  "request_id": "negotiation-1",
+  "trace_id": "trace-negotiation-1",
+  "supported_versions": [
+    "praxis.agent-run-service/v1"
+  ],
+  "required_capabilities": [
+    "agent_run.inspect",
+    "command.inspect_original"
+  ],
+  "optional_capabilities": [
+    "agent_host.stop",
+    "agent_run.cancel",
+    "agent_run.watch"
+  ],
+  "requested_unix_nano": "1900000000000000000",
+  "not_after_unix_nano": "1900000000000001000",
+  "request_digest": "sha256:af3acc7c64047435403405b80aca24969d8a3351337b5ecc0085eeb2163cbd71"
+}

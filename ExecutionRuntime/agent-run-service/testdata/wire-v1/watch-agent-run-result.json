@@ -1,0 +1,70 @@
+{
+  "contract_version": "praxis.agent-run-service/v1",
+  "request_digest": "sha256:75ffcfedfd56cdf0823d6164af78c08439534a6137260918f78b11b31d3c0535",
+  "trace_id": "trace-watch-events-1",
+  "stream_ref": {
+    "kind": "praxis.agent-run-service/event-stream",
+    "id": "stream-1",
+    "revision": "1",
+    "digest": "sha256:5cd6d9bac95c28b4ab065b1eb5b0831fe7015caafc32ac958941795fd3cbaf96"
+  },
+  "retention_current_ref": {
+    "kind": "praxis.agent-run-service/event-retention-current",
+    "id": "retention-1",
+    "revision": "4",
+    "digest": "sha256:27d93242dc2ba9d8b747a80f8e5e08283c62fdf97531938e0917daecd1d87489"
+  },
+  "disposition": "EVENTS",
+  "events": [
+    {
+      "contract_version": "praxis.agent-run-service/v1",
+      "stream_ref": {
+        "kind": "praxis.agent-run-service/event-stream",
+        "id": "stream-1",
+        "revision": "1",
+        "digest": "sha256:5cd6d9bac95c28b4ab065b1eb5b0831fe7015caafc32ac958941795fd3cbaf96"
+      },
+      "sequence": "1",
+      "event_ref": {
+        "kind": "praxis.agent-run-service/event",
+        "id": "event/9316b5147e24fcf9d6eb3faef9e3c21d11bd616118f532df59814449edb75b14",
+        "revision": "1",
+        "digest": "sha256:9c251defcabc9ac6ff770b3ad1a054476163c240584587e5259549587bd622f0"
+      },
+      "source_owner_ref": {
+        "kind": "praxis.runtime/run-event",
+        "id": "owner-event-1",
+        "revision": "1",
+        "digest": "sha256:f04915a19a7c271aae08a25d8a60baef0a060a953853aa3f8647fcc765f64d89"
+      },
+      "subject_ref": {
+        "kind": "praxis.runtime/agent-run-current",
+        "id": "run-1",
+        "revision": "9",
+        "digest": "sha256:051639f3bc5720342b8b110d93bb2724e9e0ae22c947c84a967574d6519dc121"
+      },
+      "kind": "run.lifecycle.changed",
+      "payload_version": "1.0.0",
+      "payload_digest": "sha256:e1a8f9410e74cef9492b65c28531c7bd9f0c640194b25a8688ccf2907817c7ac",
+      "occurred_unix_nano": "1900000000000000030",
+      "observed_unix_nano": "1900000000000000035",
+      "event_digest": "sha256:9c251defcabc9ac6ff770b3ad1a054476163c240584587e5259549587bd622f0"
+    }
+  ],
+  "next_cursor": {
+    "contract_version": "praxis.agent-run-service/v1",
+    "stream_ref": {
+      "kind": "praxis.agent-run-service/event-stream",
+      "id": "stream-1",
+      "revision": "1",
+      "digest": "sha256:5cd6d9bac95c28b4ab065b1eb5b0831fe7015caafc32ac958941795fd3cbaf96"
+    },
+    "sequence": "1",
+    "cursor_digest": "sha256:973db65b4e9df3d1815bb12110ba88378151596193a7b59acc350ec22c93d56d"
+  },
+  "window": {
+    "checked_unix_nano": "1900000000000000040",
+    "expires_unix_nano": "1900000000000000900"
+  },
+  "result_digest": "sha256:f76fbcbfcc4270792f7a8022c87c58cc0932dca92fdb412bdb9e673deb324955"
+}

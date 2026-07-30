@@ -1,0 +1,32 @@
+{
+  "contract_version": "praxis.agent-run-service/v1",
+  "request_id": "inspect-agent-run-1",
+  "trace_id": "trace-inspect-agent-run-1",
+  "target": {
+    "host_id": "host-1",
+    "start_id": "start-1",
+    "host_start_claim": {
+      "kind": "praxis.agent-host/host-start-claim",
+      "id": "claim-1",
+      "revision": "1",
+      "digest": "sha256:c2da71a8a9f638531513d3e379129c80702d94fef79c5cd609c0833cb8eb3728"
+    },
+    "execution_scope": {
+      "kind": "praxis.runtime/execution-scope",
+      "id": "scope-1",
+      "revision": "7",
+      "digest": "sha256:2dba7b566a8f6898e0e6f0fa365b6a35b01465e41176a854004ae22f57ef0610"
+    },
+    "run_current": {
+      "kind": "praxis.runtime/agent-run-current",
+      "id": "run-1",
+      "revision": "9",
+      "digest": "sha256:051639f3bc5720342b8b110d93bb2724e9e0ae22c947c84a967574d6519dc121"
+    },
+    "authority_epoch": "18446744073709551615",
+    "target_digest": "sha256:387c7b1188c06dde2794993d871aeaaff55737ff504074cff3a63f6b486906aa"
+  },
+  "requested_unix_nano": "1900000000000000000",
+  "not_after_unix_nano": "1900000000000001000",
+  "request_digest": "sha256:da48fb6cd98950a71aa7db9a939ba8323885cf02d31356fa16703f8ccd7d281b"
+}

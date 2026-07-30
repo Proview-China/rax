@@ -1,0 +1,37 @@
+{
+  "contract_version": "praxis.agent-run-service/v1",
+  "request_digest": "sha256:1a3cfaf7f1cf09fd04962bf2a93c46485986b6fe9796c08d908cdd3ba55dcef7",
+  "trace_id": "trace-watch-resync-1",
+  "stream_ref": {
+    "kind": "praxis.agent-run-service/event-stream",
+    "id": "stream-1",
+    "revision": "1",
+    "digest": "sha256:5cd6d9bac95c28b4ab065b1eb5b0831fe7015caafc32ac958941795fd3cbaf96"
+  },
+  "retention_current_ref": {
+    "kind": "praxis.agent-run-service/event-retention-current",
+    "id": "retention-1",
+    "revision": "4",
+    "digest": "sha256:27d93242dc2ba9d8b747a80f8e5e08283c62fdf97531938e0917daecd1d87489"
+  },
+  "disposition": "RESYNC_REQUIRED",
+  "events": null,
+  "fault": {
+    "code": "PRECONDITION_FAILED",
+    "reason": "event_retention_gap",
+    "message": "event continuity cannot be proven",
+    "current_ref": {
+      "kind": "praxis.agent-run-service/event-retention-current",
+      "id": "retention-1",
+      "revision": "4",
+      "digest": "sha256:27d93242dc2ba9d8b747a80f8e5e08283c62fdf97531938e0917daecd1d87489"
+    },
+    "trace_id": "trace-watch-resync-1",
+    "retry_directive": "INSPECT"
+  },
+  "window": {
+    "checked_unix_nano": "1900000000000000040",
+    "expires_unix_nano": "1900000000000000900"
+  },
+  "result_digest": "sha256:b64ff914bdba6b6d6deaabd57417b560920179984247d7dfbabefe9e95c4be00"
+}
