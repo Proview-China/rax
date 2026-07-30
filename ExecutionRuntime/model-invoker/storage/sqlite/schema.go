@@ -107,3 +107,46 @@ CREATE INDEX IF NOT EXISTS governed_model_turn_current_exact
 CREATE INDEX IF NOT EXISTS governed_model_turn_projection_exact
   ON governed_model_turn_tool_call_projection(projection_id, projection_revision, projection_digest, observation_digest);
 `
+
+const schemaV3 = `
+CREATE TABLE IF NOT EXISTS invocation_material_v2_history (
+  material_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision > 0),
+  material_digest TEXT NOT NULL,
+  prepared_id TEXT NOT NULL,
+  prepared_revision INTEGER NOT NULL CHECK(prepared_revision > 0),
+  prepared_digest TEXT NOT NULL,
+  current_id TEXT NOT NULL,
+  current_revision INTEGER NOT NULL CHECK(current_revision > 0),
+  current_digest TEXT NOT NULL,
+  current_checked_unix_nano INTEGER NOT NULL CHECK(current_checked_unix_nano > 0),
+  current_expires_unix_nano INTEGER NOT NULL CHECK(current_expires_unix_nano > 0),
+  current_not_after_unix_nano INTEGER NOT NULL CHECK(current_not_after_unix_nano > 0),
+  route_call_digest TEXT NOT NULL,
+  authorization_id TEXT NOT NULL UNIQUE,
+  source_lineage_digest TEXT NOT NULL,
+  authorization_digest TEXT NOT NULL,
+  expires_unix_nano INTEGER NOT NULL CHECK(expires_unix_nano > 0),
+  canonical_json BLOB NOT NULL,
+  PRIMARY KEY(material_id, revision)
+);
+CREATE INDEX IF NOT EXISTS invocation_material_v2_history_exact
+  ON invocation_material_v2_history(
+    material_id,
+    revision,
+    material_digest,
+    prepared_id,
+    prepared_revision,
+    prepared_digest,
+    current_id,
+    current_revision,
+    current_digest,
+    current_checked_unix_nano,
+    current_expires_unix_nano,
+    current_not_after_unix_nano,
+    route_call_digest,
+    authorization_id,
+    source_lineage_digest,
+    authorization_digest
+  );
+`
