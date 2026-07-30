@@ -7,19 +7,17 @@ import (
 
 	"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/ports"
-	"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycontract"
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 )
-
-type VerifiedAgentPackageClosureV1 struct {
-	Package     contract.AgentPackageV1
-	Publication assemblycontract.AssemblyPublicationBundleV2
-}
 
 type LoaderV1 struct {
 	packages     ports.AgentPackageExactReaderV1
 	publications ports.HarnessAssemblyPublicationHistoricalReaderV2
 }
+
+// VerifiedAgentPackageClosureV1 preserves the loader package's original
+// explicit result type while the authoritative contract now lives in contract.
+type VerifiedAgentPackageClosureV1 = contract.VerifiedAgentPackageClosureV1
 
 func NewV1(packages ports.AgentPackageExactReaderV1, publications ports.HarnessAssemblyPublicationHistoricalReaderV2) (*LoaderV1, error) {
 	if nilInterface(packages) || nilInterface(publications) {
@@ -29,6 +27,10 @@ func NewV1(packages ports.AgentPackageExactReaderV1, publications ports.HarnessA
 }
 
 func (l *LoaderV1) LoadExactV1(ctx context.Context, ref contract.AgentPackageRefV1) (VerifiedAgentPackageClosureV1, error) {
+	return l.LoadVerifiedAgentPackageClosureV1(ctx, ref)
+}
+
+func (l *LoaderV1) LoadVerifiedAgentPackageClosureV1(ctx context.Context, ref contract.AgentPackageRefV1) (contract.VerifiedAgentPackageClosureV1, error) {
 	if l == nil || nilInterface(l.packages) || nilInterface(l.publications) {
 		return VerifiedAgentPackageClosureV1{}, invalid("agent package loader is nil")
 	}
@@ -53,27 +55,11 @@ func (l *LoaderV1) LoadExactV1(ctx context.Context, ref contract.AgentPackageRef
 	if err != nil {
 		return VerifiedAgentPackageClosureV1{}, err
 	}
-	if err = bundle.Validate(); err != nil {
+	verified, err := contract.SealVerifiedAgentPackageClosureV1(pkg, bundle)
+	if err != nil {
 		return VerifiedAgentPackageClosureV1{}, err
 	}
-	publicationRef := assemblycontract.AssemblyPublicationRefV2{PublicationID: bundle.Publication.PublicationID, Revision: bundle.Publication.Revision, Digest: bundle.Publication.Digest}
-	if publicationRef != pkg.Lock.PublicationRef {
-		return VerifiedAgentPackageClosureV1{}, drift("Harness historical reader returned a different exact Publication ref")
-	}
-	artifacts := bundle.Publication.Artifacts
-	if artifacts.Generation != pkg.Lock.GenerationRef || artifacts.Manifest != pkg.Lock.ManifestRef || artifacts.Graph != pkg.Lock.GraphRef || artifacts.Handoff != pkg.Lock.HandoffRef {
-		return VerifiedAgentPackageClosureV1{}, drift("Package lock and Harness Publication artifact refs diverged")
-	}
-	if bundle.Publication.InputDigest != pkg.Lock.AssemblyInputDigest || bundle.Generation.InputDigest != pkg.Lock.AssemblyInputDigest || bundle.Manifest.InputDigest != pkg.Lock.AssemblyInputDigest || bundle.Graph.InputDigest != pkg.Lock.AssemblyInputDigest {
-		return VerifiedAgentPackageClosureV1{}, drift("Package lock and Harness Publication input closure diverged")
-	}
-	if bundle.Generation.CompilerVersion != pkg.Lock.HarnessCompilerVersion || bundle.Generation.CreatedUnixNano != pkg.Lock.FrozenUnixNano {
-		return VerifiedAgentPackageClosureV1{}, drift("Package lock and Harness Publication compiler closure diverged")
-	}
-	if bundle.Handoff.GenerationRef != pkg.Lock.GenerationRef || bundle.Handoff.ManifestDigest != pkg.Lock.ManifestRef.Digest || bundle.Handoff.GraphDigest != pkg.Lock.GraphRef.Digest {
-		return VerifiedAgentPackageClosureV1{}, drift("Package lock and Harness Publication handoff closure diverged")
-	}
-	return clone(VerifiedAgentPackageClosureV1{Package: pkg, Publication: bundle}), nil
+	return contract.CloneVerifiedAgentPackageClosureV1(verified), nil
 }
 
 func invalid(message string) error {
