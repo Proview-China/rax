@@ -2,7 +2,9 @@ package modelinvoker
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
+	"strings"
 	"time"
 
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
@@ -344,12 +346,22 @@ func DigestGovernedModelTurnContextV2(call RouteCall) (core.Digest, error) {
 	if _, err := DigestGovernedModelTurnRouteCallV2(canonical); err != nil {
 		return "", err
 	}
-	body := struct {
-		Instructions []Instruction `json:"instructions"`
-		Input        []InputItem   `json:"input"`
-	}{
-		Instructions: canonical.Request.Instructions,
-		Input:        canonical.Request.Input,
+	return DigestGovernedModelTurnContextBodyV2(
+		canonical.Request.Instructions,
+		canonical.Request.Input,
+	)
+}
+
+// DigestGovernedModelTurnContextBodyV2 seals the exact Model-owned
+// Instructions/Input body without requiring another Owner to synthesize a
+// RouteCall. It does not define or authorize any Context Channel lowering.
+func DigestGovernedModelTurnContextBodyV2(
+	instructions []Instruction,
+	input []InputItem,
+) (core.Digest, error) {
+	body, err := canonicalGovernedModelTurnContextBodyV2(instructions, input)
+	if err != nil {
+		return "", err
 	}
 	return core.CanonicalJSONDigest(
 		"praxis.model-invoker.governed-model-turn-context",
@@ -357,6 +369,50 @@ func DigestGovernedModelTurnContextV2(call RouteCall) (core.Digest, error) {
 		"GovernedModelTurnContextV2",
 		body,
 	)
+}
+
+func canonicalGovernedModelTurnContextBodyV2(
+	instructions []Instruction,
+	input []InputItem,
+) (struct {
+	Instructions []Instruction `json:"instructions"`
+	Input        []InputItem   `json:"input"`
+}, error) {
+	body := struct {
+		Instructions []Instruction `json:"instructions"`
+		Input        []InputItem   `json:"input"`
+	}{
+		Instructions: instructions,
+		Input:        input,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return body, err
+	}
+	var canonical struct {
+		Instructions []Instruction `json:"instructions"`
+		Input        []InputItem   `json:"input"`
+	}
+	if err := core.DecodeStrictJSON(payload, &canonical); err != nil {
+		return body, err
+	}
+	if len(canonical.Input) == 0 {
+		return body, governedInvalidV1("governed model turn requires at least one input item")
+	}
+	for _, instruction := range canonical.Instructions {
+		if instruction.Role != RoleSystem && instruction.Role != RoleDeveloper {
+			return body, governedInvalidV1("governed model turn instruction role is invalid")
+		}
+		if strings.TrimSpace(instruction.Text) == "" {
+			return body, governedInvalidV1("governed model turn instruction text is required")
+		}
+	}
+	for _, item := range canonical.Input {
+		if err := validateInputItem(item); err != nil {
+			return body, governedInvalidV1("governed model turn input item is invalid")
+		}
+	}
+	return canonical, nil
 }
 
 func DigestGovernedModelTurnRequestToolsV2(call RouteCall) (core.Digest, error) {
@@ -367,12 +423,52 @@ func DigestGovernedModelTurnRequestToolsV2(call RouteCall) (core.Digest, error) 
 	if _, err := DigestGovernedModelTurnRouteCallV2(canonical); err != nil {
 		return "", err
 	}
+	return DigestGovernedModelTurnRequestToolSetV2(canonical.Request.Tools)
+}
+
+// DigestGovernedModelTurnRequestToolSetV2 seals the exact Model-owned
+// Request.Tools bytes without requiring another Owner to synthesize a
+// RouteCall. It deliberately uses the same canonical frame and body as
+// DigestGovernedModelTurnRequestToolsV2.
+func DigestGovernedModelTurnRequestToolSetV2(tools []Tool) (core.Digest, error) {
+	canonical, err := canonicalGovernedModelTurnRequestToolSetV2(tools)
+	if err != nil {
+		return "", err
+	}
 	return core.CanonicalJSONDigest(
 		"praxis.model-invoker.governed-model-turn-request-tools",
 		"v2",
 		"GovernedModelTurnRequestToolsV2",
-		canonical.Request.Tools,
+		canonical,
 	)
+}
+
+func canonicalGovernedModelTurnRequestToolSetV2(tools []Tool) ([]Tool, error) {
+	payload, err := json.Marshal(tools)
+	if err != nil {
+		return nil, err
+	}
+	var canonical []Tool
+	if err := core.DecodeStrictJSON(payload, &canonical); err != nil {
+		return nil, err
+	}
+	if len(canonical) == 0 {
+		return nil, governedInvalidV1("governed model turn requires tools and explicit non-parallel execution")
+	}
+	names := make(map[string]struct{}, len(canonical))
+	for _, tool := range canonical {
+		if strings.TrimSpace(tool.Name) == "" || tool.Strict == nil || !*tool.Strict {
+			return nil, governedInvalidV1("governed model turn requires strict named tools")
+		}
+		if _, ok := names[tool.Name]; ok {
+			return nil, governedConflictV1("governed model turn tool names must be unique")
+		}
+		names[tool.Name] = struct{}{}
+		if err := validateStrictJSONObjectV1(tool.Parameters); err != nil {
+			return nil, err
+		}
+	}
+	return canonical, nil
 }
 
 func sameInvocationMaterialAuthorizationClosureV2(left, right InvocationMaterialAuthorizationV2) bool {
