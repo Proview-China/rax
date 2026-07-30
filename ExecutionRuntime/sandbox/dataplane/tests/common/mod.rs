@@ -37,6 +37,15 @@ pub fn request_with_payload(
             digest: digest("sandbox-projection"),
             expires_unix_nano: expires,
         });
+    let runtime_current_query = if phase == EnforcementPhaseV1::Execute
+        && matches!(&payload, ProviderPayloadV1::WorkspaceRead(_))
+    {
+        serde_json::json!({
+            "contract_version": "praxis.sandbox/workspace-read-current/v2"
+        })
+    } else {
+        serde_json::json!({"fixture": "current-query"})
+    };
     DispatchRequestV1 {
         contract_version: String::new(),
         request_id: format!("request-{phase:?}"),
@@ -66,7 +75,7 @@ pub fn request_with_payload(
             },
             expires_unix_nano: expires,
         },
-        runtime_current_query: serde_json::json!({"fixture": "current-query"}),
+        runtime_current_query,
         runtime_current_query_digest: String::new(),
         requested_not_after_unix_nano: expires,
         payload_schema: "praxis.sandbox/provider-payload/v1".to_owned(),

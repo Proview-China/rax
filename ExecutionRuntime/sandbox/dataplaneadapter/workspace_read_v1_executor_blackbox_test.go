@@ -5,12 +5,9 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
-	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"io"
-	"net"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -26,7 +23,10 @@ import (
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
 	dataplaneadapter "github.com/Proview-China/rax/ExecutionRuntime/sandbox/dataplaneadapter"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/testkit"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/kernel"
+	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/runtimeadapter"
 	sqlitestore "github.com/Proview-China/rax/ExecutionRuntime/sandbox/storage/sqlite"
 )
 
@@ -40,8 +40,28 @@ type workspaceReadExecutorCaseV1 struct {
 	expectedAdapter     uint64
 	expectedPhysical    uint64
 	expectedBoundary    kernel.WorkspaceReadActualPointBoundaryV1
+	expectInspectError  bool
 	expectBeforeActual  bool
 	runtimeLeaseS2Drift bool
+	driftReservation    bool
+	driftAttempt        bool
+}
+
+type lockedBuffer struct {
+	mu     sync.Mutex
+	buffer bytes.Buffer
+}
+
+func (b *lockedBuffer) Write(value []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.Write(value)
+}
+
+func (b *lockedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buffer.String()
 }
 
 func TestWorkspaceReadPublicExecutorCallsConcreteAdapterAndRustOnce(t *testing.T) {
@@ -90,6 +110,12 @@ func TestWorkspaceReadPublicExecutorClassifiesPhysicalBoundariesThroughRustIPC(t
 		}},
 		{name: "workspace-lease-s2-drift", spec: workspaceReadExecutorCaseV1{
 			expectedState: contract.WorkspaceReadUnknownV1, expectedAdapter: 1, expectedPhysical: 1, runtimeLeaseS2Drift: true,
+		}},
+		{name: "sandbox-reservation-drift", spec: workspaceReadExecutorCaseV1{
+			expectedState: contract.WorkspaceReadStartedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1, expectInspectError: true, driftReservation: true,
+		}},
+		{name: "sandbox-attempt-drift", spec: workspaceReadExecutorCaseV1{
+			expectedState: contract.WorkspaceReadUnknownV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1, driftAttempt: true,
 		}},
 		{name: "non-utf8", spec: workspaceReadExecutorCaseV1{
 			setup: func(t *testing.T, root string) {
@@ -254,12 +280,32 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 
 	dispatchSocket := filepath.Join(root, "dispatch.sock")
 	currentSocket := filepath.Join(root, "current.sock")
-	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: currentSocket, Net: "unix"})
+	baseCurrent, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV1(
+		fixedWorkspaceReadEnforcementReaderV1{value: current},
+		fixedWorkspaceReadAssociationReaderV1{association},
+		store,
+		store,
+		time.Now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exactCurrent, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(baseCurrent, store, store, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	countedCurrent := &countingWorkspaceReadCurrentReaderV2{inner: exactCurrent}
+	currentServer := dataplaneadapter.CurrentServer{
+		SocketPath: currentSocket, SocketMode: 0o660, AllowedUID: uint32(os.Getuid()),
+		Governance: fixedWorkspaceReadEnforcementReaderV1{value: current},
+		Sandbox:    testkit.NewMemoryStore(), WorkspaceReadCurrentV2: countedCurrent, Now: time.Now,
+	}
+	listener, err := currentServer.Listen()
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	go serveWorkspaceReadExecutorCurrentV1(ctx, t, listener)
+	go func() { _ = currentServer.Serve(ctx, listener) }()
 	config := map[string]any{"contract_version": "praxis.sandbox/data-plane-root/v1", "dispatch_socket": dispatchSocket, "current_reader_socket": currentSocket, "journal_path": filepath.Join(root, "journal.jsonl"), "checkpoint_store_path": filepath.Join(root, "checkpoints.sqlite"), "allowed_dispatch_uid": os.Getuid(), "allowed_current_reader_uid": os.Getuid(), "socket_mode": 0o660, "wasmtime_component_bindings": map[string]string{}, "workspace_read": map[string]any{"bindings": map[string]any{"workspace-view": map[string]any{"path": root, "digest": workspaceDigest}}}}
 	configBytes, _ := json.Marshal(config)
 	configPath := filepath.Join(root, "config.json")
@@ -267,7 +313,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		t.Fatal(err)
 	}
 	process := exec.CommandContext(ctx, binary, configPath)
-	var output bytes.Buffer
+	var output lockedBuffer
 	process.Stdout, process.Stderr = &output, &output
 	if err = process.Start(); err != nil {
 		t.Fatal(err)
@@ -278,7 +324,17 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if err != nil {
 		t.Fatal(err)
 	}
-	counted := &countingWorkspaceReadActualPointV1{inner: concrete}
+	var actualPoint kernel.WorkspaceReadActualPointV1 = concrete
+	if spec.driftReservation || spec.driftAttempt {
+		actualPoint = &driftingWorkspaceReadActualPointV1{
+			inner:            concrete,
+			store:            store,
+			databasePath:     databasePath,
+			driftReservation: spec.driftReservation,
+			driftAttempt:     spec.driftAttempt,
+		}
+	}
+	counted := &countingWorkspaceReadActualPointV1{inner: actualPoint}
 	enforcementReader := &sequencedWorkspaceReadEnforcementReaderV1{first: current, second: current}
 	if spec.runtimeLeaseS2Drift {
 		enforcementReader.second.Sandbox.RuntimeLease.FenceEpoch++
@@ -349,11 +405,20 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			t.Fatal(err)
 		}
 		projection, inspectErr := executor.InspectBoundedWorkspaceReadV1(ctx, contract.WorkspaceReadAttemptRefV1{ID: origin.Meta.ID, Revision: origin.Meta.Revision, Digest: origin.Meta.Digest})
+		if spec.expectInspectError {
+			if inspectErr == nil {
+				t.Fatal("owner-current corruption unexpectedly produced an exact projection")
+			}
+			return
+		}
 		if inspectErr != nil || projection.Attempt.State != spec.expectedState {
 			t.Fatalf("exact Inspect state=%q, want %q err=%v", projection.Attempt.State, spec.expectedState, inspectErr)
 		}
 		if spec.expectedState == contract.WorkspaceReadObservedV1 && (projection.Observation == nil || projection.Observation.Content != spec.expectedContent || !projection.Observation.Complete) {
 			t.Fatalf("EOF result drifted: %#v", projection.Observation)
+		}
+		if spec.expectedAdapter != 0 && countedCurrent.calls.Load() == 0 {
+			t.Fatal("public CurrentServer never inspected workspace read current v2")
 		}
 		return
 	}
@@ -419,6 +484,19 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if projection.Attempt.State != contract.WorkspaceReadObservedV1 || projection.Observation == nil || projection.Observation.Content != "Praxis" {
 		t.Fatalf("unexpected exact Inspect: %#v", projection)
 	}
+	if countedCurrent.calls.Load() == 0 {
+		t.Fatal("public CurrentServer never inspected workspace read current v2")
+	}
+}
+
+type countingWorkspaceReadCurrentReaderV2 struct {
+	inner sandboxports.WorkspaceReadCurrentProjectionReaderV2
+	calls atomic.Uint64
+}
+
+func (r *countingWorkspaceReadCurrentReaderV2) InspectWorkspaceReadCurrentV2(ctx context.Context, query sandboxports.WorkspaceReadCurrentQueryV2) (sandboxports.WorkspaceReadCurrentProjectionV2, error) {
+	r.calls.Add(1)
+	return r.inner.InspectWorkspaceReadCurrentV2(ctx, query)
 }
 
 type fixedWorkspaceReadAssociationReaderV1 struct {
@@ -479,8 +557,73 @@ type countingWorkspaceReadActualPointV1 struct {
 	err   error
 }
 
+type driftingWorkspaceReadActualPointV1 struct {
+	inner            kernel.WorkspaceReadActualPointV1
+	store            *sqlitestore.Store
+	databasePath     string
+	driftReservation bool
+	driftAttempt     bool
+	once             sync.Once
+	err              error
+}
+
+func (a *driftingWorkspaceReadActualPointV1) ReadWorkspaceFileV1(ctx context.Context, input kernel.WorkspaceReadActualPointRequestV1) (kernel.WorkspaceReadActualPointResultV1, error) {
+	a.once.Do(func() {
+		switch {
+		case a.driftReservation:
+			drifted := input.Reservation
+			drifted.RequestDigest = digestWorkspaceReadExecutorTest("spliced-reservation-request")
+			var err error
+			drifted, err = contract.SealWorkspaceReadReservationV1(
+				drifted,
+				input.Reservation.Meta.ID,
+				time.Unix(0, input.Reservation.Meta.CreatedUnixNano),
+				time.Unix(0, input.Reservation.Meta.ExpiresUnixNano),
+			)
+			if err != nil {
+				a.err = err
+				return
+			}
+			body, err := json.Marshal(drifted)
+			if err != nil {
+				a.err = err
+				return
+			}
+			db, err := sql.Open("sqlite", a.databasePath)
+			if err != nil {
+				a.err = err
+				return
+			}
+			defer db.Close()
+			_, a.err = db.ExecContext(ctx, `UPDATE workspace_read_reservation SET body=? WHERE reservation_id=?`, body, input.Reservation.Meta.ID)
+		case a.driftAttempt:
+			unknown, err := contract.Digest("workspace-read-test-attempt-drift", input.CurrentQuery.Attempt)
+			if err != nil {
+				a.err = err
+				return
+			}
+			_, a.err = a.store.MarkWorkspaceReadUnknownV1(ctx, input.CurrentQuery.Attempt.OwnerRef(), unknown)
+		}
+	})
+	if a.err != nil {
+		return kernel.WorkspaceReadActualPointResultV1{}, a.err
+	}
+	return a.inner.ReadWorkspaceFileV1(ctx, input)
+}
+
 func (a *countingWorkspaceReadActualPointV1) ReadWorkspaceFileV1(ctx context.Context, input kernel.WorkspaceReadActualPointRequestV1) (kernel.WorkspaceReadActualPointResultV1, error) {
 	a.calls.Add(1)
+	wire, wireErr := json.Marshal(input.CurrentQuery)
+	if wireErr == nil {
+		var roundTrip sandboxports.WorkspaceReadCurrentQueryV2
+		wireErr = json.Unmarshal(wire, &roundTrip)
+		if wireErr == nil {
+			wireErr = roundTrip.Validate()
+		}
+	}
+	if wireErr != nil {
+		return kernel.WorkspaceReadActualPointResultV1{}, wireErr
+	}
 	result, err := a.inner.ReadWorkspaceFileV1(ctx, input)
 	a.mu.Lock()
 	a.err = err
@@ -498,78 +641,6 @@ func digestWorkspaceReadExecutorTest(value string) string {
 	return string(runtimecore.DigestBytes([]byte(value)))
 }
 
-func serveWorkspaceReadExecutorCurrentV1(ctx context.Context, t *testing.T, listener *net.UnixListener) {
-	t.Helper()
-	for {
-		connection, err := listener.AcceptUnix()
-		if err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			t.Errorf("workspace-read current accept: %v", err)
-			return
-		}
-		var request dataplaneadapter.DispatchRequestV1
-		if err = readWorkspaceReadExecutorFrameV1(connection, &request); err != nil {
-			_ = connection.Close()
-			continue
-		}
-		authorization := dataplaneadapter.CurrentAuthorizationV1{
-			ContractVersion: dataplaneadapter.ContractVersionV1,
-			RequestDigest:   request.Digest,
-			OperationDigest: request.OperationDigest,
-			EffectID:        request.EffectID,
-			AttemptID:       request.AttemptID,
-			Phase:           request.Phase,
-			ProviderBinding: request.ProviderBinding,
-			SandboxProjection: dataplaneadapter.SandboxProjectionRefV1{
-				Revision: 1, Digest: digestWorkspaceReadExecutorTest("sandbox-projection"),
-				ExpiresUnixNano: request.RequestedNotAfterUnixNano,
-			},
-			ExecutionBinding:   request.ExecutionBinding,
-			RuntimeEnforcement: request.RuntimeEnforcement,
-			CheckedUnixNano:    time.Now().UnixNano(),
-			ExpiresUnixNano:    request.RequestedNotAfterUnixNano,
-		}
-		authorization.Digest, err = digestWorkspaceReadExecutorIPC("CurrentAuthorizationV1", authorization)
-		response := dataplaneadapter.CurrentReadResponseV1{Authorization: &authorization}
-		if err != nil {
-			response = dataplaneadapter.CurrentReadResponseV1{Error: &dataplaneadapter.ClosedError{Reason: "internal", Message: err.Error()}}
-		}
-		_ = writeWorkspaceReadExecutorFrameV1(connection, response)
-		_ = connection.Close()
-	}
-}
-
-func readWorkspaceReadExecutorFrameV1(reader io.Reader, value any) error {
-	var length uint32
-	if err := binary.Read(reader, binary.BigEndian, &length); err != nil {
-		return err
-	}
-	if length == 0 || length > 8<<20 {
-		return errors.New("workspace-read IPC frame is outside bounds")
-	}
-	data := make([]byte, length)
-	if _, err := io.ReadFull(reader, data); err != nil {
-		return err
-	}
-	decoder := json.NewDecoder(bytes.NewReader(data))
-	decoder.DisallowUnknownFields()
-	return decoder.Decode(value)
-}
-
-func writeWorkspaceReadExecutorFrameV1(writer io.Writer, value any) error {
-	data, err := json.Marshal(value)
-	if err != nil {
-		return err
-	}
-	if err = binary.Write(writer, binary.BigEndian, uint32(len(data))); err != nil {
-		return err
-	}
-	_, err = writer.Write(data)
-	return err
-}
-
 func digestWorkspaceReadExecutorIPC(kind string, value any) (string, error) {
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -584,7 +655,7 @@ func digestWorkspaceReadExecutorIPC(kind string, value any) (string, error) {
 	return "sha256:" + hex.EncodeToString(hash.Sum(nil)), nil
 }
 
-func waitForWorkspaceReadExecutorSocket(t *testing.T, path string, output *bytes.Buffer) {
+func waitForWorkspaceReadExecutorSocket(t *testing.T, path string, output *lockedBuffer) {
 	t.Helper()
 	deadline := time.Now().Add(10 * time.Second)
 	for time.Now().Before(deadline) {

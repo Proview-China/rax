@@ -41,6 +41,199 @@ func TestWorkspaceReadCurrentV1SealsExactS1S2Projection(t *testing.T) {
 	}
 }
 
+func TestWorkspaceReadCurrentV2SealsSandboxOwnerClosure(t *testing.T) {
+	t.Parallel()
+	fixture := newWorkspaceReadCurrentFixtureV1(t)
+	got, err := fixture.adapterV2.InspectWorkspaceReadCurrentV2(context.Background(), fixture.queryV2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := got.ValidateCurrent(fixture.now); err != nil {
+		t.Fatal(err)
+	}
+	if got.Reservation.Meta.Ref() != fixture.queryV2.Reservation ||
+		got.Attempt.Meta.Ref() != fixture.queryV2.Attempt.OwnerRef() ||
+		got.AttemptState != contract.WorkspaceReadStartedV1 ||
+		got.AdmissionReceipt != fixture.queryV2.AdmissionReceipt ||
+		got.SandboxOwnerClosureDigest == "" {
+		t.Fatalf("v2 projection lost the Sandbox Owner closure: %#v", got)
+	}
+	if fixture.readers.reservationCalls.Load() != 2 || fixture.readers.attemptCalls.Load() != 2 {
+		t.Fatalf("v2 did not independently reread reservation and attempt at S1/S2: %#v", fixture.readers)
+	}
+}
+
+func TestWorkspaceReadCurrentV2EnforcesExactMinimumTTL(t *testing.T) {
+	t.Parallel()
+	fixture := newWorkspaceReadCurrentFixtureV1(t)
+	got, err := fixture.adapterV2.InspectWorkspaceReadCurrentV2(context.Background(), fixture.queryV2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	widened := got
+	widened.ExpiresUnixNano++
+	if _, err = sandboxports.SealWorkspaceReadCurrentProjectionV2(widened); err == nil {
+		t.Fatal("caller widened the sealed v2 projection beyond its exact minimum TTL")
+	}
+	atExpiry := time.Unix(0, got.ExpiresUnixNano)
+	if err = got.ValidateCurrent(atExpiry); err == nil {
+		t.Fatal("v2 projection remained current at its exact expiry")
+	}
+	expiredFixture := newWorkspaceReadCurrentFixtureV1(t)
+	expiredReader, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(
+		expiredFixture.adapter, expiredFixture.readers, expiredFixture.readers, func() time.Time { return atExpiry },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection, inspectErr := expiredReader.InspectWorkspaceReadCurrentV2(context.Background(), expiredFixture.queryV2); inspectErr == nil || projection.ProjectionDigest != "" {
+		t.Fatalf("expired v2 query produced a current projection: projection=%#v err=%v", projection, inspectErr)
+	}
+}
+
+func TestWorkspaceReadCurrentV2RejectsClockRollbackBeforeS1(t *testing.T) {
+	t.Parallel()
+	fixture := newWorkspaceReadCurrentFixtureV1(t)
+	times := []time.Time{
+		fixture.now.Add(2 * time.Second),
+		fixture.now.Add(time.Second),
+	}
+	var calls atomic.Int64
+	adapter, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(
+		fixture.adapter,
+		fixture.readers,
+		fixture.readers,
+		func() time.Time {
+			index := int(calls.Add(1)) - 1
+			if index >= len(times) {
+				return times[len(times)-1]
+			}
+			return times[index]
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if projection, inspectErr := adapter.InspectWorkspaceReadCurrentV2(context.Background(), fixture.queryV2); inspectErr == nil || projection.ProjectionDigest != "" {
+		t.Fatalf("started-to-S1 clock rollback produced projection=%#v err=%v", projection, inspectErr)
+	}
+}
+
+func TestWorkspaceReadCurrentV2RejectsQuerySplices(t *testing.T) {
+	t.Parallel()
+	tests := map[string]func(*sandboxports.WorkspaceReadCurrentQueryV2){
+		"reservation": func(q *sandboxports.WorkspaceReadCurrentQueryV2) {
+			q.Reservation.ID = "other-reservation"
+		},
+		"attempt": func(q *sandboxports.WorkspaceReadCurrentQueryV2) {
+			q.Attempt.ID = "other-attempt"
+		},
+		"admission": func(q *sandboxports.WorkspaceReadCurrentQueryV2) {
+			q.AdmissionReceipt.ID = "other-admission"
+			q.AdmissionReceipt.Digest = string(runtimecore.DigestBytes([]byte("other-admission")))
+		},
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			fixture := newWorkspaceReadCurrentFixtureV1(t)
+			query := fixture.queryV2
+			mutate(&query)
+			query, err := sandboxports.SealWorkspaceReadCurrentQueryV2(query)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got, inspectErr := fixture.adapterV2.InspectWorkspaceReadCurrentV2(context.Background(), query); inspectErr == nil || got.ProjectionDigest != "" {
+				t.Fatalf("v2 accepted %s splice: projection=%#v err=%v", name, got, inspectErr)
+			}
+		})
+	}
+}
+
+func TestWorkspaceReadCurrentV2RejectsTerminalAndS1S2OwnerDrift(t *testing.T) {
+	t.Parallel()
+	t.Run("terminal attempt", func(t *testing.T) {
+		fixture := newWorkspaceReadCurrentFixtureV1(t)
+		terminal := fixture.readers.attempt
+		terminal.State = contract.WorkspaceReadUnknownV1
+		terminal.UnknownDigest = string(runtimecore.DigestBytes([]byte("terminal-attempt")))
+		terminal, err := contract.SealWorkspaceReadAttemptV1(terminal, terminal.Meta.ID, 2, fixture.now.Add(time.Nanosecond), time.Unix(0, terminal.Meta.ExpiresUnixNano))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.readers.attempt = terminal
+		if got, err := fixture.adapterV2.InspectWorkspaceReadCurrentV2(context.Background(), fixture.queryV2); err == nil || got.ProjectionDigest != "" {
+			t.Fatalf("terminal attempt was accepted: projection=%#v err=%v", got, err)
+		}
+	})
+	t.Run("reservation S1 S2 drift", func(t *testing.T) {
+		fixture := newWorkspaceReadCurrentFixtureV1(t)
+		drifted := fixture.readers.reservation
+		drifted.RequestDigest = string(runtimecore.DigestBytes([]byte("drifted-request")))
+		var err error
+		drifted, err = contract.SealWorkspaceReadReservationV1(drifted, drifted.Meta.ID, fixture.now, time.Unix(0, drifted.Meta.ExpiresUnixNano))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.readers.reservationSecond = drifted
+		if got, inspectErr := fixture.adapterV2.InspectWorkspaceReadCurrentV2(context.Background(), fixture.queryV2); inspectErr == nil || got.ProjectionDigest != "" {
+			t.Fatalf("reservation drift was accepted: projection=%#v err=%v", got, inspectErr)
+		}
+	})
+	t.Run("attempt S1 S2 drift", func(t *testing.T) {
+		fixture := newWorkspaceReadCurrentFixtureV1(t)
+		drifted := fixture.readers.attempt
+		drifted.State = contract.WorkspaceReadUnknownV1
+		drifted.UnknownDigest = string(runtimecore.DigestBytes([]byte("drifted-attempt")))
+		var err error
+		drifted, err = contract.SealWorkspaceReadAttemptV1(drifted, drifted.Meta.ID, 2, fixture.now.Add(time.Nanosecond), time.Unix(0, drifted.Meta.ExpiresUnixNano))
+		if err != nil {
+			t.Fatal(err)
+		}
+		fixture.readers.attemptSecond = drifted
+		if got, inspectErr := fixture.adapterV2.InspectWorkspaceReadCurrentV2(context.Background(), fixture.queryV2); inspectErr == nil || got.ProjectionDigest != "" {
+			t.Fatalf("attempt drift was accepted: projection=%#v err=%v", got, inspectErr)
+		}
+	})
+}
+
+func TestWorkspaceReadCurrentV2SixtyFourConcurrentReadsAreDeterministic(t *testing.T) {
+	t.Parallel()
+	fixture := newWorkspaceReadCurrentFixtureV1(t)
+	const workers = 64
+	var wg sync.WaitGroup
+	digests := make(chan string, workers)
+	errs := make(chan error, workers)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			got, err := fixture.adapterV2.InspectWorkspaceReadCurrentV2(context.Background(), fixture.queryV2)
+			if err != nil {
+				errs <- err
+				return
+			}
+			digests <- got.SemanticDigest
+		}()
+	}
+	wg.Wait()
+	close(digests)
+	close(errs)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	var expected string
+	for digest := range digests {
+		if expected == "" {
+			expected = digest
+		} else if digest != expected {
+			t.Fatalf("v2 semantic digest drifted: got %q want %q", digest, expected)
+		}
+	}
+	if fixture.readers.reservationCalls.Load() != workers*2 || fixture.readers.attemptCalls.Load() != workers*2 {
+		t.Fatal("v2 concurrent reads did not perform exact S1/S2 Owner rereads")
+	}
+}
+
 func TestWorkspaceReadCurrentV1RejectsCallerSubstitutedAuthorizationProof(t *testing.T) {
 	t.Parallel()
 	fixture := newWorkspaceReadCurrentFixtureV1(t)
@@ -85,7 +278,7 @@ func TestWorkspaceReadDispatchConstructorDoesNotReadWallClockForExactQuery(t *te
 	legacy := fixture.current.Dispatch.Record.Permit.LegacyPermit
 	request, err := dataplaneadapter.NewDispatchRequestV1(dataplaneadapter.DispatchInput{
 		RequestID: "workspace-current-request-v1", Current: fixture.current,
-		WorkspaceReadCurrent: &fixture.query, EffectKind: "praxis.sandbox/workspace-read",
+		WorkspaceReadCurrentV2: &fixture.queryV2, EffectKind: "praxis.sandbox/workspace-read",
 		PayloadSchema: legacy.PayloadSchema.Key(), PayloadRevision: uint64(legacy.PayloadRevision),
 		Payload: fixture.payload, RequestedNotAfter: time.Unix(0, fixture.current.Phase.ExpiresUnixNano),
 	})
@@ -94,6 +287,27 @@ func TestWorkspaceReadDispatchConstructorDoesNotReadWallClockForExactQuery(t *te
 	}
 	if request.RuntimeCurrentQueryDigest == "" {
 		t.Fatal("exact workspace read current query was not sealed into the dispatch request")
+	}
+}
+
+func TestWorkspaceReadExecuteConstructorRequiresCurrentV2(t *testing.T) {
+	t.Parallel()
+	fixture := newWorkspaceReadCurrentFixtureV1(t)
+	legacy := fixture.current.Dispatch.Record.Permit.LegacyPermit
+	for name, v1 := range map[string]*sandboxports.WorkspaceReadCurrentQueryV1{
+		"plain runtime current": nil,
+		"legacy exact v1":       &fixture.query,
+	} {
+		t.Run(name, func(t *testing.T) {
+			if _, err := dataplaneadapter.NewDispatchRequestV1(dataplaneadapter.DispatchInput{
+				RequestID: "workspace-current-v2-required", Current: fixture.current,
+				WorkspaceReadCurrent: v1, EffectKind: "praxis.sandbox/workspace-read",
+				PayloadSchema: legacy.PayloadSchema.Key(), PayloadRevision: uint64(legacy.PayloadRevision),
+				Payload: fixture.payload, RequestedNotAfter: time.Unix(0, fixture.current.Phase.ExpiresUnixNano),
+			}); err == nil {
+				t.Fatal("workspace read execute reached dispatch construction without exact current v2")
+			}
+		})
 	}
 }
 
@@ -276,6 +490,8 @@ type workspaceReadCurrentFixtureV1 struct {
 	query       sandboxports.WorkspaceReadCurrentQueryV1
 	readers     *workspaceReadCurrentReadersV1
 	adapter     *runtimeadapter.WorkspaceReadCurrentAdapterV1
+	queryV2     sandboxports.WorkspaceReadCurrentQueryV2
+	adapterV2   *runtimeadapter.WorkspaceReadCurrentAdapterV2
 }
 
 func newWorkspaceReadCurrentFixtureV1(t *testing.T) workspaceReadCurrentFixtureV1 {
@@ -429,14 +645,62 @@ func newWorkspaceReadCurrentFixtureV1(t *testing.T) workspaceReadCurrentFixtureV
 	if err != nil {
 		t.Fatal(err)
 	}
-	readers := &workspaceReadCurrentReadersV1{current: current, association: association, command: command, workspace: workspace}
+	admission := contract.WorkspaceReadReceiptBindingV1{
+		ID: "workspace-read-admission-current-v2", Revision: 1,
+		Digest:          string(runtimecore.DigestBytes([]byte("workspace-read-admission-current-v2"))),
+		StableKeyDigest: string(authorization.StableKeyDigest),
+		CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano(),
+	}
+	ttl, err := contract.SealWorkspaceReadTTLClosureV1(contract.WorkspaceReadTTLClosureV1{
+		UnifiedNotAfterUnixNano: expires.UnixNano(), RuntimeEnforcementExpiresNano: expires.UnixNano(),
+		AssociationExpiresUnixNano: expires.UnixNano(), CommandRequestedNotAfterNano: expires.UnixNano(),
+		CommandExpiresUnixNano: expires.UnixNano(), WorkspaceViewExpiresUnixNano: expires.UnixNano(),
+		WorkspaceLeaseExpiresUnixNano: expires.UnixNano(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, err := contract.SealWorkspaceReadReservationV1(contract.WorkspaceReadReservationV1{
+		StableKeyDigest: string(authorization.StableKeyDigest), AuthorizationDigest: string(authorization.AuthorizationDigest),
+		RequestDigest: command.Meta.Digest, PayloadDigest: command.SourceToolPayloadDigest,
+		Command: command.Meta.Ref(), WorkspaceView: workspace.Meta.Ref(), AttemptID: "workspace-read-attempt-current-v2",
+		TTLClosure: ttl,
+	}, "workspace-read-reservation-current-v2", now, expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attemptV2, err := contract.SealWorkspaceReadAttemptV1(contract.WorkspaceReadAttemptV1{
+		StableKeyDigest: string(authorization.StableKeyDigest), RequestDigest: reservation.RequestDigest,
+		PayloadDigest: reservation.PayloadDigest, Reservation: reservation.Meta.Ref(),
+		AdmissionReceipt: admission, State: contract.WorkspaceReadStartedV1,
+	}, "workspace-read-attempt-current-v2", 1, now, expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryV2, err := sandboxports.SealWorkspaceReadCurrentQueryV2(sandboxports.WorkspaceReadCurrentQueryV2{
+		Base: query, Reservation: reservation.Meta.Ref(),
+		Attempt:          contract.WorkspaceReadAttemptRefV1{ID: attemptV2.Meta.ID, Revision: attemptV2.Meta.Revision, Digest: attemptV2.Meta.Digest},
+		AdmissionReceipt: admission,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	readers := &workspaceReadCurrentReadersV1{
+		current: current, association: association, command: command, workspace: workspace,
+		reservation: reservation, attempt: attemptV2,
+	}
 	adapter, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV1(readers, readers, readers, readers, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapterV2, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(adapter, readers, readers, func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}
 	return workspaceReadCurrentFixtureV1{
 		now: now, current: current, association: association, command: command, workspace: workspace,
 		payload: payload, query: query, readers: readers, adapter: adapter,
+		queryV2: queryV2, adapterV2: adapterV2,
 	}
 }
 
@@ -449,6 +713,10 @@ type workspaceReadCurrentReadersV1 struct {
 	commandSecond     contract.WorkspaceReadCommandV1
 	workspace         contract.WorkspaceView
 	workspaceSecond   contract.WorkspaceView
+	reservation       contract.WorkspaceReadReservationV1
+	reservationSecond contract.WorkspaceReadReservationV1
+	attempt           contract.WorkspaceReadAttemptV1
+	attemptSecond     contract.WorkspaceReadAttemptV1
 	runtimeErr        error
 	associationErr    error
 	commandErr        error
@@ -457,6 +725,24 @@ type workspaceReadCurrentReadersV1 struct {
 	associationCalls  atomic.Int64
 	commandCalls      atomic.Int64
 	workspaceCalls    atomic.Int64
+	reservationCalls  atomic.Int64
+	attemptCalls      atomic.Int64
+}
+
+func (r *workspaceReadCurrentReadersV1) InspectWorkspaceReadReservationExactV1(context.Context, contract.Ref) (contract.WorkspaceReadReservationV1, error) {
+	call := r.reservationCalls.Add(1)
+	if call%2 == 0 && r.reservationSecond.Meta.ID != "" {
+		return r.reservationSecond, nil
+	}
+	return r.reservation, nil
+}
+
+func (r *workspaceReadCurrentReadersV1) InspectWorkspaceReadAttemptCurrentV1(context.Context, contract.WorkspaceReadAttemptRefV1) (contract.WorkspaceReadAttemptV1, error) {
+	call := r.attemptCalls.Add(1)
+	if call%2 == 0 && r.attemptSecond.Meta.ID != "" {
+		return r.attemptSecond, nil
+	}
+	return r.attempt, nil
 }
 
 func (r *workspaceReadCurrentReadersV1) InspectCurrentOperationDispatchEnforcementV4(context.Context, runtimeports.InspectCurrentOperationDispatchEnforcementRequestV4) (runtimeports.CurrentOperationDispatchEnforcementV4, error) {

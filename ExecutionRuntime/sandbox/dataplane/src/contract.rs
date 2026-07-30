@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest as _, Sha256};
 
-use crate::error::{ClosedError, ClosedReason, Result};
+use crate::error::{ClosedError, ClosedReason, EffectBoundary, Result};
 
 pub const CONTRACT_VERSION_V1: &str = "praxis.sandbox/data-plane-ipc/v1";
 pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
@@ -837,6 +837,20 @@ pub struct DispatchRequestV1 {
 
 impl DispatchRequestV1 {
     pub fn validate_shape(&self) -> Result<()> {
+        self.validate_identity_shape()?;
+        self.validate_runtime_binding_shape()?;
+        self.payload.validate()?;
+        self.validate_inspection_target_shape()?;
+        if self.digest != self.calculate_digest()? {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidDigest,
+                "dispatch request digest drifted",
+            ));
+        }
+        Ok(())
+    }
+
+    fn validate_identity_shape(&self) -> Result<()> {
         if self.contract_version != CONTRACT_VERSION_V1
             || self.request_id.trim().is_empty()
             || !valid_effect_kind(&self.effect_kind)
@@ -878,6 +892,10 @@ impl DispatchRequestV1 {
         } else if let Some(projection) = &self.sandbox_projection {
             projection.validate_shape()?;
         }
+        Ok(())
+    }
+
+    fn validate_runtime_binding_shape(&self) -> Result<()> {
         self.execution_binding.validate()?;
         if self.execution_binding.tenant_id != self.tenant_id {
             return Err(ClosedError::new(
@@ -905,7 +923,25 @@ impl DispatchRequestV1 {
                 "runtime current query is absent or drifted",
             ));
         }
-        self.payload.validate()?;
+        if self.payload.kind() == ProviderKindV1::WorkspaceRead
+            && self.phase == EnforcementPhaseV1::Execute
+            && self
+                .runtime_current_query
+                .get("contract_version")
+                .and_then(serde_json::Value::as_str)
+                != Some("praxis.sandbox/workspace-read-current/v2")
+        {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidContract,
+                "workspace read physical execution requires exact current v2",
+            )
+            .with_effect_boundary(EffectBoundary::EffectNotStarted)
+            .with_actual_point_evidence(false, 0));
+        }
+        Ok(())
+    }
+
+    fn validate_inspection_target_shape(&self) -> Result<()> {
         match (self.effect_kind.as_str(), self.payload.inspection_target()) {
             ("praxis.sandbox/inspect", Some(target)) => {
                 target.validate(self.payload.kind(), &self.tenant_id, now_unix_nano())?;
@@ -928,12 +964,6 @@ impl DispatchRequestV1 {
                 ));
             }
             (_, None) => {}
-        }
-        if self.digest != self.calculate_digest()? {
-            return Err(ClosedError::new(
-                ClosedReason::InvalidDigest,
-                "dispatch request digest drifted",
-            ));
         }
         Ok(())
     }

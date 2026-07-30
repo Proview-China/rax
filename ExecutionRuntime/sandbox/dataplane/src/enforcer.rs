@@ -6,7 +6,7 @@ use crate::checkpoint::{CHECKPOINT_EFFECT_KIND_V1, CheckpointStore};
 use crate::contract::{
     CurrentAuthorizationV1, DispatchRequestV1, EnforcementPhaseV1, now_unix_nano,
 };
-use crate::error::{ClosedError, ClosedReason, Result};
+use crate::error::{ClosedError, ClosedReason, EffectBoundary, Result};
 use crate::journal::AttemptJournal;
 use crate::provider::{Provider, ProviderResult};
 
@@ -49,8 +49,26 @@ impl<R: CurrentFactsReader> DataPlaneEnforcer<R> {
                 "provider kind does not match the sealed payload",
             ));
         }
-        let current = self.reader.inspect_current(request).await?;
-        current.validate_against(request, now_unix_nano())?;
+        // Workspace-read Prepare is a no-effect durable journal seal. Execute
+        // still requires the additive V2 current read before provider entry.
+        if request.effect_kind != "praxis.sandbox/workspace-read"
+            || request.phase != EnforcementPhaseV1::Prepare
+        {
+            let current = self
+                .reader
+                .inspect_current(request)
+                .await
+                .map_err(|error| {
+                    if request.effect_kind == "praxis.sandbox/workspace-read" {
+                        error
+                            .with_effect_boundary(EffectBoundary::EffectNotStarted)
+                            .with_actual_point_evidence(false, 0)
+                    } else {
+                        error
+                    }
+                })?;
+            current.validate_against(request, now_unix_nano())?;
+        }
 
         self.journal.begin(request).await?;
         let result = match request.phase {

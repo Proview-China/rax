@@ -22,7 +22,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 15
+const schemaVersion = 16
 
 type Store struct {
 	db                            *sql.DB
@@ -246,6 +246,12 @@ var schemaStatements = []string{
 		stable_digest TEXT PRIMARY KEY, attempt_id TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_attempt_origin (
 		attempt_id TEXT PRIMARY KEY, stable_digest TEXT NOT NULL UNIQUE, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_admission_attempt_binding (
+		admission_id TEXT NOT NULL, admission_revision INTEGER NOT NULL, admission_digest TEXT NOT NULL,
+		attempt_id TEXT NOT NULL, attempt_revision INTEGER NOT NULL, attempt_digest TEXT NOT NULL,
+		body BLOB NOT NULL,
+		PRIMARY KEY(admission_id,admission_revision,admission_digest),
+		UNIQUE(attempt_id,attempt_revision,attempt_digest))`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_attempt_owner_incarnation (
 		attempt_id TEXT PRIMARY KEY, owner_incarnation_id TEXT NOT NULL, reserved_unix_nano INTEGER NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_recovery_evidence (

@@ -129,6 +129,28 @@ func TestRuntimeQueryCanonicalizationDoesNotDependOnObjectKeyOrder(t *testing.T)
 	}
 }
 
+func TestCanonicalJSONPreservesNanosecondIntegerPrecision(t *testing.T) {
+	const input = `{"expires_unix_nano":1785431797003206945,"prepared_unix_nano":1785431767003206945}`
+	canonical, err := canonicalJSON([]byte(input))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(canonical) != input {
+		t.Fatalf("canonical JSON rounded an exact wire integer: %s", canonical)
+	}
+}
+
+func TestCanonicalJSONRejectsTrailingData(t *testing.T) {
+	for _, input := range []string{
+		`{"exact":true}{"trailing":true}`,
+		`{"exact":true} trailing`,
+	} {
+		if canonical, err := canonicalJSON([]byte(input)); err == nil || canonical != nil {
+			t.Fatalf("canonical JSON accepted trailing data %q: %s", input, canonical)
+		}
+	}
+}
+
 func TestCurrentServerRejectsMalformedRequestBeforeOwnerReads(t *testing.T) {
 	now := time.Unix(1_800_000_000, 0)
 	request := fixtureRequest(t, now)
@@ -139,7 +161,50 @@ func TestCurrentServerRejectsMalformedRequestBeforeOwnerReads(t *testing.T) {
 	}
 }
 
-func TestWorkspaceReadSandboxProjectionExactRefRejectsRevisionAndDigestDrift(t *testing.T) {
+func TestCurrentServerRejectsWorkspaceReadV1BeforeOwnerOrPhysicalExecution(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	for name, raw := range map[string]string{
+		"legacy exact v1":  `{"contract_version":"praxis.sandbox/workspace-read-current/v1"}`,
+		"plain runtime v4": `{"inspect":{"effect_id":"workspace-read"}}`,
+		"null query":       `null`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			request := fixtureRequest(t, now)
+			request.Phase = PhaseExecute
+			request.EffectKind = "praxis.sandbox/workspace-read"
+			request.RuntimeEnforcement.Phase = PhaseExecute
+			request.Payload.ProviderKind = "workspace_read"
+			request.SandboxProjection = &SandboxProjectionRefV1{
+				Revision:        1,
+				Digest:          digestForTest(t, "workspace-read-v1-projection"),
+				ExpiresUnixNano: now.Add(time.Minute).UnixNano(),
+			}
+			query, err := canonicalJSON([]byte(raw))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.RuntimeCurrentQuery = query
+			request.RuntimeCurrentQueryDigest, err = canonicalDigest("RuntimeCurrentQueryV1", json.RawMessage(query))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.PayloadDigest, err = canonicalDigest("ProviderPayloadV1", request.Payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Digest, err = request.digestV1()
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := CurrentServer{Now: func() time.Time { return now }}
+			if _, err = server.inspect(context.Background(), request); err == nil || !strings.Contains(err.Error(), "requires exact current v2") {
+				t.Fatalf("workspace read non-v2 physical request reached Owner reads: %v", err)
+			}
+		})
+	}
+}
+
+func TestCurrentServerSandboxProjectionExactRefRejectsRevisionDigestAndExpiryDrift(t *testing.T) {
 	revision := runtimecore.Revision(7)
 	digest := runtimecore.Digest(digestForTest(t, "workspace-read-sandbox-projection"))
 	expires := time.Unix(1_800_000_000, 0).Add(time.Hour).UnixNano()
@@ -158,6 +223,11 @@ func TestWorkspaceReadSandboxProjectionExactRefRejectsRevisionAndDigestDrift(t *
 	driftedDigest.Digest = digestForTest(t, "other-workspace-read-sandbox-projection")
 	if sameSandboxProjectionV1(driftedDigest, revision, digest, expires) {
 		t.Fatal("request sandbox projection digest drift was accepted")
+	}
+	driftedExpiry := exact
+	driftedExpiry.ExpiresUnixNano++
+	if sameSandboxProjectionV1(driftedExpiry, revision, digest, expires) {
+		t.Fatal("request sandbox projection expiry drift was accepted")
 	}
 }
 
