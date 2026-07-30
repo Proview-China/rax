@@ -419,7 +419,7 @@ if err := stream.Err(); err != nil {
 bash ./scripts/verify-offline.sh
 ```
 
-该统一入口先执行 `go mod download`与 `go mod verify`，随后屏蔽全部已知 Provider/云凭据和烟测开关，把外部 HTTP代理指向关闭的 loopback端口，再执行 gofmt、`go mod tidy -diff`、`git diff --check`、`go vet`、普通、shuffle、race、完整integration-tag离线套件（真实smoke默认Skip）和Catalog资产校验。依赖获取可能访问配置的 Go module proxy；Provider测试只使用 loopback或自定义 transport，不调用真实 Provider API。GitHub Actions也只调用这一入口。
+该统一入口先在唯一允许联网的依赖获取阶段执行 `go mod download`、`go mod tidy -diff`与 `go mod verify`，把 clean runner所需的测试传递依赖一并解析并缓存；随后屏蔽全部已知 Provider/云凭据和烟测开关，把外部 HTTP代理指向关闭的 loopback端口，再次执行 `go mod tidy -diff`，并继续执行 gofmt、`git diff --check`、`go vet`、普通、shuffle、race、完整integration-tag离线套件（真实smoke默认Skip）和Catalog资产校验。验证阶段不得依赖网络或预热缓存；Provider测试只使用 loopback或自定义 transport，不调用真实 Provider API。GitHub Actions也只调用这一入口。
 
 波次 A还实际执行并通过三项独立3秒 fuzz：
 

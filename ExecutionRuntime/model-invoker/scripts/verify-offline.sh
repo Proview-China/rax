@@ -126,9 +126,12 @@ export QWEN_CODE_HOME="$harness_home/qwen"
 export QWEN_HOME="$harness_home/qwen"
 
 # Dependency acquisition is the only step allowed to use the configured module
-# proxy. All verification commands below run with outbound HTTP proxies pointed
-# at a closed loopback port; httptest loopback servers remain reachable.
+# proxy. `go mod download` alone does not fetch test-only transitive modules on
+# a clean runner, so resolve and cache the complete tidy graph before closing
+# the proxy. The repeated tidy check below proves verification no longer depends
+# on an ambient module cache.
 go mod download
+go mod tidy -diff
 go mod verify
 
 export HTTP_PROXY="http://127.0.0.1:1"
