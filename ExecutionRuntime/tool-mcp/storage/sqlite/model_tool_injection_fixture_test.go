@@ -140,7 +140,12 @@ func sqliteCompileFixtureV1(t *testing.T, clock *testkit.ManualClock) sqliteMode
 		t.Fatal(err)
 	}
 	expectedExpires := current.ExpiresUnixNano
-	for _, candidate := range []int64{capabilityCurrent.ExpiresUnixNano, toolCurrent.ExpiresUnixNano} {
+	for _, candidate := range []int64{
+		capabilityCurrent.ExpiresUnixNano,
+		capabilityCurrent.Source.UpdatedUnixNano + int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
+		toolCurrent.ExpiresUnixNano,
+		toolCurrent.Source.UpdatedUnixNano + int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
+	} {
 		if candidate < expectedExpires {
 			expectedExpires = candidate
 		}

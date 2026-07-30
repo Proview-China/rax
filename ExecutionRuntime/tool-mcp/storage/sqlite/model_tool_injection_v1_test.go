@@ -3,15 +3,17 @@ package sqlite_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
+	"fmt"
 	"reflect"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	toolcontract "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/contract"
-	"github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/internal/owner/surfacebinding"
 	"github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/internal/testkit"
 	toolsqlite "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/storage/sqlite"
 	"github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/surface"
@@ -90,10 +92,65 @@ func TestSQLiteModelToolInjectionMaterialV1RestartExactConcurrentAndExpiry(t *te
 	}
 }
 
+func TestSQLiteModelToolInjectionMaterialV1AdvancingClockConcurrentConverges(t *testing.T) {
+	path := t.TempDir() + "/tool-owner.db"
+	sourceClock := testkit.NewManualClock(testkit.FixedTime.Add(time.Second))
+	fixture := sqliteCompileFixtureV1(t, sourceClock)
+	var ticks atomic.Int64
+	clock := func() time.Time {
+		return testkit.FixedTime.Add(time.Second + time.Duration(ticks.Add(1))*time.Nanosecond)
+	}
+	store, err := toolsqlite.OpenV1(context.Background(), toolsqlite.ConfigV1{
+		Path: path, Clock: clock, Owner: testkit.Owner(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	const workers = 64
+	var wg sync.WaitGroup
+	values := make(chan toolcontract.ModelToolInjectionMaterialV1, workers)
+	errs := make(chan error, workers)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, material, err := store.CompileAndEnsureModelToolInjectionMaterialV1(
+				context.Background(), fixture.Current.Ref, fixture.Surfaces, fixture.Definitions, fixture.Currents,
+			)
+			if err == nil {
+				values <- material
+			}
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(values)
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	var winner toolcontract.ModelToolInjectionMaterialV1
+	for material := range values {
+		if winner.Ref == (toolcontract.ModelToolInjectionMaterialRefV1{}) {
+			winner = material
+		} else if !reflect.DeepEqual(winner, material) {
+			t.Fatal("advancing-clock concurrent compile did not converge to one exact Material row")
+		}
+	}
+	if winner.Ref == (toolcontract.ModelToolInjectionMaterialRefV1{}) {
+		t.Fatal("advancing-clock concurrent compile produced no winner")
+	}
+}
+
 func TestSQLiteModelToolInjectionMaterialV1SpliceFailClosed(t *testing.T) {
 	for _, test := range []struct {
-		name   string
-		update string
+		name          string
+		update        string
+		reorderColumn string
 	}{
 		{name: "material id", update: `UPDATE model_tool_injection_material_v1 SET material_id='spliced-material-id'`},
 		{name: "revision", update: `UPDATE model_tool_injection_material_v1 SET revision=2`},
@@ -104,8 +161,12 @@ func TestSQLiteModelToolInjectionMaterialV1SpliceFailClosed(t *testing.T) {
 		{name: "compiled digest", update: `UPDATE model_tool_injection_material_v1 SET compiled_tools_digest='sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'`},
 		{name: "ttl", update: `UPDATE model_tool_injection_material_v1 SET expires_unix_nano=expires_unix_nano+1`},
 		{name: "compiled body", update: `UPDATE model_tool_injection_material_v1 SET compiled_tools_json=x'7b7d'`},
+		{name: "compiled body equivalent whitespace", update: `UPDATE model_tool_injection_material_v1 SET compiled_tools_json=CAST(x'20'||compiled_tools_json AS BLOB)`},
 		{name: "material body", update: `UPDATE model_tool_injection_material_v1 SET body_json=x'7b7d'`},
+		{name: "material body equivalent whitespace", update: `UPDATE model_tool_injection_material_v1 SET body_json=CAST(x'20'||body_json AS BLOB)`},
 		{name: "row digest", update: `UPDATE model_tool_injection_material_v1 SET row_digest='sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'`},
+		{name: "compiled body equivalent key reorder", reorderColumn: "compiled_tools_json"},
+		{name: "material body equivalent key reorder", reorderColumn: "body_json"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := t.TempDir() + "/tool-owner.db"
@@ -115,7 +176,11 @@ func TestSQLiteModelToolInjectionMaterialV1SpliceFailClosed(t *testing.T) {
 			if err := store.Close(); err != nil {
 				t.Fatal(err)
 			}
-			tamperSQLiteV1(t, path, test.update)
+			if test.reorderColumn != "" {
+				tamperSQLiteJSONReorderV1(t, path, "model_tool_injection_material_v1", test.reorderColumn)
+			} else {
+				tamperSQLiteV1(t, path, test.update)
+			}
 			store = openStoreV1(t, path, clock)
 			defer store.Close()
 			if _, err := store.InspectExactModelToolInjectionMaterialV1(context.Background(), material.Ref); err == nil {
@@ -140,17 +205,10 @@ func TestSQLiteModelToolInjectionMaterialV1SpliceFailClosed(t *testing.T) {
 func TestSQLiteToolSurfaceInvocationBindingV1DurableExactReader(t *testing.T) {
 	path := t.TempDir() + "/tool-owner.db"
 	clock := testkit.NewManualClock(testkit.FixedTime.Add(time.Second))
-	reference, err := surfacebinding.NewInMemoryRepositoryV1(testkit.Owner(), clock.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
 	request := testkit.ToolSurfaceInvocationBindingRequestV1()
-	binding, ack, err := reference.EnsureToolSurfaceInvocationBindingV1(context.Background(), request)
-	if err != nil {
-		t.Fatal(err)
-	}
 	store := openStoreV1(t, path, clock)
-	if _, _, err = store.EnsureExactToolSurfaceInvocationBindingV1(context.Background(), binding, ack); err != nil {
+	binding, ack, err := store.EnsureToolSurfaceInvocationBindingV1(context.Background(), request)
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err = store.Close(); err != nil {
@@ -178,27 +236,25 @@ func TestSQLiteToolSurfaceInvocationBindingV1DurableExactReader(t *testing.T) {
 func TestSQLiteToolSurfaceInvocationBindingV1ConcurrentSameBinding(t *testing.T) {
 	path := t.TempDir() + "/tool-owner.db"
 	clock := testkit.NewManualClock(testkit.FixedTime.Add(time.Second))
-	reference, err := surfacebinding.NewInMemoryRepositoryV1(testkit.Owner(), clock.Now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	binding, ack, err := reference.EnsureToolSurfaceInvocationBindingV1(context.Background(), testkit.ToolSurfaceInvocationBindingRequestV1())
-	if err != nil {
-		t.Fatal(err)
-	}
+	request := testkit.ToolSurfaceInvocationBindingRequestV1()
 	store := openStoreV1(t, path, clock)
 	defer store.Close()
 
 	const workers = 64
 	var wg sync.WaitGroup
 	errs := make(chan error, workers)
+	type closure struct {
+		binding toolcontract.ToolSurfaceInvocationBindingV1
+		ack     toolcontract.ToolSurfaceInvocationBindingAckV1
+	}
+	values := make(chan closure, workers)
 	for range workers {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			winner, winnerAck, err := store.EnsureExactToolSurfaceInvocationBindingV1(context.Background(), binding, ack)
-			if err == nil && (!reflect.DeepEqual(winner, binding) || !reflect.DeepEqual(winnerAck, ack)) {
-				err = core.NewError(core.ErrorConflict, core.ReasonBindingDrift, "concurrent Binding winner drifted")
+			winner, winnerAck, err := store.EnsureToolSurfaceInvocationBindingV1(context.Background(), request)
+			if err == nil {
+				values <- closure{binding: winner, ack: winnerAck}
 			}
 			errs <- err
 		}()
@@ -210,45 +266,77 @@ func TestSQLiteToolSurfaceInvocationBindingV1ConcurrentSameBinding(t *testing.T)
 			t.Fatal(err)
 		}
 	}
+	close(values)
+	var expected closure
+	for value := range values {
+		if expected.binding.Ref == (toolcontract.ToolSurfaceInvocationBindingRefV1{}) {
+			expected = value
+		} else if !reflect.DeepEqual(expected, value) {
+			t.Fatal("64 concurrent Binding requests did not converge")
+		}
+	}
+	binding, ack := expected.binding, expected.ack
 	exact, exactAck, err := store.InspectToolSurfaceInvocationBindingByInvocationV1(context.Background(), binding.Subject.Invocation)
 	if err != nil || !reflect.DeepEqual(exact, binding) || !reflect.DeepEqual(exactAck, ack) {
 		t.Fatalf("64 concurrent Binding calls did not converge through the invocation secondary index: binding=%v ack=%v err=%v", reflect.DeepEqual(exact, binding), reflect.DeepEqual(exactAck, ack), err)
 	}
 }
 
+func TestSQLiteToolSurfaceInvocationBindingV1SameInvocationDifferentRequestConflicts(t *testing.T) {
+	path := t.TempDir() + "/tool-owner.db"
+	clock := testkit.NewManualClock(testkit.FixedTime.Add(time.Second))
+	store := openStoreV1(t, path, clock)
+	defer store.Close()
+	request := testkit.ToolSurfaceInvocationBindingRequestV1()
+	if _, _, err := store.EnsureToolSurfaceInvocationBindingV1(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	different := request
+	different.RequestedNotAfterUnixNano--
+	if _, _, err := store.EnsureToolSurfaceInvocationBindingV1(context.Background(), different); err == nil || !core.HasCategory(err, core.ErrorConflict) {
+		t.Fatalf("same invocation with another request payload did not fail closed: %v", err)
+	}
+}
+
 func TestSQLiteToolSurfaceInvocationBindingV1SpliceFailClosed(t *testing.T) {
 	for _, test := range []struct {
-		name   string
-		update string
+		name          string
+		update        string
+		reorderColumn string
 	}{
 		{name: "revision", update: `UPDATE tool_surface_invocation_binding_v1 SET revision=2`},
 		{name: "digest", update: `UPDATE tool_surface_invocation_binding_v1 SET digest='sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'`},
 		{name: "invocation id", update: `UPDATE tool_surface_invocation_binding_v1 SET invocation_id='spliced-invocation'`},
 		{name: "invocation digest", update: `UPDATE tool_surface_invocation_binding_v1 SET invocation_digest='sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'`},
 		{name: "expiry", update: `UPDATE tool_surface_invocation_binding_v1 SET expires_unix_nano=expires_unix_nano+1`},
+		{name: "request digest", update: `UPDATE tool_surface_invocation_binding_v1 SET request_digest='sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'`},
+		{name: "request body", update: `UPDATE tool_surface_invocation_binding_v1 SET request_json=x'7b7d'`},
+		{name: "request body equivalent whitespace", update: `UPDATE tool_surface_invocation_binding_v1 SET request_json=CAST(x'20'||request_json AS BLOB)`},
 		{name: "binding body", update: `UPDATE tool_surface_invocation_binding_v1 SET binding_json=x'7b7d'`},
+		{name: "binding body equivalent whitespace", update: `UPDATE tool_surface_invocation_binding_v1 SET binding_json=CAST(x'20'||binding_json AS BLOB)`},
 		{name: "ack body", update: `UPDATE tool_surface_invocation_binding_v1 SET ack_json=x'7b7d'`},
+		{name: "ack body equivalent whitespace", update: `UPDATE tool_surface_invocation_binding_v1 SET ack_json=CAST(x'20'||ack_json AS BLOB)`},
 		{name: "row digest", update: `UPDATE tool_surface_invocation_binding_v1 SET row_digest='sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc'`},
+		{name: "request body equivalent key reorder", reorderColumn: "request_json"},
+		{name: "binding body equivalent key reorder", reorderColumn: "binding_json"},
+		{name: "ack body equivalent key reorder", reorderColumn: "ack_json"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			path := t.TempDir() + "/tool-owner.db"
 			clock := testkit.NewManualClock(testkit.FixedTime.Add(time.Second))
-			reference, err := surfacebinding.NewInMemoryRepositoryV1(testkit.Owner(), clock.Now)
-			if err != nil {
-				t.Fatal(err)
-			}
-			binding, ack, err := reference.EnsureToolSurfaceInvocationBindingV1(context.Background(), testkit.ToolSurfaceInvocationBindingRequestV1())
-			if err != nil {
-				t.Fatal(err)
-			}
 			store := openStoreV1(t, path, clock)
-			if _, _, err = store.EnsureExactToolSurfaceInvocationBindingV1(context.Background(), binding, ack); err != nil {
+			binding, _, err := store.EnsureToolSurfaceInvocationBindingV1(context.Background(), testkit.ToolSurfaceInvocationBindingRequestV1())
+			if err != nil {
 				t.Fatal(err)
 			}
 			if err = store.Close(); err != nil {
 				t.Fatal(err)
 			}
-			tamperSQLiteV1(t, path, test.update)
+			if test.reorderColumn != "" {
+				tamperSQLiteJSONReorderV1(t, path, "tool_surface_invocation_binding_v1", test.reorderColumn)
+			} else {
+				tamperSQLiteV1(t, path, test.update)
+			}
 			store = openStoreV1(t, path, clock)
 			defer store.Close()
 			if _, _, err = store.InspectExactToolSurfaceInvocationBindingV1(context.Background(), binding.Ref); err == nil {
@@ -305,7 +393,7 @@ func sqliteMaterialV1(t *testing.T) toolcontract.ModelToolInjectionMaterialV1 {
 
 func openStoreV1(t *testing.T, path string, clock *testkit.ManualClock) *toolsqlite.StoreV1 {
 	t.Helper()
-	store, err := toolsqlite.OpenV1(context.Background(), toolsqlite.ConfigV1{Path: path, Clock: clock.Now})
+	store, err := toolsqlite.OpenV1(context.Background(), toolsqlite.ConfigV1{Path: path, Clock: clock.Now, Owner: testkit.Owner()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -320,6 +408,33 @@ func tamperSQLiteV1(t *testing.T, path, statement string) {
 	}
 	defer db.Close()
 	if _, err = db.Exec(statement); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func tamperSQLiteJSONReorderV1(t *testing.T, path, table, column string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	var body []byte
+	if err = db.QueryRow(fmt.Sprintf("SELECT %s FROM %s", column, table)).Scan(&body); err != nil {
+		t.Fatal(err)
+	}
+	var value map[string]json.RawMessage
+	if err = json.Unmarshal(body, &value); err != nil {
+		t.Fatal(err)
+	}
+	reordered, err := json.Marshal(value)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(reordered) == string(body) {
+		t.Fatalf("%s.%s fixture was already map-key ordered", table, column)
+	}
+	if _, err = db.Exec(fmt.Sprintf("UPDATE %s SET %s=?", table, column), reordered); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -73,6 +73,7 @@ func CompileModelToolInjectionMaterialV1(
 
 	closures := make([]modelToolInjectionClosureV1, 0, len(surfaceS1.Manifest.Entries))
 	expires := surfaceS1.ExpiresUnixNano
+	created := surfaceS1.Manifest.CreatedUnixNano
 	for _, entry := range surfaceS1.Manifest.Entries {
 		if err := ctx.Err(); err != nil {
 			return zero(err)
@@ -123,7 +124,14 @@ func CompileModelToolInjectionMaterialV1(
 		if err := validateModelToolInjectionDescriptorClosureV1(entry, capability, tool); err != nil {
 			return zero(err)
 		}
-		expires = minimumUnixNanoV2(expires, capabilityCurrent.ExpiresUnixNano, toolCurrent.ExpiresUnixNano)
+		expires = minimumUnixNanoV2(
+			expires,
+			capabilityCurrent.ExpiresUnixNano,
+			capabilityCurrent.Source.UpdatedUnixNano+int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
+			toolCurrent.ExpiresUnixNano,
+			toolCurrent.Source.UpdatedUnixNano+int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
+		)
+		created = maximumUnixNanoV2(created, capabilityCurrent.Source.UpdatedUnixNano, toolCurrent.Source.UpdatedUnixNano)
 		closures = append(closures, modelToolInjectionClosureV1{
 			entry: entry, definition: definition, capability: capability, capabilityCurrent: capabilityCurrent,
 			tool: tool, toolCurrent: toolCurrent,
@@ -198,7 +206,14 @@ func CompileModelToolInjectionMaterialV1(
 			return zero(err)
 		}
 		nowS2 = toolNowS2
-		expires = minimumUnixNanoV2(expires, capabilityCurrentS2.ExpiresUnixNano, toolCurrentS2.ExpiresUnixNano)
+		expires = minimumUnixNanoV2(
+			expires,
+			capabilityCurrentS2.ExpiresUnixNano,
+			capabilityCurrentS2.Source.UpdatedUnixNano+int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
+			toolCurrentS2.ExpiresUnixNano,
+			toolCurrentS2.Source.UpdatedUnixNano+int64(toolcontract.MaxToolRegistryObjectCurrentTTLV1),
+		)
+		created = maximumUnixNanoV2(created, capabilityCurrentS2.Source.UpdatedUnixNano, toolCurrentS2.Source.UpdatedUnixNano)
 		closures[index].definition = definitionS2
 	}
 	if err := ctx.Err(); err != nil {
@@ -240,7 +255,7 @@ func CompileModelToolInjectionMaterialV1(
 		Entries:                 entries,
 		ExpectedInjectionDigest: surfaceS2.Manifest.ExpectedInjectionDigest,
 		CompiledToolsDigest:     compiled.Digest,
-		CreatedUnixNano:         final.UnixNano(),
+		CreatedUnixNano:         created,
 		ExpiresUnixNano:         expires,
 	})
 	if err != nil {
@@ -285,6 +300,16 @@ func minimumUnixNanoV2(values ...int64) int64 {
 		}
 	}
 	return minimum
+}
+
+func maximumUnixNanoV2(values ...int64) int64 {
+	maximum := values[0]
+	for _, value := range values[1:] {
+		if value > maximum {
+			maximum = value
+		}
+	}
+	return maximum
 }
 
 func sameRegistryCurrentStableV2(left, right toolcontract.ToolRegistryObjectCurrentProjectionV1) bool {

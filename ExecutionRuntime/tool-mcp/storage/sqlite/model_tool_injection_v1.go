@@ -4,6 +4,7 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -13,6 +14,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
@@ -52,6 +54,8 @@ CREATE TABLE IF NOT EXISTS tool_surface_invocation_binding_v1 (
     invocation_id TEXT NOT NULL,
     invocation_digest TEXT NOT NULL,
     expires_unix_nano INTEGER NOT NULL,
+    request_digest TEXT NOT NULL,
+    request_json BLOB NOT NULL,
     binding_json BLOB NOT NULL,
     ack_json BLOB NOT NULL,
     row_digest TEXT NOT NULL,
@@ -65,11 +69,21 @@ type ConfigV1 struct {
 	BusyTimeout  time.Duration
 	MaxOpenConns int
 	Clock        func() time.Time
+	Owner        core.OwnerRef
 }
 
 type StoreV1 struct {
 	db    *sql.DB
 	clock func() time.Time
+	owner core.OwnerRef
+
+	gatesMu sync.Mutex
+	gates   map[string]*bindingInvocationGateV1
+}
+
+type bindingInvocationGateV1 struct {
+	mu   sync.Mutex
+	refs int
 }
 
 func OpenV1(ctx context.Context, config ConfigV1) (*StoreV1, error) {
@@ -78,6 +92,9 @@ func OpenV1(ctx context.Context, config ConfigV1) (*StoreV1, error) {
 	}
 	if strings.TrimSpace(config.Path) == "" {
 		return nil, invalidV1("Tool SQLite path is required")
+	}
+	if err := config.Owner.Validate(); err != nil {
+		return nil, invalidV1("Tool SQLite Owner is required")
 	}
 	if config.BusyTimeout <= 0 {
 		config.BusyTimeout = 5 * time.Second
@@ -106,7 +123,7 @@ func OpenV1(ctx context.Context, config ConfigV1) (*StoreV1, error) {
 	}
 	db.SetMaxOpenConns(config.MaxOpenConns)
 	db.SetMaxIdleConns(config.MaxOpenConns)
-	store := &StoreV1{db: db, clock: config.Clock}
+	store := &StoreV1{db: db, clock: config.Clock, owner: config.Owner, gates: make(map[string]*bindingInvocationGateV1)}
 	if err := store.migrateV1(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -239,19 +256,100 @@ func (s *StoreV1) InspectExactModelToolInjectionMaterialV1(ctx context.Context, 
 	return material.Clone(), nil
 }
 
-// EnsureExactToolSurfaceInvocationBindingV1 persists an already sealed
-// Tool-owned binding and ACK. It intentionally does not recreate upstream
-// Prepared/Assembly facts or mint a second authorization path.
-func (s *StoreV1) EnsureExactToolSurfaceInvocationBindingV1(ctx context.Context, binding toolcontract.ToolSurfaceInvocationBindingV1, ack toolcontract.ToolSurfaceInvocationBindingAckV1) (toolcontract.ToolSurfaceInvocationBindingV1, toolcontract.ToolSurfaceInvocationBindingAckV1, error) {
+func (s *StoreV1) EnsureToolSurfaceInvocationBindingV1(ctx context.Context, request toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1) (toolcontract.ToolSurfaceInvocationBindingV1, toolcontract.ToolSurfaceInvocationBindingAckV1, error) {
 	if err := s.writeReadyV1(ctx); err != nil {
 		return bindingZeroV1(err)
 	}
-	now := s.clock()
-	if err := binding.ValidateCurrent(now); err != nil {
+	request, err := cloneBindingRequestV1(request)
+	if err != nil {
 		return bindingZeroV1(err)
 	}
-	if err := ack.ValidateAgainst(binding, now); err != nil {
+	if err := request.Validate(); err != nil {
 		return bindingZeroV1(err)
+	}
+	requestDigest, err := request.ComputeDigest()
+	if err != nil {
+		return bindingZeroV1(err)
+	}
+	first := s.clock()
+	if err := validateBindingRequestCurrentV1(request, first); err != nil {
+		return bindingZeroV1(err)
+	}
+	release := s.acquireBindingInvocationGateV1(request.Invocation.InvocationID + "\x00" + string(request.Invocation.InvocationDigest))
+	defer release()
+	if err := contextErrorV1(ctx); err != nil {
+		return bindingZeroV1(err)
+	}
+	second := s.clock()
+	if second.Before(first) {
+		return bindingZeroV1(core.NewError(core.ErrorPreconditionFailed, core.ReasonClockRegression, "Tool Surface Invocation Binding clock regressed"))
+	}
+	if err := validateBindingRequestCurrentV1(request, second); err != nil {
+		return bindingZeroV1(err)
+	}
+	subject, err := toolcontract.SealToolSurfaceInvocationBindingSubjectV1(request)
+	if err != nil {
+		return bindingZeroV1(err)
+	}
+	deadline, _ := ctx.Deadline()
+	notAfter := toolcontract.ToolSurfaceInvocationBindingNotAfterV1(subject, deadline)
+	if second.UnixNano() >= notAfter {
+		return bindingZeroV1(core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingExpired, "Tool Surface Invocation Binding expired before commit"))
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return bindingZeroV1(mapDBErrorV1(ctx, err, true))
+	}
+	defer func() { _ = tx.Rollback() }()
+	commitNow := s.clock()
+	if commitNow.Before(second) {
+		return bindingZeroV1(core.NewError(core.ErrorPreconditionFailed, core.ReasonClockRegression, "Tool Surface Invocation Binding commit clock regressed"))
+	}
+	if err := validateBindingRequestCurrentV1(request, commitNow); err != nil {
+		return bindingZeroV1(err)
+	}
+	if commitNow.UnixNano() >= notAfter {
+		return bindingZeroV1(core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingExpired, "Tool Surface Invocation Binding expired at commit"))
+	}
+
+	if winnerRequest, winnerRequestDigest, winner, winnerAck, inspectErr := inspectBindingTxByInvocationV1(ctx, tx, request.Invocation); inspectErr == nil {
+		if winnerRequestDigest != requestDigest || winnerRequest.ValidateAgainst(winner) != nil || request.ValidateAgainst(winner) != nil {
+			return bindingZeroV1(core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "Tool Surface Invocation Binding request differs from winner"))
+		}
+		if err := winner.ValidateCurrent(commitNow); err != nil {
+			return bindingZeroV1(err)
+		}
+		if err := winnerAck.ValidateAgainst(winner, commitNow); err != nil {
+			return bindingZeroV1(err)
+		}
+		return winner, winnerAck, nil
+	} else if !core.HasCategory(inspectErr, core.ErrorNotFound) {
+		return bindingZeroV1(inspectErr)
+	}
+
+	binding, err := toolcontract.SealToolSurfaceInvocationBindingV1(toolcontract.ToolSurfaceInvocationBindingV1{
+		Ref:              toolcontract.ToolSurfaceInvocationBindingRefV1{Owner: s.owner},
+		Subject:          subject,
+		CreatedUnixNano:  commitNow.UnixNano(),
+		NotAfterUnixNano: notAfter,
+	})
+	if err != nil {
+		return bindingZeroV1(err)
+	}
+	ack, err := toolcontract.SealToolSurfaceInvocationBindingAckV1(toolcontract.ToolSurfaceInvocationBindingAckV1{
+		BindingRef: binding.Ref, Invocation: binding.Subject.Invocation,
+		PreparedFactRef: binding.Subject.PreparedFactRef, PreparedCurrentRef: binding.Subject.PreparedCurrentRef,
+		CheckedUnixNano: commitNow.UnixNano(), NotAfterUnixNano: binding.NotAfterUnixNano,
+	})
+	if err != nil {
+		return bindingZeroV1(err)
+	}
+	if err := ack.ValidateAgainst(binding, commitNow); err != nil {
+		return bindingZeroV1(err)
+	}
+	requestBody, err := json.Marshal(request)
+	if err != nil {
+		return bindingZeroV1(invalidV1("Tool Surface Invocation Binding request JSON encode failed"))
 	}
 	bindingBody, err := json.Marshal(binding)
 	if err != nil {
@@ -261,22 +359,17 @@ func (s *StoreV1) EnsureExactToolSurfaceInvocationBindingV1(ctx context.Context,
 	if err != nil {
 		return bindingZeroV1(invalidV1("Tool Surface Invocation Binding Ack JSON encode failed"))
 	}
-	rowDigest, err := bindingRowDigestV1(binding, ack)
+	rowDigest, err := bindingRowDigestV1(request, requestDigest, binding, ack)
 	if err != nil {
 		return bindingZeroV1(err)
 	}
-	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
-	if err != nil {
-		return bindingZeroV1(mapDBErrorV1(ctx, err, true))
-	}
-	defer func() { _ = tx.Rollback() }()
 	result, err := tx.ExecContext(ctx, `
-INSERT OR IGNORE INTO tool_surface_invocation_binding_v1
-(binding_id,revision,digest,invocation_id,invocation_digest,expires_unix_nano,binding_json,ack_json,row_digest)
-VALUES(?,?,?,?,?,?,?,?,?)`,
+	INSERT OR IGNORE INTO tool_surface_invocation_binding_v1
+	(binding_id,revision,digest,invocation_id,invocation_digest,expires_unix_nano,request_digest,request_json,binding_json,ack_json,row_digest)
+	VALUES(?,?,?,?,?,?,?,?,?,?,?)`,
 		binding.Ref.ID, int64(binding.Ref.Revision), string(binding.Ref.Digest),
 		binding.Subject.Invocation.InvocationID, string(binding.Subject.Invocation.InvocationDigest),
-		binding.NotAfterUnixNano, bindingBody, ackBody, string(rowDigest),
+		binding.NotAfterUnixNano, string(requestDigest), requestBody, bindingBody, ackBody, string(rowDigest),
 	)
 	if err != nil {
 		return bindingZeroV1(mapDBErrorV1(ctx, err, true))
@@ -286,13 +379,20 @@ VALUES(?,?,?,?,?,?,?,?,?)`,
 		return bindingZeroV1(mapDBErrorV1(ctx, err, true))
 	}
 	if affected == 0 {
-		winner, winnerAck, err := inspectBindingTxByIDV1(ctx, tx, binding.Ref.ID)
+		winnerRequest, winnerRequestDigest, winner, winnerAck, err := inspectBindingTxByInvocationV1(ctx, tx, request.Invocation)
 		if err != nil {
 			return bindingZeroV1(err)
 		}
-		if !reflect.DeepEqual(winner, binding) || !reflect.DeepEqual(winnerAck, ack) {
-			return bindingZeroV1(conflictV1("Tool Surface Invocation Binding coordinate already binds different content"))
+		if winnerRequestDigest != requestDigest || winnerRequest.ValidateAgainst(winner) != nil || request.ValidateAgainst(winner) != nil {
+			return bindingZeroV1(core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "Tool Surface Invocation Binding request differs from winner"))
 		}
+		if err := winner.ValidateCurrent(commitNow); err != nil {
+			return bindingZeroV1(err)
+		}
+		if err := winnerAck.ValidateAgainst(winner, commitNow); err != nil {
+			return bindingZeroV1(err)
+		}
+		return winner, winnerAck, nil
 	}
 	if err := tx.Commit(); err != nil {
 		return bindingZeroV1(indeterminateV1("Tool Surface Invocation Binding commit outcome is unknown"))
@@ -308,10 +408,10 @@ func (s *StoreV1) InspectToolSurfaceInvocationBindingByInvocationV1(ctx context.
 		return bindingZeroV1(err)
 	}
 	row := s.db.QueryRowContext(ctx, `
-SELECT binding_id,revision,digest,invocation_id,invocation_digest,expires_unix_nano,binding_json,ack_json,row_digest
-FROM tool_surface_invocation_binding_v1
-WHERE invocation_id=? AND invocation_digest=?`, invocation.InvocationID, string(invocation.InvocationDigest))
-	binding, ack, err := decodeBindingRowV1(ctx, row)
+	SELECT binding_id,revision,digest,invocation_id,invocation_digest,expires_unix_nano,request_digest,request_json,binding_json,ack_json,row_digest
+	FROM tool_surface_invocation_binding_v1
+	WHERE invocation_id=? AND invocation_digest=?`, invocation.InvocationID, string(invocation.InvocationDigest))
+	_, _, binding, ack, err := decodeBindingRowV1(ctx, row)
 	if err != nil {
 		return bindingZeroV1(err)
 	}
@@ -329,9 +429,9 @@ func (s *StoreV1) InspectExactToolSurfaceInvocationBindingV1(ctx context.Context
 		return bindingZeroV1(err)
 	}
 	row := s.db.QueryRowContext(ctx, `
-SELECT binding_id,revision,digest,invocation_id,invocation_digest,expires_unix_nano,binding_json,ack_json,row_digest
-FROM tool_surface_invocation_binding_v1 WHERE binding_id=?`, exact.ID)
-	binding, ack, err := decodeBindingRowV1(ctx, row)
+	SELECT binding_id,revision,digest,invocation_id,invocation_digest,expires_unix_nano,request_digest,request_json,binding_json,ack_json,row_digest
+	FROM tool_surface_invocation_binding_v1 WHERE binding_id=?`, exact.ID)
+	_, _, binding, ack, err := decodeBindingRowV1(ctx, row)
 	if err != nil {
 		return bindingZeroV1(err)
 	}
@@ -418,7 +518,7 @@ func (s *StoreV1) readReadyV1(ctx context.Context) error {
 	if err := contextErrorV1(ctx); err != nil {
 		return err
 	}
-	if s == nil || s.db == nil || s.clock == nil {
+	if s == nil || s.db == nil || s.clock == nil || s.owner.Validate() != nil {
 		return unavailableV1("Tool SQLite exact Reader is unavailable")
 	}
 	return nil
@@ -450,7 +550,8 @@ FROM model_tool_injection_material_v1 WHERE material_id=?`, id).Scan(
 	}
 	var compiled toolsurface.CompiledModelToolsV1
 	var material toolcontract.ModelToolInjectionMaterialV1
-	if core.DecodeStrictJSON(compiledBody, &compiled) != nil || core.DecodeStrictJSON(materialBody, &material) != nil {
+	if core.DecodeStrictJSON(compiledBody, &compiled) != nil || core.DecodeStrictJSON(materialBody, &material) != nil ||
+		!canonicalJSONBytesV1(compiledBody, compiled) || !canonicalJSONBytesV1(materialBody, material) {
 		return modelToolClosureZeroV1(conflictV1("stored Model Tool Injection closure JSON is non-canonical"))
 	}
 	expected, err := modelToolClosureRowDigestV1(compiled, material)
@@ -464,10 +565,11 @@ FROM model_tool_injection_material_v1 WHERE material_id=?`, id).Scan(
 	return compiled.Clone(), material.Clone(), nil
 }
 
-func inspectBindingTxByIDV1(ctx context.Context, tx *sql.Tx, id string) (toolcontract.ToolSurfaceInvocationBindingV1, toolcontract.ToolSurfaceInvocationBindingAckV1, error) {
+func inspectBindingTxByInvocationV1(ctx context.Context, tx *sql.Tx, invocation toolcontract.ToolSurfaceInvocationCoordinateV1) (toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1, core.Digest, toolcontract.ToolSurfaceInvocationBindingV1, toolcontract.ToolSurfaceInvocationBindingAckV1, error) {
 	row := tx.QueryRowContext(ctx, `
-SELECT binding_id,revision,digest,invocation_id,invocation_digest,expires_unix_nano,binding_json,ack_json,row_digest
-FROM tool_surface_invocation_binding_v1 WHERE binding_id=?`, id)
+	SELECT binding_id,revision,digest,invocation_id,invocation_digest,expires_unix_nano,request_digest,request_json,binding_json,ack_json,row_digest
+	FROM tool_surface_invocation_binding_v1 WHERE invocation_id=? AND invocation_digest=?`,
+		invocation.InvocationID, string(invocation.InvocationDigest))
 	return decodeBindingRowV1(ctx, row)
 }
 
@@ -475,31 +577,38 @@ type scanRowV1 interface {
 	Scan(...any) error
 }
 
-func decodeBindingRowV1(ctx context.Context, row scanRowV1) (toolcontract.ToolSurfaceInvocationBindingV1, toolcontract.ToolSurfaceInvocationBindingAckV1, error) {
-	var bindingBody, ackBody []byte
-	var bindingID, bindingDigest, invocationID, invocationDigest, storedRowDigest string
+func decodeBindingRowV1(ctx context.Context, row scanRowV1) (toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1, core.Digest, toolcontract.ToolSurfaceInvocationBindingV1, toolcontract.ToolSurfaceInvocationBindingAckV1, error) {
+	var requestBody, bindingBody, ackBody []byte
+	var bindingID, bindingDigest, invocationID, invocationDigest, requestDigestText, storedRowDigest string
 	var revision, expiresUnixNano int64
 	if err := row.Scan(
 		&bindingID, &revision, &bindingDigest, &invocationID, &invocationDigest, &expiresUnixNano,
-		&bindingBody, &ackBody, &storedRowDigest,
+		&requestDigestText, &requestBody, &bindingBody, &ackBody, &storedRowDigest,
 	); err != nil {
-		return bindingZeroV1(mapDBErrorV1(ctx, err, false))
+		return bindingRecordZeroV1(mapDBErrorV1(ctx, err, false))
 	}
+	var request toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1
 	var binding toolcontract.ToolSurfaceInvocationBindingV1
 	var ack toolcontract.ToolSurfaceInvocationBindingAckV1
-	if core.DecodeStrictJSON(bindingBody, &binding) != nil || core.DecodeStrictJSON(ackBody, &ack) != nil || binding.Validate() != nil || ack.Validate() != nil {
-		return bindingZeroV1(conflictV1("stored Tool Surface Invocation Binding row is non-canonical"))
+	if core.DecodeStrictJSON(requestBody, &request) != nil || core.DecodeStrictJSON(bindingBody, &binding) != nil || core.DecodeStrictJSON(ackBody, &ack) != nil ||
+		!canonicalJSONBytesV1(requestBody, request) || !canonicalJSONBytesV1(bindingBody, binding) || !canonicalJSONBytesV1(ackBody, ack) ||
+		request.Validate() != nil || binding.Validate() != nil || ack.Validate() != nil {
+		return bindingRecordZeroV1(conflictV1("stored Tool Surface Invocation Binding row is non-canonical"))
 	}
-	rowDigest, err := bindingRowDigestV1(binding, ack)
+	requestDigest, err := request.ComputeDigest()
+	if err != nil || string(requestDigest) != requestDigestText || request.ValidateAgainst(binding) != nil {
+		return bindingRecordZeroV1(conflictV1("stored Tool Surface Invocation Binding request drifted"))
+	}
+	rowDigest, err := bindingRowDigestV1(request, requestDigest, binding, ack)
 	if err != nil || string(rowDigest) != storedRowDigest ||
 		bindingID != binding.Ref.ID || revision != int64(binding.Ref.Revision) ||
 		bindingDigest != string(binding.Ref.Digest) ||
 		invocationID != binding.Subject.Invocation.InvocationID ||
 		invocationDigest != string(binding.Subject.Invocation.InvocationDigest) ||
 		expiresUnixNano != binding.NotAfterUnixNano {
-		return bindingZeroV1(conflictV1("stored Tool Surface Invocation Binding row digest drifted"))
+		return bindingRecordZeroV1(conflictV1("stored Tool Surface Invocation Binding row digest drifted"))
 	}
-	return binding, ack, nil
+	return request, requestDigest, binding, ack, nil
 }
 
 func encodeRowV1(discriminator string, value any) ([]byte, core.Digest, error) {
@@ -522,11 +631,51 @@ func modelToolClosureRowDigestV1(compiled toolsurface.CompiledModelToolsV1, mate
 	}{Compiled: compiled, Material: material})
 }
 
-func bindingRowDigestV1(binding toolcontract.ToolSurfaceInvocationBindingV1, ack toolcontract.ToolSurfaceInvocationBindingAckV1) (core.Digest, error) {
+func bindingRowDigestV1(request toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1, requestDigest core.Digest, binding toolcontract.ToolSurfaceInvocationBindingV1, ack toolcontract.ToolSurfaceInvocationBindingAckV1) (core.Digest, error) {
 	return rowDigestV1("ToolSurfaceInvocationBindingRowV1", struct {
-		Binding toolcontract.ToolSurfaceInvocationBindingV1    `json:"binding"`
-		Ack     toolcontract.ToolSurfaceInvocationBindingAckV1 `json:"ack"`
-	}{Binding: binding, Ack: ack})
+		Request       toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1 `json:"request"`
+		RequestDigest core.Digest                                              `json:"request_digest"`
+		Binding       toolcontract.ToolSurfaceInvocationBindingV1              `json:"binding"`
+		Ack           toolcontract.ToolSurfaceInvocationBindingAckV1           `json:"ack"`
+	}{Request: request, RequestDigest: requestDigest, Binding: binding, Ack: ack})
+}
+
+func canonicalJSONBytesV1(stored []byte, value any) bool {
+	canonical, err := json.Marshal(value)
+	return err == nil && bytes.Equal(stored, canonical)
+}
+
+func cloneBindingRequestV1(request toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1) (toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1, error) {
+	body, err := json.Marshal(request)
+	if err != nil {
+		return toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1{}, invalidV1("Tool Surface Invocation Binding request JSON encode failed")
+	}
+	var cloned toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1
+	if err := core.DecodeStrictJSON(body, &cloned); err != nil {
+		return toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1{}, invalidV1("Tool Surface Invocation Binding request JSON clone failed")
+	}
+	return cloned, nil
+}
+
+func (s *StoreV1) acquireBindingInvocationGateV1(key string) func() {
+	s.gatesMu.Lock()
+	gate := s.gates[key]
+	if gate == nil {
+		gate = &bindingInvocationGateV1{}
+		s.gates[key] = gate
+	}
+	gate.refs++
+	s.gatesMu.Unlock()
+	gate.mu.Lock()
+	return func() {
+		gate.mu.Unlock()
+		s.gatesMu.Lock()
+		gate.refs--
+		if gate.refs == 0 && s.gates[key] == gate {
+			delete(s.gates, key)
+		}
+		s.gatesMu.Unlock()
+	}
 }
 
 func contextErrorV1(ctx context.Context) error {
@@ -534,6 +683,25 @@ func contextErrorV1(ctx context.Context) error {
 		return invalidV1("Tool SQLite context is required")
 	}
 	return ctx.Err()
+}
+
+func validateBindingRequestCurrentV1(request toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1, now time.Time) error {
+	if now.IsZero() {
+		return core.NewError(core.ErrorPreconditionFailed, core.ReasonClockRegression, "Tool Surface Invocation Binding clock is unavailable")
+	}
+	if err := request.PreparedCurrent.ValidateCurrent(request.PreparedCurrentRef, now); err != nil {
+		return err
+	}
+	if err := request.SurfaceCurrent.ValidateCurrent(request.SurfaceCurrent.Ref, now); err != nil {
+		return err
+	}
+	if err := request.AssemblyCurrent.ValidateCurrent(request.AssemblyCurrentRef, now); err != nil {
+		return err
+	}
+	if !now.Before(time.Unix(0, request.RequestedNotAfterUnixNano)) || !now.Before(time.Unix(0, request.PreparedHistoricalFact.NotAfterUnixNano)) {
+		return core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingExpired, "Tool Surface Invocation Binding request is no longer current")
+	}
+	return nil
 }
 
 func mapDBErrorV1(ctx context.Context, err error, mutation bool) error {
@@ -560,6 +728,10 @@ func bindingZeroV1(err error) (toolcontract.ToolSurfaceInvocationBindingV1, tool
 	return toolcontract.ToolSurfaceInvocationBindingV1{}, toolcontract.ToolSurfaceInvocationBindingAckV1{}, err
 }
 
+func bindingRecordZeroV1(err error) (toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1, core.Digest, toolcontract.ToolSurfaceInvocationBindingV1, toolcontract.ToolSurfaceInvocationBindingAckV1, error) {
+	return toolcontract.ToolSurfaceInvocationBindingEnsureRequestV1{}, "", toolcontract.ToolSurfaceInvocationBindingV1{}, toolcontract.ToolSurfaceInvocationBindingAckV1{}, err
+}
+
 func modelToolClosureZeroV1(err error) (toolsurface.CompiledModelToolsV1, toolcontract.ModelToolInjectionMaterialV1, error) {
 	return toolsurface.CompiledModelToolsV1{}, toolcontract.ModelToolInjectionMaterialV1{}, err
 }
@@ -581,4 +753,4 @@ func indeterminateV1(message string) error {
 }
 
 var _ toolcontract.ModelToolInjectionMaterialReaderV1 = (*StoreV1)(nil)
-var _ toolcontract.ToolSurfaceInvocationBindingReaderV1 = (*StoreV1)(nil)
+var _ toolcontract.ToolSurfaceInvocationBindingRepositoryV1 = (*StoreV1)(nil)
