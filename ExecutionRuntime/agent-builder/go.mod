@@ -1,0 +1,30 @@
+module github.com/Proview-China/rax/ExecutionRuntime/agent-builder
+
+go 1.25.0
+
+require (
+	github.com/Proview-China/rax/ExecutionRuntime/agent-assembler v0.0.0
+	github.com/Proview-China/rax/ExecutionRuntime/agent-definition v0.0.0
+	github.com/Proview-China/rax/ExecutionRuntime/harness v0.0.0
+	github.com/Proview-China/rax/ExecutionRuntime/runtime v0.0.0
+)
+
+require gopkg.in/yaml.v3 v3.0.1 // indirect
+
+replace github.com/Proview-China/rax/ExecutionRuntime/agent-assembler => ../agent-assembler
+
+replace github.com/Proview-China/rax/ExecutionRuntime/agent-definition => ../agent-definition
+
+replace github.com/Proview-China/rax/ExecutionRuntime/harness => ../harness
+
+replace github.com/Proview-China/rax/ExecutionRuntime/runtime => ../runtime
+
+replace github.com/Proview-China/rax/ExecutionRuntime/application => ../application
+
+replace github.com/Proview-China/rax/ExecutionRuntime/continuity => ../continuity
+
+replace github.com/Proview-China/rax/ExecutionRuntime/model-invoker => ../model-invoker
+
+replace github.com/Proview-China/rax/ExecutionRuntime/sandbox => ../sandbox
+
+replace github.com/Proview-China/rax/ExecutionRuntime/tool-mcp => ../tool-mcp

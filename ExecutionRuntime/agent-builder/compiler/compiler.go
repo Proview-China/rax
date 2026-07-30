@@ -1,0 +1,63 @@
+package compiler
+
+import (
+	"reflect"
+
+	"github.com/Proview-China/rax/ExecutionRuntime/agent-assembler/conformance"
+	assemblercontract "github.com/Proview-China/rax/ExecutionRuntime/agent-assembler/contract"
+	packagecontract "github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract"
+	"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycompiler"
+	"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycontract"
+	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
+)
+
+type CompilerV1 struct{ harness assemblycompiler.Compiler }
+
+func NewV1() CompilerV1 { return CompilerV1{harness: assemblycompiler.New()} }
+
+// Compile consumes only the existing sealed Assembler result.
+// Every lock coordinate is derived from that validated closure; callers cannot
+// inject a parallel list of releases, facts, catalog or binding digests.
+func (c CompilerV1) Compile(result assemblercontract.ResolveResultV1) (packagecontract.AgentPackageV1, error) {
+	if _, err := conformance.CheckResolveResultV1(result); err != nil {
+		return packagecontract.AgentPackageV1{}, err
+	}
+	if !reflect.DeepEqual(result.BindingPlan, result.Plan.BindingPlan) || !reflect.DeepEqual(result.AssemblyInput.Plan, result.Plan.AssemblyPlanRefs) {
+		return packagecontract.AgentPackageV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, "resolve result is not one exact Definition-to-Assembly closure")
+	}
+	planRef := result.Plan.RefV1()
+	assemblyPlanRef := result.AssemblyInput.Plan.ResolvedAgentPlan
+	if assemblyPlanRef.ID != planRef.PlanID || assemblyPlanRef.Revision != planRef.Revision || assemblyPlanRef.Digest != planRef.Digest {
+		return packagecontract.AgentPackageV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, "assembly input does not bind the exact resolved plan")
+	}
+	if result.AssemblyInput.CreatedUnixNano != result.Plan.CreatedUnixNano {
+		return packagecontract.AgentPackageV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, "assembly input frozen time differs from the resolved plan")
+	}
+	refs := make([]assemblercontract.ComponentReleaseRefV1, 0, len(result.Plan.ComponentReleases))
+	for _, component := range result.Plan.ComponentReleases {
+		refs = append(refs, component.ReleaseRef)
+	}
+	compiled, err := c.harness.Compile(result.AssemblyInput)
+	if err != nil {
+		return packagecontract.AgentPackageV1{}, err
+	}
+	if compiled.Generation == nil || compiled.Manifest == nil || compiled.Graph == nil || compiled.Handoff == nil {
+		return packagecontract.AgentPackageV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonPlanInvalid, "Harness compiler did not return a complete sealed artifact set")
+	}
+	generationRef := assemblycontract.ObjectRefV1{ID: compiled.Generation.GenerationID, Revision: compiled.Generation.Revision, Digest: compiled.Generation.Digest}
+	if compiled.Handoff.GenerationRef != generationRef || compiled.Handoff.ManifestDigest != compiled.Manifest.Digest || compiled.Handoff.GraphDigest != compiled.Graph.Digest {
+		return packagecontract.AgentPackageV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, "Harness compile artifacts are not an exact closure")
+	}
+	lock, err := packagecontract.SealLockManifestV1(packagecontract.AgentPackageLockManifestV1{
+		DefinitionRef: result.Plan.DefinitionRef, ResolvedPlanRef: planRef, ResolutionFactsRef: result.Plan.ResolutionFactsRef, CatalogRef: result.Plan.CatalogRef,
+		ComponentReleaseRefs: refs, BindingPlanDigest: result.BindingPlan.PlanDigest, AssemblyInputDigest: result.AssemblyInput.Digest, FrozenUnixNano: result.AssemblyInput.CreatedUnixNano,
+		HarnessCompilerVersion: assemblycontract.CompilerVersionV1, GenerationRef: generationRef,
+		ManifestRef: assemblycontract.ObjectRefV1{ID: generationRef.ID + "/manifest", Revision: generationRef.Revision, Digest: compiled.Manifest.Digest},
+		GraphRef:    assemblycontract.ObjectRefV1{ID: generationRef.ID + "/graph", Revision: generationRef.Revision, Digest: compiled.Graph.Digest},
+		HandoffRef:  assemblycontract.ObjectRefV1{ID: generationRef.ID + "/handoff", Revision: generationRef.Revision, Digest: compiled.Handoff.Digest},
+	})
+	if err != nil {
+		return packagecontract.AgentPackageV1{}, err
+	}
+	return packagecontract.SealPackageV1(packagecontract.AgentPackageV1{Lock: lock})
+}
