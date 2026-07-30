@@ -16,8 +16,8 @@ AgentDefinitionV1
 
 - `AgentPackageRefV1`：`package_id + revision + digest + contract_version + schema_version`；
 - `AgentPackageLockManifestV1`：锁定 Definition、Resolution Facts、Catalog、全部 selected Component Release、Resolved Plan、Binding Plan、Assembly Input；
-- Harness 产物闭包：Generation、Manifest、Graph、Handoff 均提供 `ID + revision + digest` exact ref；
-- `CompilerV1` 只接受已验证的现有 `ResolveResultV1`，所有 lock 字段从该闭包派生，调用方不能另传 release/facts/catalog/binding；
+- Harness 产物闭包：锁定 create-once `AssemblyPublicationRefV2`，以及 Generation、Manifest、Graph、Handoff 的 `ID + revision + digest` exact refs；
+- `CompilerV1` 只接受已验证的现有 `ResolveResultV1`，并用 Harness `NewAssemblyPublicationBundleV2` 生成唯一 Publication 闭包；所有 lock 字段从该闭包派生，调用方不能另传 release/facts/catalog/binding；
 - Package ID、revision、digest 与 lock 一一确定；冻结时间来自 lock，不读取编译时 wall clock。
 
 ## 3. Fail Closed

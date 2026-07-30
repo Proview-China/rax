@@ -36,6 +36,7 @@ type AgentPackageLockManifestV1 struct {
 	AssemblyInputDigest    core.Digest                                    `json:"assembly_input_digest"`
 	FrozenUnixNano         int64                                          `json:"frozen_unix_nano"`
 	HarnessCompilerVersion string                                         `json:"harness_compiler_version"`
+	PublicationRef         assemblycontract.AssemblyPublicationRefV2      `json:"publication_ref"`
 	GenerationRef          assemblycontract.ObjectRefV1                   `json:"generation_ref"`
 	ManifestRef            assemblycontract.ObjectRefV1                   `json:"manifest_ref"`
 	GraphRef               assemblycontract.ObjectRefV1                   `json:"graph_ref"`

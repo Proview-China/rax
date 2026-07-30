@@ -11,14 +11,13 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/compiler"
 	packagecontract "github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/loader"
-	"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/repository"
 	"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycompiler"
 	"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycontract"
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 )
 
-func packageAndArtifacts(t *testing.T) (packagecontract.AgentPackageV1, artifactReaderV1) {
+func packageAndPublication(t *testing.T) (packagecontract.AgentPackageV1, assemblycontract.AssemblyPublicationBundleV2) {
 	t.Helper()
 	result := resolved(t)
 	pkg, err := compiler.NewV1().Compile(result)
@@ -29,12 +28,11 @@ func packageAndArtifacts(t *testing.T) (packagecontract.AgentPackageV1, artifact
 	if err != nil {
 		t.Fatal(err)
 	}
-	return pkg, artifactReaderV1{
-		generation: ports.AssemblyGenerationArtifactV1{Ref: pkg.Lock.GenerationRef, Value: *compiled.Generation},
-		manifest:   ports.AssemblyManifestArtifactV1{Ref: pkg.Lock.ManifestRef, Value: *compiled.Manifest},
-		graph:      ports.CompiledHarnessGraphArtifactV1{Ref: pkg.Lock.GraphRef, Value: *compiled.Graph},
-		handoff:    ports.AssemblyHandoffArtifactV1{Ref: pkg.Lock.HandoffRef, Value: *compiled.Handoff},
+	bundle, err := assemblycontract.NewAssemblyPublicationBundleV2(result.AssemblyInput.ScopeRef, compiled)
+	if err != nil {
+		t.Fatal(err)
 	}
+	return pkg, bundle
 }
 
 type packageReaderV1 struct {
@@ -48,30 +46,20 @@ func (r *packageReaderV1) InspectExactAgentPackageV1(_ context.Context, ref pack
 	return r.value, r.err
 }
 
-type artifactReaderV1 struct {
-	generation ports.AssemblyGenerationArtifactV1
-	manifest   ports.AssemblyManifestArtifactV1
-	graph      ports.CompiledHarnessGraphArtifactV1
-	handoff    ports.AssemblyHandoffArtifactV1
-	err        error
+type publicationReaderV2 struct {
+	bundle assemblycontract.AssemblyPublicationBundleV2
+	err    error
+	seen   []assemblycontract.AssemblyPublicationRefV2
 }
 
-func (r artifactReaderV1) InspectExactGenerationV1(context.Context, assemblycontract.ObjectRefV1) (ports.AssemblyGenerationArtifactV1, error) {
-	return r.generation, r.err
-}
-func (r artifactReaderV1) InspectExactManifestV1(context.Context, assemblycontract.ObjectRefV1) (ports.AssemblyManifestArtifactV1, error) {
-	return r.manifest, r.err
-}
-func (r artifactReaderV1) InspectExactGraphV1(context.Context, assemblycontract.ObjectRefV1) (ports.CompiledHarnessGraphArtifactV1, error) {
-	return r.graph, r.err
-}
-func (r artifactReaderV1) InspectExactHandoffV1(context.Context, assemblycontract.ObjectRefV1) (ports.AssemblyHandoffArtifactV1, error) {
-	return r.handoff, r.err
+func (r *publicationReaderV2) InspectAssemblyPublicationHistoricalV2(_ context.Context, ref assemblycontract.AssemblyPublicationRefV2) (assemblycontract.AssemblyPublicationBundleV2, error) {
+	r.seen = append(r.seen, ref)
+	return r.bundle, r.err
 }
 
 func TestSQLitePackageStoreRestartRaceConflictAndLostReply(t *testing.T) {
 	ctx := context.Background()
-	pkg, _ := packageAndArtifacts(t)
+	pkg, _ := packageAndPublication(t)
 	path := t.TempDir() + "/packages.db"
 	store, err := repository.OpenSQLiteRepositoryV1(ctx, repository.SQLiteConfigV1{Path: path})
 	if err != nil {
@@ -171,7 +159,7 @@ func TestSQLitePackageStoreRestartRaceConflictAndLostReply(t *testing.T) {
 
 func TestSQLitePackageInspectFailsClosedOnDirectRowCorruption(t *testing.T) {
 	ctx := context.Background()
-	pkg, _ := packageAndArtifacts(t)
+	pkg, _ := packageAndPublication(t)
 	tests := map[string]struct {
 		query string
 		value any
@@ -238,7 +226,7 @@ func (r *countingNotFoundReaderV1) InspectExactAgentPackageV1(_ context.Context,
 }
 
 func TestLostReplyWithoutOriginalEvidenceNeverSucceeds(t *testing.T) {
-	pkg, _ := packageAndArtifacts(t)
+	pkg, _ := packageAndPublication(t)
 	reader := &countingNotFoundReaderV1{}
 	_, err := repository.EnsureExactWithRecoveryV1(context.Background(), unknownRepositoryV1{}, reader, pkg)
 	if !core.HasCategory(err, core.ErrorIndeterminate) || reader.calls.Load() != 1 || reader.ref != pkg.RefV1() {
@@ -246,10 +234,11 @@ func TestLostReplyWithoutOriginalEvidenceNeverSucceeds(t *testing.T) {
 	}
 }
 
-func TestLoaderRereadsAndValidatesExactArtifactClosure(t *testing.T) {
-	pkg, artifacts := packageAndArtifacts(t)
+func TestLoaderRereadsAndValidatesExactHistoricalPublication(t *testing.T) {
+	pkg, bundle := packageAndPublication(t)
 	packageReader := &packageReaderV1{value: pkg}
-	exactLoader, err := loader.NewV1(packageReader, artifacts)
+	publicationReader := &publicationReaderV2{bundle: bundle}
+	exactLoader, err := loader.NewV1(packageReader, publicationReader)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,88 +246,64 @@ func TestLoaderRereadsAndValidatesExactArtifactClosure(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(packageReader.seen) != 1 || packageReader.seen[0] != pkg.RefV1() || closure.Generation.Ref != pkg.Lock.GenerationRef || closure.Manifest.Ref != pkg.Lock.ManifestRef || closure.Graph.Ref != pkg.Lock.GraphRef || closure.Handoff.Ref != pkg.Lock.HandoffRef {
-		t.Fatal("loader did not read the exact Package and four locked artifact refs")
+	if len(packageReader.seen) != 1 || packageReader.seen[0] != pkg.RefV1() || len(publicationReader.seen) != 1 || publicationReader.seen[0] != pkg.Lock.PublicationRef || closure.Publication.Publication.Artifacts.Generation != pkg.Lock.GenerationRef {
+		t.Fatal("loader did not read the exact Package and locked historical Publication")
 	}
-	closure.Generation.Value.GenerationID = "caller-mutated"
+	closure.Publication.Generation.GenerationID = "caller-mutated"
 	again, err := exactLoader.LoadExactV1(context.Background(), pkg.RefV1())
-	if err != nil || again.Generation.Value.GenerationID == "caller-mutated" {
+	if err != nil || again.Publication.Generation.GenerationID == "caller-mutated" {
 		t.Fatal("loader returned an aliased closure")
 	}
 
-	tests := map[string]func(*packagecontract.AgentPackageV1, *artifactReaderV1){
-		"generation id splice":     func(_ *packagecontract.AgentPackageV1, a *artifactReaderV1) { a.generation.Ref.ID += "-other" },
-		"manifest revision splice": func(_ *packagecontract.AgentPackageV1, a *artifactReaderV1) { a.manifest.Ref.Revision++ },
-		"graph digest splice": func(_ *packagecontract.AgentPackageV1, a *artifactReaderV1) {
-			a.graph.Ref.Digest = core.DigestBytes([]byte("other"))
+	tests := map[string]func(*packagecontract.AgentPackageV1, *assemblycontract.AssemblyPublicationBundleV2){
+		"publication ref splice": func(_ *packagecontract.AgentPackageV1, value *assemblycontract.AssemblyPublicationBundleV2) {
+			value.Publication.Digest = core.DigestBytes([]byte("other-publication"))
 		},
-		"handoff body drift": func(_ *packagecontract.AgentPackageV1, a *artifactReaderV1) {
-			a.handoff.Value.GraphDigest = core.DigestBytes([]byte("other"))
+		"manifest revision splice": func(_ *packagecontract.AgentPackageV1, value *assemblycontract.AssemblyPublicationBundleV2) {
+			value.Publication.Artifacts.Manifest.Revision++
 		},
-		"package lock drift": func(p *packagecontract.AgentPackageV1, _ *artifactReaderV1) { p.Lock.GenerationRef.ID += "-other" },
+		"input closure splice": func(_ *packagecontract.AgentPackageV1, value *assemblycontract.AssemblyPublicationBundleV2) {
+			value.Generation.InputDigest = core.DigestBytes([]byte("other-input"))
+		},
+		"rejected generation": func(_ *packagecontract.AgentPackageV1, value *assemblycontract.AssemblyPublicationBundleV2) {
+			value.Generation.State = assemblycontract.AssemblyStateRejectedV1
+		},
+		"package lock splice": func(value *packagecontract.AgentPackageV1, _ *assemblycontract.AssemblyPublicationBundleV2) {
+			value.Lock.PublicationRef.Digest = core.DigestBytes([]byte("other-lock-publication"))
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {
-			changedPackage, changedArtifacts := pkg, artifacts
-			mutate(&changedPackage, &changedArtifacts)
-			candidate, newErr := loader.NewV1(&packageReaderV1{value: changedPackage}, changedArtifacts)
+			changedPackage, changedBundle := pkg, bundle
+			mutate(&changedPackage, &changedBundle)
+			candidate, newErr := loader.NewV1(&packageReaderV1{value: changedPackage}, &publicationReaderV2{bundle: changedBundle})
 			if newErr != nil {
 				t.Fatal(newErr)
 			}
 			if _, loadErr := candidate.LoadExactV1(context.Background(), pkg.RefV1()); loadErr == nil {
-				t.Fatal("spliced or drifted closure accepted")
+				t.Fatal("spliced or drifted historical Publication closure accepted")
 			}
 		})
 	}
 }
 
-func TestLoaderRejectsLockWithoutArtifactsAndTypedNilReaders(t *testing.T) {
-	pkg, artifacts := packageAndArtifacts(t)
-	notFound := core.NewError(core.ErrorNotFound, core.ReasonEvidenceUnavailable, "artifact absent")
-	artifacts.err = notFound
-	exactLoader, err := loader.NewV1(&packageReaderV1{value: pkg}, artifacts)
+func TestLoaderRejectsLockWithoutCommittedPublicationAndTypedNilReaders(t *testing.T) {
+	pkg, bundle := packageAndPublication(t)
+	notFound := core.NewError(core.ErrorNotFound, core.ReasonEvidenceUnavailable, "publication absent")
+	publicationReader := &publicationReaderV2{bundle: bundle, err: notFound}
+	exactLoader, err := loader.NewV1(&packageReaderV1{value: pkg}, publicationReader)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err = exactLoader.LoadExactV1(context.Background(), pkg.RefV1()); !core.HasCategory(err, core.ErrorNotFound) {
-		t.Fatalf("lock alone must not grant artifact closure: %v", err)
+		t.Fatalf("lock alone must not grant an uncommitted Publication closure: %v", err)
 	}
 	var nilPackageReader *packageReaderV1
-	if _, err = loader.NewV1(nilPackageReader, artifacts); err == nil {
+	if _, err = loader.NewV1(nilPackageReader, publicationReader); err == nil {
 		t.Fatal("typed-nil package reader accepted")
 	}
-}
-
-func TestLoaderRejectsSelfConsistentRejectedGeneration(t *testing.T) {
-	pkg, artifacts := packageAndArtifacts(t)
-	artifacts.generation.Value.State = assemblycontract.AssemblyStateRejectedV1
-	var err error
-	artifacts.generation.Value.Digest, err = assemblycontract.GenerationDigestV1(artifacts.generation.Value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifacts.generation.Ref.Digest = artifacts.generation.Value.Digest
-	artifacts.handoff.Value.GenerationRef = artifacts.generation.Ref
-	artifacts.handoff.Value.Digest, err = assemblycontract.HandoffDigestV1(artifacts.handoff.Value)
-	if err != nil {
-		t.Fatal(err)
-	}
-	artifacts.handoff.Ref.Digest = artifacts.handoff.Value.Digest
-	pkg.Lock.GenerationRef = artifacts.generation.Ref
-	pkg.Lock.HandoffRef = artifacts.handoff.Ref
-	pkg.Lock, err = packagecontract.SealLockManifestV1(pkg.Lock)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pkg, err = packagecontract.SealPackageV1(pkg)
-	if err != nil {
-		t.Fatal(err)
-	}
-	exactLoader, err := loader.NewV1(&packageReaderV1{value: pkg}, artifacts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err = exactLoader.LoadExactV1(context.Background(), pkg.RefV1()); err == nil {
-		t.Fatal("self-consistent rejected generation became a verified closure")
+	var nilPublicationReader *publicationReaderV2
+	if _, err = loader.NewV1(&packageReaderV1{value: pkg}, nilPublicationReader); err == nil {
+		t.Fatal("typed-nil historical Publication reader accepted")
 	}
 }

@@ -12,27 +12,24 @@ import (
 )
 
 type VerifiedAgentPackageClosureV1 struct {
-	Package    contract.AgentPackageV1
-	Generation ports.AssemblyGenerationArtifactV1
-	Manifest   ports.AssemblyManifestArtifactV1
-	Graph      ports.CompiledHarnessGraphArtifactV1
-	Handoff    ports.AssemblyHandoffArtifactV1
+	Package     contract.AgentPackageV1
+	Publication assemblycontract.AssemblyPublicationBundleV2
 }
 
 type LoaderV1 struct {
-	packages  ports.AgentPackageExactReaderV1
-	artifacts ports.HarnessArtifactExactReaderV1
+	packages     ports.AgentPackageExactReaderV1
+	publications ports.HarnessAssemblyPublicationHistoricalReaderV2
 }
 
-func NewV1(packages ports.AgentPackageExactReaderV1, artifacts ports.HarnessArtifactExactReaderV1) (*LoaderV1, error) {
-	if nilInterface(packages) || nilInterface(artifacts) {
-		return nil, invalid("agent package loader requires exact package and Harness artifact readers")
+func NewV1(packages ports.AgentPackageExactReaderV1, publications ports.HarnessAssemblyPublicationHistoricalReaderV2) (*LoaderV1, error) {
+	if nilInterface(packages) || nilInterface(publications) {
+		return nil, invalid("agent package loader requires exact package and Harness historical publication readers")
 	}
-	return &LoaderV1{packages: packages, artifacts: artifacts}, nil
+	return &LoaderV1{packages: packages, publications: publications}, nil
 }
 
 func (l *LoaderV1) LoadExactV1(ctx context.Context, ref contract.AgentPackageRefV1) (VerifiedAgentPackageClosureV1, error) {
-	if l == nil || nilInterface(l.packages) || nilInterface(l.artifacts) {
+	if l == nil || nilInterface(l.packages) || nilInterface(l.publications) {
 		return VerifiedAgentPackageClosureV1{}, invalid("agent package loader is nil")
 	}
 	if ctx == nil || ctx.Err() != nil {
@@ -52,103 +49,31 @@ func (l *LoaderV1) LoadExactV1(ctx context.Context, ref contract.AgentPackageRef
 		return VerifiedAgentPackageClosureV1{}, drift("package reader returned a different exact ref")
 	}
 
-	generation, err := l.artifacts.InspectExactGenerationV1(ctx, pkg.Lock.GenerationRef)
+	bundle, err := l.publications.InspectAssemblyPublicationHistoricalV2(ctx, pkg.Lock.PublicationRef)
 	if err != nil {
 		return VerifiedAgentPackageClosureV1{}, err
 	}
-	manifest, err := l.artifacts.InspectExactManifestV1(ctx, pkg.Lock.ManifestRef)
-	if err != nil {
+	if err = bundle.Validate(); err != nil {
 		return VerifiedAgentPackageClosureV1{}, err
 	}
-	graph, err := l.artifacts.InspectExactGraphV1(ctx, pkg.Lock.GraphRef)
-	if err != nil {
-		return VerifiedAgentPackageClosureV1{}, err
+	publicationRef := assemblycontract.AssemblyPublicationRefV2{PublicationID: bundle.Publication.PublicationID, Revision: bundle.Publication.Revision, Digest: bundle.Publication.Digest}
+	if publicationRef != pkg.Lock.PublicationRef {
+		return VerifiedAgentPackageClosureV1{}, drift("Harness historical reader returned a different exact Publication ref")
 	}
-	handoff, err := l.artifacts.InspectExactHandoffV1(ctx, pkg.Lock.HandoffRef)
-	if err != nil {
-		return VerifiedAgentPackageClosureV1{}, err
+	artifacts := bundle.Publication.Artifacts
+	if artifacts.Generation != pkg.Lock.GenerationRef || artifacts.Manifest != pkg.Lock.ManifestRef || artifacts.Graph != pkg.Lock.GraphRef || artifacts.Handoff != pkg.Lock.HandoffRef {
+		return VerifiedAgentPackageClosureV1{}, drift("Package lock and Harness Publication artifact refs diverged")
 	}
-
-	if err = validateGeneration(pkg.Lock.GenerationRef, generation); err != nil {
-		return VerifiedAgentPackageClosureV1{}, err
+	if bundle.Publication.InputDigest != pkg.Lock.AssemblyInputDigest || bundle.Generation.InputDigest != pkg.Lock.AssemblyInputDigest || bundle.Manifest.InputDigest != pkg.Lock.AssemblyInputDigest || bundle.Graph.InputDigest != pkg.Lock.AssemblyInputDigest {
+		return VerifiedAgentPackageClosureV1{}, drift("Package lock and Harness Publication input closure diverged")
 	}
-	if err = validateManifest(pkg.Lock.ManifestRef, manifest); err != nil {
-		return VerifiedAgentPackageClosureV1{}, err
+	if bundle.Generation.CompilerVersion != pkg.Lock.HarnessCompilerVersion || bundle.Generation.CreatedUnixNano != pkg.Lock.FrozenUnixNano {
+		return VerifiedAgentPackageClosureV1{}, drift("Package lock and Harness Publication compiler closure diverged")
 	}
-	if err = validateGraph(pkg.Lock.GraphRef, graph); err != nil {
-		return VerifiedAgentPackageClosureV1{}, err
+	if bundle.Handoff.GenerationRef != pkg.Lock.GenerationRef || bundle.Handoff.ManifestDigest != pkg.Lock.ManifestRef.Digest || bundle.Handoff.GraphDigest != pkg.Lock.GraphRef.Digest {
+		return VerifiedAgentPackageClosureV1{}, drift("Package lock and Harness Publication handoff closure diverged")
 	}
-	if err = validateHandoff(pkg.Lock.HandoffRef, handoff); err != nil {
-		return VerifiedAgentPackageClosureV1{}, err
-	}
-
-	g, m, graphValue, h := generation.Value, manifest.Value, graph.Value, handoff.Value
-	if g.InputDigest != pkg.Lock.AssemblyInputDigest || m.InputDigest != pkg.Lock.AssemblyInputDigest || graphValue.InputDigest != pkg.Lock.AssemblyInputDigest || g.CompilerVersion != pkg.Lock.HarnessCompilerVersion {
-		return VerifiedAgentPackageClosureV1{}, drift("Package lock and Harness generation inputs diverged")
-	}
-	if g.ManifestDigest != m.Digest || g.GraphDigest != graphValue.Digest || h.GenerationRef != pkg.Lock.GenerationRef || h.ManifestDigest != m.Digest || h.GraphDigest != graphValue.Digest {
-		return VerifiedAgentPackageClosureV1{}, drift("Harness generation, manifest, graph and handoff do not form one closure")
-	}
-	if m.CatalogDigest != graphValue.CatalogDigest || h.CatalogDigest != m.CatalogDigest {
-		return VerifiedAgentPackageClosureV1{}, drift("Harness artifact catalog digests diverged")
-	}
-	return clone(VerifiedAgentPackageClosureV1{Package: pkg, Generation: generation, Manifest: manifest, Graph: graph, Handoff: handoff}), nil
-}
-
-func validateGeneration(ref assemblycontract.ObjectRefV1, artifact ports.AssemblyGenerationArtifactV1) error {
-	value := artifact.Value
-	if artifact.Ref != ref || value.GenerationID != ref.ID || value.Revision != ref.Revision || value.Digest != ref.Digest || value.ContractVersion != assemblycontract.ContractVersionV1 || value.CompilerVersion != assemblycontract.CompilerVersionV1 || value.State != assemblycontract.AssemblyStateSealedV1 || value.CreatedUnixNano <= 0 {
-		return drift("Harness generation exact identity or discriminator drifted")
-	}
-	digest, err := assemblycontract.GenerationDigestV1(value)
-	if err != nil {
-		return err
-	}
-	if digest != value.Digest {
-		return digestDrift("Harness generation body digest drifted")
-	}
-	return nil
-}
-
-func validateManifest(ref assemblycontract.ObjectRefV1, artifact ports.AssemblyManifestArtifactV1) error {
-	value := artifact.Value
-	if artifact.Ref != ref || value.Digest != ref.Digest || value.ContractVersion != assemblycontract.ContractVersionV1 {
-		return drift("Harness manifest exact identity or discriminator drifted")
-	}
-	digest, err := assemblycontract.ManifestDigestV1(value)
-	if err != nil {
-		return err
-	}
-	if digest != value.Digest {
-		return digestDrift("Harness manifest body digest drifted")
-	}
-	return nil
-}
-
-func validateGraph(ref assemblycontract.ObjectRefV1, artifact ports.CompiledHarnessGraphArtifactV1) error {
-	value := artifact.Value
-	if artifact.Ref != ref || value.Digest != ref.Digest || value.ContractVersion != assemblycontract.ContractVersionV1 {
-		return drift("Harness graph exact identity or discriminator drifted")
-	}
-	digest, err := assemblycontract.GraphDigestV1(value)
-	if err != nil {
-		return err
-	}
-	if digest != value.Digest {
-		return digestDrift("Harness graph body digest drifted")
-	}
-	return nil
-}
-
-func validateHandoff(ref assemblycontract.ObjectRefV1, artifact ports.AssemblyHandoffArtifactV1) error {
-	value := artifact.Value
-	if artifact.Ref != ref || value.Digest != ref.Digest {
-		return drift("Harness handoff exact identity drifted")
-	}
-	if err := value.Validate(); err != nil {
-		return err
-	}
-	return nil
+	return clone(VerifiedAgentPackageClosureV1{Package: pkg, Publication: bundle}), nil
 }
 
 func invalid(message string) error {
@@ -156,9 +81,6 @@ func invalid(message string) error {
 }
 func drift(message string) error {
 	return core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, message)
-}
-func digestDrift(message string) error {
-	return core.NewError(core.ErrorPreconditionFailed, core.ReasonInvalidDigest, message)
 }
 func nilInterface(value any) bool {
 	if value == nil {
