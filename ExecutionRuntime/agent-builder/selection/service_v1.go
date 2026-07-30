@@ -2,7 +2,6 @@ package selection
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"reflect"
 	"time"
@@ -89,7 +88,7 @@ func (service *ServiceV1) SelectPackageV1(ctx context.Context, request contract.
 		if !reflect.DeepEqual(result, current) {
 			return contract.AgentPackageSelectionCurrentV1{}, driftV1("package selection Owner returned another current")
 		}
-		return cloneV1(result), nil
+		return contract.CloneAgentPackageSelectionCurrentV1(result), nil
 	}
 	if !core.HasCategory(err, core.ErrorIndeterminate) {
 		return contract.AgentPackageSelectionCurrentV1{}, err
@@ -107,7 +106,7 @@ func (service *ServiceV1) SelectPackageV1(ctx context.Context, request contract.
 	if !reflect.DeepEqual(inspected, current) {
 		return contract.AgentPackageSelectionCurrentV1{}, driftV1("package selection recovery observed another current body")
 	}
-	return cloneV1(inspected), nil
+	return contract.CloneAgentPackageSelectionCurrentV1(inspected), nil
 }
 
 func (service *ServiceV1) InspectCurrentV1(ctx context.Context, selectionID string) (contract.AgentPackageSelectionCurrentV1, error) {
@@ -118,18 +117,6 @@ func (service *ServiceV1) InspectCurrentV1(ctx context.Context, selectionID stri
 		return contract.AgentPackageSelectionCurrentV1{}, unavailableV1("package selection Inspect requires live context")
 	}
 	return service.selections.InspectAgentPackageSelectionCurrentV1(ctx, selectionID)
-}
-
-func cloneV1[T any](value T) T {
-	raw, err := json.Marshal(value)
-	if err != nil {
-		return value
-	}
-	var result T
-	if json.Unmarshal(raw, &result) != nil {
-		return value
-	}
-	return result
 }
 
 func nilInterfaceV1(value any) bool {

@@ -1,15 +1,14 @@
 package repository
 
 import (
-	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"path/filepath"
 	"reflect"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -20,9 +19,12 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const selectionSchemaV1 = "CREATE TABLE IF NOT EXISTS agent_package_selection_schema_v1(version INTEGER PRIMARY KEY,digest TEXT NOT NULL,applied_unix_nano INTEGER NOT NULL);" +
-	"CREATE TABLE IF NOT EXISTS agent_package_selection_history_v1(selection_id TEXT NOT NULL,revision INTEGER NOT NULL,digest TEXT NOT NULL,row_digest TEXT NOT NULL,payload_json BLOB NOT NULL,checked_unix_nano INTEGER NOT NULL,expires_unix_nano INTEGER NOT NULL,PRIMARY KEY(selection_id,revision),UNIQUE(selection_id,revision,digest));" +
-	"CREATE TABLE IF NOT EXISTS agent_package_selection_current_v1(selection_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,digest TEXT NOT NULL,row_digest TEXT NOT NULL,FOREIGN KEY(selection_id,revision,digest) REFERENCES agent_package_selection_history_v1(selection_id,revision,digest));"
+const (
+	selectionSchemaLedgerCreateV1 = "CREATE TABLE IF NOT EXISTS agent_package_selection_schema_v1(version INTEGER PRIMARY KEY,digest TEXT NOT NULL,applied_unix_nano INTEGER NOT NULL)"
+	selectionHistoryCreateV1      = "CREATE TABLE IF NOT EXISTS agent_package_selection_history_v1(selection_id TEXT NOT NULL,revision INTEGER NOT NULL,digest TEXT NOT NULL,row_digest TEXT NOT NULL,payload_json BLOB NOT NULL,checked_unix_nano INTEGER NOT NULL,expires_unix_nano INTEGER NOT NULL,PRIMARY KEY(selection_id,revision),UNIQUE(selection_id,revision,digest))"
+	selectionCurrentCreateV1      = "CREATE TABLE IF NOT EXISTS agent_package_selection_current_v1(selection_id TEXT PRIMARY KEY,revision INTEGER NOT NULL,digest TEXT NOT NULL,row_digest TEXT NOT NULL,FOREIGN KEY(selection_id,revision,digest) REFERENCES agent_package_selection_history_v1(selection_id,revision,digest))"
+	selectionSchemaV1             = selectionSchemaLedgerCreateV1 + ";" + selectionHistoryCreateV1 + ";" + selectionCurrentCreateV1 + ";"
+)
 
 type SelectionSQLiteConfigV1 struct {
 	Path         string
@@ -146,6 +148,9 @@ func (store *SelectionSQLiteV1) migrateV1(ctx context.Context) error {
 	if storedDigest != string(digest) || count != 1 {
 		return core.NewError(core.ErrorConflict, core.ReasonInvalidDigest, "package selection SQLite schema digest drifted")
 	}
+	if err = verifySelectionSchemaTxV1(ctx, tx); err != nil {
+		return err
+	}
 	if err = tx.Commit(); err != nil {
 		return selectionIndeterminateV1("package selection SQLite migration commit outcome unknown")
 	}
@@ -168,6 +173,230 @@ func (store *SelectionSQLiteV1) verifyV1(ctx context.Context) error {
 		return core.NewError(core.ErrorPreconditionFailed, core.ReasonInvalidState, "package selection SQLite WAL, foreign keys or FULL sync inactive")
 	}
 	return nil
+}
+
+type selectionSchemaColumnV1 struct {
+	Name       string
+	Type       string
+	NotNull    int
+	PrimaryKey int
+}
+
+type selectionForeignKeyV1 struct {
+	Sequence int
+	Table    string
+	From     string
+	To       string
+	OnUpdate string
+	OnDelete string
+	Match    string
+}
+
+type selectionTableSchemaV1 struct {
+	Name        string
+	MasterSQL   string
+	Columns     []selectionSchemaColumnV1
+	Indexes     []string
+	ForeignKeys []selectionForeignKeyV1
+}
+
+func verifySelectionSchemaTxV1(ctx context.Context, tx *sql.Tx) error {
+	expected := []selectionTableSchemaV1{
+		{
+			Name:      "agent_package_selection_schema_v1",
+			MasterSQL: strings.Replace(selectionSchemaLedgerCreateV1, " IF NOT EXISTS", "", 1),
+			Columns: []selectionSchemaColumnV1{
+				{Name: "version", Type: "INTEGER", PrimaryKey: 1},
+				{Name: "digest", Type: "TEXT", NotNull: 1},
+				{Name: "applied_unix_nano", Type: "INTEGER", NotNull: 1},
+			},
+		},
+		{
+			Name:      "agent_package_selection_history_v1",
+			MasterSQL: strings.Replace(selectionHistoryCreateV1, " IF NOT EXISTS", "", 1),
+			Columns: []selectionSchemaColumnV1{
+				{Name: "selection_id", Type: "TEXT", NotNull: 1, PrimaryKey: 1},
+				{Name: "revision", Type: "INTEGER", NotNull: 1, PrimaryKey: 2},
+				{Name: "digest", Type: "TEXT", NotNull: 1},
+				{Name: "row_digest", Type: "TEXT", NotNull: 1},
+				{Name: "payload_json", Type: "BLOB", NotNull: 1},
+				{Name: "checked_unix_nano", Type: "INTEGER", NotNull: 1},
+				{Name: "expires_unix_nano", Type: "INTEGER", NotNull: 1},
+			},
+			Indexes: []string{
+				"pk|selection_id,revision",
+				"u|selection_id,revision,digest",
+			},
+		},
+		{
+			Name:      "agent_package_selection_current_v1",
+			MasterSQL: strings.Replace(selectionCurrentCreateV1, " IF NOT EXISTS", "", 1),
+			Columns: []selectionSchemaColumnV1{
+				{Name: "selection_id", Type: "TEXT", PrimaryKey: 1},
+				{Name: "revision", Type: "INTEGER", NotNull: 1},
+				{Name: "digest", Type: "TEXT", NotNull: 1},
+				{Name: "row_digest", Type: "TEXT", NotNull: 1},
+			},
+			Indexes: []string{"pk|selection_id"},
+			ForeignKeys: []selectionForeignKeyV1{
+				{Sequence: 0, Table: "agent_package_selection_history_v1", From: "selection_id", To: "selection_id", OnUpdate: "NO ACTION", OnDelete: "NO ACTION", Match: "NONE"},
+				{Sequence: 1, Table: "agent_package_selection_history_v1", From: "revision", To: "revision", OnUpdate: "NO ACTION", OnDelete: "NO ACTION", Match: "NONE"},
+				{Sequence: 2, Table: "agent_package_selection_history_v1", From: "digest", To: "digest", OnUpdate: "NO ACTION", OnDelete: "NO ACTION", Match: "NONE"},
+			},
+		},
+	}
+	for _, table := range expected {
+		if err := verifySelectionTableV1(ctx, tx, table); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifySelectionTableV1(ctx context.Context, tx *sql.Tx, expected selectionTableSchemaV1) error {
+	var objectType, masterSQL string
+	if err := tx.QueryRowContext(
+		ctx,
+		"SELECT type,sql FROM sqlite_master WHERE name=?",
+		expected.Name,
+	).Scan(&objectType, &masterSQL); err != nil {
+		return selectionSchemaDriftV1()
+	}
+	if objectType != "table" || masterSQL != expected.MasterSQL {
+		return selectionSchemaDriftV1()
+	}
+
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_info(%q)", expected.Name))
+	if err != nil {
+		return selectionSchemaDriftV1()
+	}
+	var columns []selectionSchemaColumnV1
+	for rows.Next() {
+		var cid int
+		var column selectionSchemaColumnV1
+		var defaultValue sql.NullString
+		if err = rows.Scan(&cid, &column.Name, &column.Type, &column.NotNull, &defaultValue, &column.PrimaryKey); err != nil ||
+			cid != len(columns) ||
+			defaultValue.Valid {
+			_ = rows.Close()
+			return selectionSchemaDriftV1()
+		}
+		columns = append(columns, column)
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return selectionSchemaDriftV1()
+	}
+	if err = rows.Close(); err != nil || !reflect.DeepEqual(columns, expected.Columns) {
+		return selectionSchemaDriftV1()
+	}
+
+	indexes, err := selectionIndexSignaturesV1(ctx, tx, expected.Name)
+	if err != nil {
+		return selectionSchemaDriftV1()
+	}
+	sort.Strings(indexes)
+	sort.Strings(expected.Indexes)
+	if strings.Join(indexes, "\x00") != strings.Join(expected.Indexes, "\x00") {
+		return selectionSchemaDriftV1()
+	}
+
+	foreignKeys, err := selectionForeignKeysV1(ctx, tx, expected.Name)
+	if err != nil || !reflect.DeepEqual(foreignKeys, expected.ForeignKeys) {
+		return selectionSchemaDriftV1()
+	}
+	return nil
+}
+
+func selectionIndexSignaturesV1(ctx context.Context, tx *sql.Tx, table string) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA index_list(%q)", table))
+	if err != nil {
+		return nil, err
+	}
+	type indexV1 struct {
+		name   string
+		origin string
+	}
+	var indexes []indexV1
+	for rows.Next() {
+		var sequence, unique, partial int
+		var index indexV1
+		if err = rows.Scan(&sequence, &index.name, &unique, &index.origin, &partial); err != nil ||
+			sequence < 0 ||
+			unique != 1 ||
+			partial != 0 {
+			_ = rows.Close()
+			return nil, errors.New("invalid selection index")
+		}
+		indexes = append(indexes, index)
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return nil, err
+	}
+	if err = rows.Close(); err != nil {
+		return nil, err
+	}
+	result := make([]string, 0, len(indexes))
+	for _, index := range indexes {
+		info, queryErr := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA index_info(%q)", index.name))
+		if queryErr != nil {
+			return nil, queryErr
+		}
+		var columns []string
+		for info.Next() {
+			var sequence, cid int
+			var name string
+			if queryErr = info.Scan(&sequence, &cid, &name); queryErr != nil ||
+				sequence != len(columns) ||
+				cid < 0 ||
+				name == "" {
+				_ = info.Close()
+				return nil, errors.New("invalid selection index column")
+			}
+			columns = append(columns, name)
+		}
+		if queryErr = info.Err(); queryErr != nil {
+			_ = info.Close()
+			return nil, queryErr
+		}
+		if queryErr = info.Close(); queryErr != nil {
+			return nil, queryErr
+		}
+		result = append(result, index.origin+"|"+strings.Join(columns, ","))
+	}
+	return result, nil
+}
+
+func selectionForeignKeysV1(ctx context.Context, tx *sql.Tx, table string) ([]selectionForeignKeyV1, error) {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA foreign_key_list(%q)", table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var result []selectionForeignKeyV1
+	for rows.Next() {
+		var id int
+		var value selectionForeignKeyV1
+		if err = rows.Scan(
+			&id,
+			&value.Sequence,
+			&value.Table,
+			&value.From,
+			&value.To,
+			&value.OnUpdate,
+			&value.OnDelete,
+			&value.Match,
+		); err != nil || id != 0 {
+			return nil, errors.New("invalid selection foreign key")
+		}
+		result = append(result, value)
+	}
+	return result, rows.Err()
+}
+
+func selectionSchemaDriftV1() error {
+	return core.NewError(core.ErrorConflict, core.ReasonInvalidDigest, "package selection SQLite actual schema drifted")
 }
 
 func (store *SelectionSQLiteV1) IntegrityCheckV1(ctx context.Context) error {
@@ -534,14 +763,8 @@ func selectionRowDigestV1(selectionID string, revision core.Revision, digest cor
 
 func strictSelectionJSONV1[T any](raw []byte) (T, error) {
 	var value T
-	decoder := json.NewDecoder(bytes.NewReader(raw))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&value); err != nil {
+	if err := core.DecodeStrictJSON(raw, &value); err != nil {
 		return value, err
-	}
-	var tail any
-	if err := decoder.Decode(&tail); !errors.Is(err, io.EOF) {
-		return value, errors.New("trailing JSON")
 	}
 	return value, nil
 }

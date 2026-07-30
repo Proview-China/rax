@@ -33,8 +33,13 @@ func TestProductionPackagesDoNotImportHostRuntimeLoopOrConsole(t *testing.T) {
 			"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/ports":    {},
 			"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":           {},
 		},
+		"selection": {
+			"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract": {},
+			"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/ports":    {},
+			"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":           {},
+		},
 	}
-	for _, directory := range []string{"builder", "compiler", "contract", "loader", "ports", "repository"} {
+	for _, directory := range []string{"builder", "compiler", "contract", "loader", "ports", "repository", "selection"} {
 		files, err := filepath.Glob(filepath.Join(root, directory, "*.go"))
 		if err != nil {
 			t.Fatal(err)

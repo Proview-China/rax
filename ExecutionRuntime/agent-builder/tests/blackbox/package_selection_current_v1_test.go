@@ -204,6 +204,37 @@ func (store *countingSelectionStoreV1) InspectAgentPackageSelectionCurrentV1(ctx
 	return store.inner.InspectAgentPackageSelectionCurrentV1(ctx, id)
 }
 
+func TestPackageSelectionServiceRejectsTypedNilDependenciesV1(t *testing.T) {
+	fixture := newSelectionFixtureV1(t)
+	tests := []struct {
+		name   string
+		config selection.ConfigV1
+	}{
+		{
+			name: "closure reader",
+			config: selection.ConfigV1{
+				Closures:   (*mutatedClosureReaderV1)(nil),
+				Selections: fixture.selectionStore,
+			},
+		},
+		{
+			name: "selection repository",
+			config: selection.ConfigV1{
+				Closures:   fixture.loader,
+				Selections: (*countingSelectionStoreV1)(nil),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service, err := selection.NewServiceV1(test.config)
+			if err == nil || service != nil || !core.HasCategory(err, core.ErrorInvalidArgument) {
+				t.Fatalf("typed-nil %s dependency was accepted: service=%v err=%v", test.name, service, err)
+			}
+		})
+	}
+}
+
 func TestPackageSelectionClosureFailureWritesZeroV1(t *testing.T) {
 	fixture := newSelectionFixtureV1(t)
 	request := selectionRequestV1(t, fixture, "agent/example/rejected-package", packagecontract.AgentPackageSelectionCurrentRefV1{})
@@ -610,6 +641,170 @@ func TestPackageSelectionRestartExpiryAndSchemaFailClosedV1(t *testing.T) {
 	}); openErr == nil {
 		_ = reopened.Close()
 		t.Fatal("schema digest drift was accepted")
+	}
+}
+
+func TestPackageSelectionOpenRejectsActualSchemaDriftWithValidLedgerDigestV1(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_800_100_000, 0).UTC()
+	referencePath := t.TempDir() + "/reference.db"
+	reference, err := repository.OpenSelectionSQLiteV1(ctx, repository.SelectionSQLiteConfigV1{
+		Path:  referencePath,
+		Clock: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = reference.Close(); err != nil {
+		t.Fatal(err)
+	}
+	referenceDB, err := sql.Open("sqlite", "file:"+referencePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var publicDigest string
+	if err = referenceDB.QueryRowContext(ctx, "SELECT digest FROM agent_package_selection_schema_v1 WHERE version=1").Scan(&publicDigest); err != nil {
+		_ = referenceDB.Close()
+		t.Fatal(err)
+	}
+	if err = referenceDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	driftPath := t.TempDir() + "/schema-drift.db"
+	driftDB, err := sql.Open("sqlite", "file:"+driftPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = driftDB.ExecContext(
+		ctx,
+		"CREATE TABLE agent_package_selection_schema_v1(version INTEGER,digest TEXT NOT NULL,applied_unix_nano INTEGER NOT NULL);"+
+			"CREATE TABLE agent_package_selection_history_v1(selection_id TEXT NOT NULL,revision INTEGER NOT NULL,digest TEXT NOT NULL,row_digest TEXT NOT NULL,payload_json BLOB NOT NULL,checked_unix_nano INTEGER NOT NULL,expires_unix_nano INTEGER NOT NULL);"+
+			"CREATE TABLE agent_package_selection_current_v1(selection_id TEXT,revision INTEGER NOT NULL,digest TEXT NOT NULL,row_digest TEXT NOT NULL);"+
+			"INSERT INTO agent_package_selection_schema_v1(version,digest,applied_unix_nano) VALUES(1,?,?)",
+		publicDigest,
+		now.UnixNano(),
+	)
+	if err != nil {
+		_ = driftDB.Close()
+		t.Fatal(err)
+	}
+	if err = driftDB.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, openErr := repository.OpenSelectionSQLiteV1(ctx, repository.SelectionSQLiteConfigV1{
+		Path:  driftPath,
+		Clock: func() time.Time { return now },
+	})
+	if openErr == nil {
+		_ = reopened.Close()
+		t.Fatal("same-name same-column tables without PK, UNIQUE and FK constraints were accepted")
+	}
+	if !core.HasCategory(openErr, core.ErrorConflict) || !core.HasReason(openErr, core.ReasonInvalidDigest) {
+		t.Fatalf("actual schema drift returned the wrong closed failure: %v", openErr)
+	}
+}
+
+func TestPackageSelectionPersistentJSONRejectsStrictDriftWithSynchronizedRowDigestV1(t *testing.T) {
+	ctx := context.Background()
+	type rowDigestInputV1 struct {
+		SelectionID   string
+		Revision      core.Revision
+		Digest        core.Digest
+		PayloadDigest core.Digest
+	}
+	tests := []struct {
+		name   string
+		mutate func([]byte) []byte
+	}{
+		{
+			name: "duplicate first conflict last valid",
+			mutate: func(raw []byte) []byte {
+				return append([]byte(`{"object_kind":"spliced-object-kind",`), raw[1:]...)
+			},
+		},
+		{
+			name: "unknown field",
+			mutate: func(raw []byte) []byte {
+				return append([]byte(`{"unexpected_selection_field":true,`), raw[1:]...)
+			},
+		},
+		{
+			name: "trailing document",
+			mutate: func(raw []byte) []byte {
+				return append(append([]byte(nil), raw...), []byte(` {}`)...)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture := newSelectionFixtureV1(t)
+			request := selectionRequestV1(t, fixture, "agent/example/strict-json-"+strings.ReplaceAll(test.name, " ", "-"), packagecontract.AgentPackageSelectionCurrentRefV1{})
+			current, err := fixture.service.SelectPackageV1(ctx, request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err = fixture.selectionStore.Close(); err != nil {
+				t.Fatal(err)
+			}
+			db, err := sql.Open("sqlite", "file:"+fixture.selectionPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var raw []byte
+			var storedDigest string
+			if err = db.QueryRowContext(
+				ctx,
+				"SELECT payload_json,digest FROM agent_package_selection_history_v1 WHERE selection_id=? AND revision=?",
+				current.Ref.SelectionID,
+				uint64(current.Ref.Revision),
+			).Scan(&raw, &storedDigest); err != nil {
+				_ = db.Close()
+				t.Fatal(err)
+			}
+			mutated := test.mutate(raw)
+			rowDigest, digestErr := core.CanonicalJSONDigest(
+				"praxis.agent-builder.selection-sqlite",
+				"v1",
+				"AgentPackageSelectionSQLiteRowV1",
+				rowDigestInputV1{
+					SelectionID:   current.Ref.SelectionID,
+					Revision:      current.Ref.Revision,
+					Digest:        core.Digest(storedDigest),
+					PayloadDigest: core.DigestBytes(mutated),
+				},
+			)
+			if digestErr != nil {
+				_ = db.Close()
+				t.Fatal(digestErr)
+			}
+			if _, err = db.ExecContext(
+				ctx,
+				"UPDATE agent_package_selection_history_v1 SET payload_json=?,row_digest=? WHERE selection_id=? AND revision=?",
+				mutated,
+				string(rowDigest),
+				current.Ref.SelectionID,
+				uint64(current.Ref.Revision),
+			); err != nil {
+				_ = db.Close()
+				t.Fatal(err)
+			}
+			if err = db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			fixture.selectionStore, err = repository.OpenSelectionSQLiteV1(ctx, repository.SelectionSQLiteConfigV1{
+				Path:  fixture.selectionPath,
+				Clock: func() time.Time { return fixture.now },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, inspectErr := fixture.selectionStore.InspectAgentPackageSelectionExactV1(ctx, current.RefV1())
+			if !core.HasCategory(inspectErr, core.ErrorConflict) || !core.HasReason(inspectErr, core.ReasonInvalidDigest) {
+				t.Fatalf("strict JSON drift with synchronized row digest was accepted: %v", inspectErr)
+			}
+		})
 	}
 }
 
