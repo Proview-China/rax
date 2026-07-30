@@ -702,7 +702,7 @@ func operationEffectFactDigestV3(fact control.OperationEffectFactV3) (core.Diges
 func cloneOperationEffectFactV3(fact control.OperationEffectFactV3) control.OperationEffectFactV3 {
 	fact.Intent.Owners = append([]ports.EffectOwnerRefV2{}, fact.Intent.Owners...)
 	fact.Intent.CredentialLeases = append([]ports.CredentialLeaseRefV2{}, fact.Intent.CredentialLeases...)
-	fact.Intent.Payload.Inline = append([]byte{}, fact.Intent.Payload.Inline...)
+	fact.Intent.Payload.Inline = cloneBytesPreservingNilV1(fact.Intent.Payload.Inline)
 	if fact.DispatchReceipt != nil {
 		value := *fact.DispatchReceipt
 		fact.DispatchReceipt = &value
@@ -712,7 +712,7 @@ func cloneOperationEffectFactV3(fact control.OperationEffectFactV3) control.Oper
 		value.Evidence = append([]ports.EvidenceRecordRefV2{}, value.Evidence...)
 		if value.DomainResult != nil {
 			payload := *value.DomainResult
-			payload.Inline = append([]byte{}, payload.Inline...)
+			payload.Inline = cloneBytesPreservingNilV1(payload.Inline)
 			value.DomainResult = &payload
 		}
 		fact.Settlement = &value
@@ -725,7 +725,7 @@ func cloneOperationPermitFactV3(fact control.OperationDispatchPermitFactV3) cont
 		value := *fact.Enforcement
 		if value.Attestation != nil {
 			extension := *value.Attestation
-			extension.Payload.Inline = append([]byte{}, extension.Payload.Inline...)
+			extension.Payload.Inline = cloneBytesPreservingNilV1(extension.Payload.Inline)
 			value.Attestation = &extension
 		}
 		fact.Enforcement = &value
@@ -915,7 +915,7 @@ func cloneExecutionDelegationV2(fact ports.ExecutionDelegationFactV2) ports.Exec
 		preparation := *fact.Preparation
 		if preparation.Enforcement.Attestation != nil {
 			extension := *preparation.Enforcement.Attestation
-			extension.Payload.Inline = append([]byte{}, extension.Payload.Inline...)
+			extension.Payload.Inline = cloneBytesPreservingNilV1(extension.Payload.Inline)
 			preparation.Enforcement.Attestation = &extension
 		}
 		fact.Preparation = &preparation
@@ -988,6 +988,13 @@ func (s *ProviderAttemptObservationStoreV2) InspectProviderAttemptObservationV2(
 }
 
 func cloneProviderObservationV2(observation ports.ProviderAttemptObservationV2) ports.ProviderAttemptObservationV2 {
-	observation.Payload.Inline = append([]byte{}, observation.Payload.Inline...)
+	observation.Payload.Inline = cloneBytesPreservingNilV1(observation.Payload.Inline)
 	return observation
+}
+
+func cloneBytesPreservingNilV1(value []byte) []byte {
+	if value == nil {
+		return nil
+	}
+	return append([]byte{}, value...)
 }
