@@ -238,6 +238,136 @@ func TestSQLiteModelToolInjectionMaterialV1ExpiredDynamicCurrentFailsClosed(t *t
 	}
 }
 
+func TestSQLiteModelToolInjectionMaterialV1PhysicalSchemaFailClosed(t *testing.T) {
+	const columns = `
+    material_id TEXT PRIMARY KEY,
+    revision INTEGER NOT NULL,
+    digest TEXT NOT NULL,
+    surface_id TEXT NOT NULL,
+    surface_revision INTEGER NOT NULL,
+    surface_digest TEXT NOT NULL,
+    compiled_tools_digest TEXT NOT NULL,
+    expires_unix_nano INTEGER NOT NULL,
+    compiled_tools_json BLOB NOT NULL,
+    body_json BLOB NOT NULL,
+    row_digest TEXT NOT NULL`
+	const exactTable = `CREATE TABLE model_tool_injection_material_v1 (` + columns + `,
+    UNIQUE(material_id, revision, digest)
+) STRICT`
+	for _, test := range []struct {
+		name       string
+		statements []string
+	}{
+		{
+			name:       "weak same-name table",
+			statements: []string{`CREATE TABLE model_tool_injection_material_v1 (material_id TEXT)`},
+		},
+		{
+			name: "missing primary key",
+			statements: []string{`CREATE TABLE model_tool_injection_material_v1 (
+    material_id TEXT NOT NULL,
+    revision INTEGER NOT NULL,
+    digest TEXT NOT NULL,
+    surface_id TEXT NOT NULL,
+    surface_revision INTEGER NOT NULL,
+    surface_digest TEXT NOT NULL,
+    compiled_tools_digest TEXT NOT NULL,
+    expires_unix_nano INTEGER NOT NULL,
+    compiled_tools_json BLOB NOT NULL,
+    body_json BLOB NOT NULL,
+    row_digest TEXT NOT NULL,
+    UNIQUE(material_id, revision, digest)
+) STRICT`},
+		},
+		{
+			name:       "missing unique closure index",
+			statements: []string{`CREATE TABLE model_tool_injection_material_v1 (` + columns + `) STRICT`},
+		},
+		{
+			name:       "missing strict",
+			statements: []string{`CREATE TABLE model_tool_injection_material_v1 (` + columns + `, UNIQUE(material_id, revision, digest))`},
+		},
+		{
+			name: "comment cannot fake schema constraint",
+			statements: []string{`CREATE TABLE model_tool_injection_material_v1 (
+    material_id TEXT PRIMARY KEY /* CHECK(material_id <> '') */,
+    revision INTEGER NOT NULL,
+    digest TEXT NOT NULL,
+    surface_id TEXT NOT NULL,
+    surface_revision INTEGER NOT NULL,
+    surface_digest TEXT NOT NULL,
+    compiled_tools_digest TEXT NOT NULL,
+    expires_unix_nano INTEGER NOT NULL,
+    compiled_tools_json BLOB NOT NULL,
+    body_json BLOB NOT NULL,
+    row_digest TEXT NOT NULL,
+    UNIQUE(material_id, revision, digest)
+) STRICT`},
+		},
+		{
+			name:       "extra index",
+			statements: []string{exactTable, `CREATE INDEX unexpected_material_surface_v1 ON model_tool_injection_material_v1(surface_id)`},
+		},
+		{
+			name: "extra trigger",
+			statements: []string{
+				exactTable,
+				`CREATE TRIGGER unexpected_material_insert_v1 AFTER INSERT ON model_tool_injection_material_v1 BEGIN SELECT 1; END`,
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			path := t.TempDir() + "/tool-owner.db"
+			createRawSQLiteSchemaV1(t, path, test.statements...)
+			store, err := toolsqlite.OpenV1(context.Background(), toolsqlite.ConfigV1{
+				Path: path, Clock: testkit.NewManualClock(testkit.FixedTime.Add(time.Second)).Now, Owner: testkit.Owner(),
+			})
+			if store != nil {
+				_ = store.Close()
+			}
+			if err == nil || !core.HasCategory(err, core.ErrorConflict) {
+				t.Fatalf("physical schema drift was accepted: %v", err)
+			}
+		})
+	}
+}
+
+func TestSQLiteModelToolInjectionMaterialV1SchemaProbeRollsBackAndRepeatedOpenPreservesData(t *testing.T) {
+	path := t.TempDir() + "/tool-owner.db"
+	clock := testkit.NewManualClock(testkit.FixedTime.Add(time.Second))
+	store := openStoreV1(t, path, clock)
+	compiled, material := compileAndPersistV1(t, store, clock)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for range 3 {
+		store = openStoreV1(t, path, clock)
+		got, err := store.InspectExactModelToolInjectionMaterialV1(context.Background(), material.Ref)
+		if err != nil || !reflect.DeepEqual(got, material) {
+			t.Fatalf("repeated Open or rollback probe changed legal data: equal=%v err=%v", reflect.DeepEqual(got, material), err)
+		}
+		var count int
+		db, err := sql.Open("sqlite", path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err = db.QueryRow(`SELECT count(*) FROM model_tool_injection_material_v1`).Scan(&count); err != nil {
+			_ = db.Close()
+			t.Fatal(err)
+		}
+		_ = db.Close()
+		if count != 1 {
+			t.Fatalf("schema probe leaked a row beside the legal closure: %d", count)
+		}
+		if err = store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if compiled.Digest == "" {
+		t.Fatal("legal compiled closure fixture was empty")
+	}
+}
+
 func TestSQLiteModelToolInjectionMaterialV1SpliceFailClosed(t *testing.T) {
 	for _, test := range []struct {
 		name          string
@@ -273,7 +403,12 @@ func TestSQLiteModelToolInjectionMaterialV1SpliceFailClosed(t *testing.T) {
 			} else {
 				tamperSQLiteV1(t, path, test.update)
 			}
-			store = openStoreV1(t, path, clock)
+			store, err := toolsqlite.OpenV1(context.Background(), toolsqlite.ConfigV1{
+				Path: path, Clock: clock.Now, Owner: testkit.Owner(),
+			})
+			if err != nil {
+				return
+			}
 			defer store.Close()
 			if _, err := store.InspectExactModelToolInjectionMaterialV1(context.Background(), material.Ref); err == nil {
 				t.Fatalf("%s splice was accepted: %v", test.name, err)
@@ -555,6 +690,20 @@ func tamperSQLiteV1(t *testing.T, path, statement string) {
 	defer db.Close()
 	if _, err = db.Exec(statement); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func createRawSQLiteSchemaV1(t *testing.T, path string, statements ...string) {
+	t.Helper()
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, statement := range statements {
+		if _, err = db.Exec(statement); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 
