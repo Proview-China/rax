@@ -27,6 +27,7 @@ Application模块把Runtime的线性化事实与Harness/组件Port组织成可�
 - `SingleCallToolActionPortV1`：Application自有N=1 G6A窄合同。Request完整绑定Workflow/Scope/Run/Session/Turn/PendingAction/Model Projection/Assembly/Authority/ParentFrame，并用Session、Turn、ParentFrame CTX-D10三种distinct applicability source阻断type-pun；不携带Owner正文、Runtime Applicability Fact Ref或Tool Boundary proof；
 - `SingleCallToolActionCoordinatorV1`：严格执行S1→prepared write-ahead→dispatch_intent→唯一`StartClaimID` CAS为`waiting_inspect`→一次同canonical Tool start-or-inspect→S2→Runtime current V4 Inspection→public Association Inspect→completed。只有精确CAS回包持有者可以调用Tool；CAS回包丢失、竞争失败及既有`waiting_inspect`全部永久只Inspect，NotFound/Unavailable/Indeterminate都不授重派。Input、Tool、Settlement、Association、commit与return边界分别读取fresh clock，途中TTL跨越或时钟回拨Fail Closed；
 - G6A硬停：成功结果仅包含settled ToolResult中立坐标、current V4 Inspection和Association typed ref；没有Context Refresh、Continuation、Capability activation、Turn推进或Checkpoint依赖。当前V1仅完成neutral fixture隔离验证，不包含Identity V2/P3接线、Tool P4/P5、生产composition root、Backend或SLA。
+- TurnContinuationCoordinatorV1：只协调Tool-only refresh的Harness Begin(pending)、既有Context coordinator、Harness Commit(CAS)和ModelTurnAllowed门禁。它在Begin前重算sealed Attempt；Memory/Knowledge owner-backed refresh在V1固定Fail Closed。它不注入Model/Tool/Provider Port，不执行下一Model Turn；Begin/Commit unknown只Inspect原Attempt。多Application coordinator可经多个Harness SQLite handle共享同一Context coordinator收敛，但Context coordinator的single-call gate仍是进程内边界，跨进程/多Context composition root并发继续NO-GO。
 
 ## G6A additive V2当前真值
 
