@@ -12,9 +12,11 @@ Admission -> immutable origin AttemptRef rev1
 缺口。SQLite 在单个只读事务中验证 origin、Reservation、Command、Admission
 binding和current全部闭合；不会按stable key接受 caller 查询。
 
-Envelope 的30秒TTL仅代表读取证明的新鲜度。历史事实即使已过期，terminal
-current仍可审计，但不能据此恢复执行。Unknown和lost reply只能Inspect原
-Attempt，物理文件不会重读。
+Reader 在事务读取前后分别取 initial/fresh owner clock，最终 Envelope 必须
+按 fresh 封存。started current同时受全部已封存 execution TTL最短上界约束；
+历史事实即使已过期，terminal current仍可用独立30秒内的inspection证明审计，
+但不能据此恢复执行。Unknown和lost reply只能Inspect原Attempt，物理文件不会
+重读。
 
 V1保持兼容。当前模块仅为 Sandbox owner-local reusable public reader；
 Tool adapter/full composition、Runtime Settlement、Host root及Console仍不在本

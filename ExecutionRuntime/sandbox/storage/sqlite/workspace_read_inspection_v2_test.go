@@ -101,6 +101,72 @@ func TestWorkspaceReadInspectionV2SurvivesLostReplyRestartAndExpiredOrigin(t *te
 	}
 }
 
+func TestWorkspaceReadInspectionV2UsesFreshClockAfterReadTransaction(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_900_000_000, 0)
+	expires := now.Add(10 * time.Second)
+
+	for _, test := range []struct {
+		name  string
+		fresh time.Time
+	}{
+		{name: "exact execution expiry", fresh: expires},
+		{name: "after execution expiry", fresh: expires.Add(time.Nanosecond)},
+		{name: "clock rollback", fresh: now.Add(-time.Nanosecond)},
+		{name: "zero clock", fresh: time.Time{}},
+		{name: "negative clock", fresh: time.Unix(-1, 0)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store, _, attempt := openWorkspaceReadInspectionStartedFixtureV2(t, now, expires, test.name)
+			var calls atomic.Int64
+			store.clock = func() time.Time {
+				if calls.Add(1) == 1 {
+					return now
+				}
+				return test.fresh
+			}
+			envelope, err := store.InspectBoundedWorkspaceReadV2(ctx, workspaceReadOriginRefV2(attempt))
+			if !errors.Is(err, ports.ErrConflict) {
+				t.Fatalf("fresh clock drift was accepted: envelope=%#v err=%v", envelope, err)
+			}
+			if envelope != (ports.WorkspaceReadInspectionEnvelopeV2{}) {
+				t.Fatalf("fresh clock rejection returned an envelope: %#v", envelope)
+			}
+			if calls.Load() != 2 {
+				t.Fatalf("clock reads=%d, want initial and post-read fresh", calls.Load())
+			}
+		})
+	}
+
+	t.Run("fresh normal is checked after reads and capped by execution TTL", func(t *testing.T) {
+		store, _, attempt := openWorkspaceReadInspectionStartedFixtureV2(t, now, expires, "fresh-normal")
+		fresh := now.Add(2 * time.Second)
+		var calls atomic.Int64
+		store.clock = func() time.Time {
+			if calls.Add(1) == 1 {
+				return now
+			}
+			return fresh
+		}
+		envelope, err := store.InspectBoundedWorkspaceReadV2(ctx, workspaceReadOriginRefV2(attempt))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if envelope.CheckedUnixNano != fresh.UnixNano() || envelope.ExpiresUnixNano != expires.UnixNano() {
+			t.Fatalf("fresh envelope was not capped by execution TTL: %#v", envelope)
+		}
+		if err = envelope.ValidateCurrent(fresh); err != nil {
+			t.Fatalf("fresh envelope is invalid: %v", err)
+		}
+		if err = envelope.ValidateCurrent(time.Unix(0, envelope.ExpiresUnixNano)); err == nil {
+			t.Fatal("now==envelope expiry was accepted")
+		}
+		if calls.Load() != 2 {
+			t.Fatalf("clock reads=%d, want initial and post-read fresh", calls.Load())
+		}
+	})
+}
+
 func TestWorkspaceReadInspectionV2RejectsOriginAndLineageSplices(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1_900_000_000, 0)
@@ -361,10 +427,25 @@ func openWorkspaceReadInspectionFixtureV2(
 	return store, reservation, attempt
 }
 
-func seedWorkspaceReadInspectionTerminalV2(
+func openWorkspaceReadInspectionStartedFixtureV2(
+	t *testing.T,
+	now time.Time,
+	expires time.Time,
+	name string,
+) (*Store, contract.WorkspaceReadReservationV1, contract.WorkspaceReadAttemptV1) {
+	t.Helper()
+	store, err := OpenWithClock(context.Background(), filepath.Join(t.TempDir(), "sandbox.db"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	reservation, attempt := seedWorkspaceReadInspectionStartedV2(t, store, now, expires, name)
+	return store, reservation, attempt
+}
+
+func seedWorkspaceReadInspectionStartedV2(
 	t *testing.T,
 	store *Store,
-	state contract.WorkspaceReadStateV1,
 	now time.Time,
 	expires time.Time,
 	name string,
@@ -400,6 +481,20 @@ func seedWorkspaceReadInspectionTerminalV2(
 	if _, created, err := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); err != nil || !created {
 		t.Fatalf("reserve inspection fixture: created=%v err=%v", created, err)
 	}
+	return reservation, attempt
+}
+
+func seedWorkspaceReadInspectionTerminalV2(
+	t *testing.T,
+	store *Store,
+	state contract.WorkspaceReadStateV1,
+	now time.Time,
+	expires time.Time,
+	name string,
+) (contract.WorkspaceReadReservationV1, contract.WorkspaceReadAttemptV1) {
+	t.Helper()
+	ctx := context.Background()
+	reservation, attempt := seedWorkspaceReadInspectionStartedV2(t, store, now, expires, name)
 	switch state {
 	case contract.WorkspaceReadObservedV1:
 		observation := workspaceReadCompletionObservationFixtureV1(t, reservation, attempt, now, expires)

@@ -28,8 +28,8 @@ func (s *Store) InspectBoundedWorkspaceReadV2(
 	if err := exact.Validate(); err != nil {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
 	}
-	now := s.clock()
-	if now.IsZero() || now.UnixNano() <= 0 {
+	initial := s.clock()
+	if initial.IsZero() || initial.UnixNano() <= 0 {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, ports.ErrConflict
 	}
 	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
@@ -65,7 +65,7 @@ func (s *Store) InspectBoundedWorkspaceReadV2(
 		command,
 		binding,
 		current,
-		now,
+		initial,
 	); err != nil {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
 	}
@@ -76,22 +76,80 @@ func (s *Store) InspectBoundedWorkspaceReadV2(
 	if err := validateWorkspaceReadInspectionProjectionV2(current, reservation, origin, projection); err != nil {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
 	}
+	fresh := s.clock()
+	if fresh.IsZero() || fresh.UnixNano() <= 0 || fresh.UnixNano() < initial.UnixNano() {
+		return ports.WorkspaceReadInspectionEnvelopeV2{}, ports.ErrConflict
+	}
+	expiresUnixNano, err := workspaceReadInspectionExpiryV2(
+		fresh,
+		origin,
+		reservation,
+		command,
+		binding,
+		current,
+		projection,
+	)
+	if err != nil {
+		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
+	}
 
 	envelope, err := ports.SealWorkspaceReadInspectionEnvelopeV2(
 		ports.WorkspaceReadInspectionEnvelopeV2{
 			RequestedOriginAttemptRef: exact,
 			CurrentProjection:         projection,
-			CheckedUnixNano:           now.UnixNano(),
-			ExpiresUnixNano:           now.Add(ports.WorkspaceReadInspectionMaxTTLV2).UnixNano(),
+			CheckedUnixNano:           fresh.UnixNano(),
+			ExpiresUnixNano:           expiresUnixNano,
 		},
 	)
 	if err != nil {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
 	}
-	if err := envelope.ValidateCurrent(now); err != nil {
+	if err := envelope.ValidateCurrent(fresh); err != nil {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
 	}
 	return envelope, nil
+}
+
+func workspaceReadInspectionExpiryV2(
+	fresh time.Time,
+	origin contract.WorkspaceReadAttemptV1,
+	reservation contract.WorkspaceReadReservationV1,
+	command contract.WorkspaceReadCommandV1,
+	binding ports.WorkspaceReadAdmissionAttemptBindingV1,
+	current contract.WorkspaceReadAttemptV1,
+	projection contract.WorkspaceReadExecutionProjectionV1,
+) (int64, error) {
+	envelopeExpiry := fresh.Add(ports.WorkspaceReadInspectionMaxTTLV2).UnixNano()
+	if envelopeExpiry <= fresh.UnixNano() {
+		return 0, ports.ErrConflict
+	}
+	// Terminal facts remain inspectable after execution eligibility expires.
+	// Their historical TTL is not renewed: only this newly checked, read-only
+	// envelope receives the independent bounded inspection lifetime.
+	if current.State != contract.WorkspaceReadStartedV1 {
+		return envelopeExpiry, nil
+	}
+	executionExpiry := minWorkspaceReadStoreExpiryV1(
+		origin.Meta.ExpiresUnixNano,
+		origin.AdmissionReceipt.ExpiresUnixNano,
+		reservation.Meta.ExpiresUnixNano,
+		reservation.TTLClosure.EffectiveExpiresUnixNano,
+		command.Meta.ExpiresUnixNano,
+		command.RequestedNotAfterUnixNano,
+		binding.ExpiresUnixNano,
+		current.Meta.ExpiresUnixNano,
+		current.AdmissionReceipt.ExpiresUnixNano,
+		projection.Attempt.Meta.ExpiresUnixNano,
+		projection.Reservation.Meta.ExpiresUnixNano,
+		projection.AdmissionReceipt.ExpiresUnixNano,
+	)
+	if executionExpiry <= fresh.UnixNano() {
+		return 0, ports.ErrConflict
+	}
+	if executionExpiry < envelopeExpiry {
+		envelopeExpiry = executionExpiry
+	}
+	return envelopeExpiry, nil
 }
 
 func inspectWorkspaceReadOriginV2Tx(

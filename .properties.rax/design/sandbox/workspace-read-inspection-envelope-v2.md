@@ -45,9 +45,18 @@ SQLite Reader 在一个只读事务中：
 
 ## TTL、Unknown 与恢复
 
+Reader 在读取任何 SQLite 对象前取得 initial clock；完成全部只读事务读取及
+projection 验证后必须再次取得 fresh clock。fresh 为零、非正、早于 initial
+均 Fail Closed。`CheckedUnixNano` 必须使用 fresh，禁止用事务开始前的旧时钟
+自证返回时 current。
+
 Envelope TTL 固定不超过 30 秒，只描述 inspection freshness，不续租、不授权、
-不恢复任何已过期的 execution fact。过期 historical origin 仍可读取 terminal
-current；`now == envelope expiry` 必须拒绝。
+不恢复任何已过期的 execution fact。若 current 仍为 started，Envelope expiry
+还必须不晚于 origin、Reservation/TTLClosure、Command/requested-not-after、
+Admission binding/receipt和current projection的最短可验证执行 TTL；fresh
+到达该边界即拒绝。过期 historical origin 仍可读取 terminal current，其
+Envelope 使用独立、从 fresh 起算的短 inspection TTL，不会令执行资格复活；
+`now == envelope expiry` 必须拒绝。
 
 UnknownOutcome 只允许用 original Attempt ref Inspect。lost reply、restart和重复
 请求不得再次执行物理 read。Started recovery仍由现有显式 owner-incarnation

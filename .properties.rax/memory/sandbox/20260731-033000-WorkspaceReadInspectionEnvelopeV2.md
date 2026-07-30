@@ -10,3 +10,6 @@
 - Unknown/lost reply/restart只Inspect original Attempt，Provider和物理读取为零。
 - owner-local实现与验收完成后可供Tool新adapter消费；Tool full composition、
   Runtime/Application/Harness/Host/Console仍NO-GO。
+- P1返修：SQLite读取前后分别取initial/fresh owner clock，Envelope改由fresh
+  seal；started受全部可验证execution TTL最短边界约束，terminal historical
+  仍只获得独立inspection freshness，不恢复执行资格。

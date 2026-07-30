@@ -20,6 +20,10 @@
 - 过期 historical terminal可Inspect但不可恢复执行；
 - Envelope digest、strict nested JSON、TTL上界、`now==expiry`、clock rollback、
   typed-nil均Fail Closed；
+- SQLite读取前后分别读取initial/fresh owner clock；started在fresh到达任一
+  execution TTL边界、fresh回退或归零时返回零Envelope；
+- terminal historical inspection在execution TTL后仍可读取，但Envelope只从
+  fresh产生独立短TTL，不能恢复执行资格；
 - 64并发 V2 Inspect不写Owner state且物理读取计数为零；
 - V1 Inspect保持兼容。
 
