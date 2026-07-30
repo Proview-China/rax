@@ -34,11 +34,17 @@ func TestProductionImportBoundaryV1(t *testing.T) {
 			}
 			first := strings.Split(value, "/")[0]
 			isExternal := strings.Contains(first, ".")
-			if isExternal && value != modulePathV1+"/contract" && value != modulePathV1+"/ports" && value != modulePathV1+"/transport/jsonv1" {
+			relative, relativeErr := filepath.Rel(root, path)
+			if relativeErr != nil {
+				return relativeErr
+			}
+			isSQLiteAdapter := strings.HasPrefix(filepath.ToSlash(relative), "storage/sqlite/")
+			isAllowedSQLiteDriver := isSQLiteAdapter && value == "modernc.org/sqlite"
+			if isExternal && value != modulePathV1+"/contract" && value != modulePathV1+"/ports" && value != modulePathV1+"/transport/jsonv1" && !isAllowedSQLiteDriver {
 				t.Errorf("horizontal production file %s imports non-service package %s", path, value)
 			}
 			for _, forbidden := range []string{"/internal", "/storage", "/fakes", "/sqlite", "/console", "/frontend"} {
-				if strings.Contains(value, forbidden) {
+				if strings.Contains(value, forbidden) && !isAllowedSQLiteDriver {
 					t.Errorf("horizontal production file %s imports forbidden implementation package %s", path, value)
 				}
 			}
