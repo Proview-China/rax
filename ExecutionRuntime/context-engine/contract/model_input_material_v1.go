@@ -223,7 +223,10 @@ func SealContextModelInputMaterialV1(m ContextModelInputMaterialV1) (ContextMode
 	}
 	m.Ref.Digest = digest
 	m.Digest = digest
-	return m, m.Validate()
+	if err := m.Validate(); err != nil {
+		return ContextModelInputMaterialV1{}, err
+	}
+	return m, nil
 }
 
 func (m ContextModelInputMaterialV1) Clone() ContextModelInputMaterialV1 {

@@ -85,3 +85,57 @@ func TestModelInputClosedEnumsAndCanonicalEncodingV1(t *testing.T) {
 		t.Fatalf("non-canonical JSON was accepted: %v", err)
 	}
 }
+
+func TestModelInputMaterialResealCannotBlessSemanticBindingDriftV1(t *testing.T) {
+	content := []byte("exact tool output")
+	binding, err := contract.SealContextModelInputSegmentBindingV1(contract.ContextModelInputSegmentBindingV1{
+		FragmentRef: modelInputRefV1("reseal-tool-result"), Region: contract.RegionDynamicTail, Position: 1,
+		Kind: contract.FragmentToolResult, Trust: contract.TrustObservation, Channel: contract.ContextModelInputFunctionResultV1,
+		Role: contract.ContextModelInputRoleToolV1, Encoding: contract.ContextModelInputUTF8V1,
+		CallID: "call-reseal-1", Name: "workspace.read",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	material, err := contract.SealContextModelInputMaterialV1(contract.ContextModelInputMaterialV1{
+		Ref:                          contract.ContextModelInputMaterialRefV1{ID: "reseal-material", Revision: 1},
+		DescriptorRef:                contract.ContextFrameConsumptionDescriptorRefV1{ID: "reseal-descriptor", Revision: 1, Digest: contract.DigestBytes([]byte("descriptor"))},
+		FrameRef:                     modelInputRefV1("reseal-frame"),
+		ManifestRef:                  modelInputRefV1("reseal-manifest"),
+		GenerationRef:                modelInputRefV1("reseal-generation"),
+		MaterializedDescriptorDigest: contract.DigestBytes([]byte("materialized-descriptor")),
+		OrderedSegments: []contract.ContextModelInputSegmentV1{{
+			FragmentRef: binding.FragmentRef, Region: binding.Region, Position: binding.Position, Kind: binding.Kind,
+			Trust: binding.Trust, Channel: binding.Channel, Role: binding.Role, Encoding: binding.Encoding,
+			CallID: binding.CallID, Name: binding.Name,
+			ContentRef: contract.ContentRef{Ref: "reseal-content", Digest: contract.DigestBytes(content), Length: uint64(len(content))},
+			Content:    content, SemanticBindingDigest: binding.Digest,
+		}},
+		CheckedUnixNano: 100, ExpiresUnixNano: 200,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := []struct {
+		name   string
+		mutate func(*contract.ContextModelInputSegmentV1)
+	}{
+		{"call_id_old_digest", func(s *contract.ContextModelInputSegmentV1) { s.CallID = "call-reseal-2" }},
+		{"name_old_digest", func(s *contract.ContextModelInputSegmentV1) { s.Name = "workspace.write" }},
+		{"role_old_digest", func(s *contract.ContextModelInputSegmentV1) { s.Role = contract.ContextModelInputRoleAssistantV1 }},
+		{"channel_old_digest", func(s *contract.ContextModelInputSegmentV1) { s.Channel = contract.ContextModelInputMessageV1 }},
+		{"encoding_old_digest", func(s *contract.ContextModelInputSegmentV1) { s.Encoding = contract.ContextModelInputCanonicalJSONV1 }},
+		{"arbitrary_valid_digest", func(s *contract.ContextModelInputSegmentV1) {
+			s.SemanticBindingDigest = contract.DigestBytes([]byte("attacker-chosen"))
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tampered := material.Clone()
+			tc.mutate(&tampered.OrderedSegments[0])
+			if got, err := contract.SealContextModelInputMaterialV1(tampered); !errors.Is(err, contract.ErrConflict) || got.Ref.ID != "" {
+				t.Fatalf("re-seal blessed semantic drift: got=%+v err=%v", got, err)
+			}
+		})
+	}
+}
