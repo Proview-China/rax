@@ -13,3 +13,6 @@
 - P1返修：SQLite读取前后分别取initial/fresh owner clock，Envelope改由fresh
   seal；started受全部可验证execution TTL最短边界约束，terminal historical
   仍只获得独立inspection freshness，不恢复执行资格。
+- P1敌手返修：Observed逐字段闭合Observation/View/File/receipt/bytes，
+  Observation行denorm与body exact一致；terminal及S1/S2/receipt时间保持从
+  origin向终态单调，重Seal与restart row splice均Fail Closed。

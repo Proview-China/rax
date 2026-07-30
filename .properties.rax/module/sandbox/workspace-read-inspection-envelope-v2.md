@@ -10,7 +10,9 @@ Admission -> immutable origin AttemptRef rev1
 
 它解决 V1 response 只有 latest current、却没有响应级 origin lineage proof 的
 缺口。SQLite 在单个只读事务中验证 origin、Reservation、Command、Admission
-binding和current全部闭合；不会按stable key接受 caller 查询。
+binding和current全部闭合；Observed还复核Observation、WorkspaceView、
+canonical path、File identity、bytes/digest、Provider receipt、SQLite行坐标及
+因果时间。不会按stable key接受 caller 查询。
 
 Reader 在事务读取前后分别取 initial/fresh owner clock，最终 Envelope 必须
 按 fresh 封存。started current同时受全部已封存 execution TTL最短上界约束；

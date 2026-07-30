@@ -50,6 +50,10 @@ func (s *Store) InspectBoundedWorkspaceReadV2(
 	if err != nil {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
 	}
+	workspace, err := inspectWorkspaceReadViewV2Tx(ctx, tx, reservation.WorkspaceView)
+	if err != nil {
+		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
+	}
 	binding, err := inspectWorkspaceReadAdmissionBindingV2Tx(ctx, tx, exact)
 	if err != nil {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
@@ -73,7 +77,7 @@ func (s *Store) InspectBoundedWorkspaceReadV2(
 	if err != nil {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, ports.ErrConflict
 	}
-	if err := validateWorkspaceReadInspectionProjectionV2(current, reservation, origin, projection); err != nil {
+	if err := validateWorkspaceReadInspectionProjectionV2(current, reservation, command, workspace, origin, projection); err != nil {
 		return ports.WorkspaceReadInspectionEnvelopeV2{}, err
 	}
 	fresh := s.clock()
@@ -256,6 +260,41 @@ func inspectWorkspaceReadCommandV2Tx(
 	return command, nil
 }
 
+func inspectWorkspaceReadViewV2Tx(
+	ctx context.Context,
+	tx *sql.Tx,
+	exact contract.Ref,
+) (contract.WorkspaceView, error) {
+	var revision uint64
+	var digest string
+	var body []byte
+	err := tx.QueryRowContext(
+		ctx,
+		`SELECT revision,digest,body
+		   FROM workspace_view_history
+		  WHERE view_id=? AND revision=?`,
+		exact.ID,
+		exact.Revision,
+	).Scan(&revision, &digest, &body)
+	if errors.Is(err, sql.ErrNoRows) {
+		return contract.WorkspaceView{}, ports.ErrNotFound
+	}
+	if err != nil {
+		return contract.WorkspaceView{}, err
+	}
+	if revision != exact.Revision || digest != exact.Digest {
+		return contract.WorkspaceView{}, ports.ErrConflict
+	}
+	var workspace contract.WorkspaceView
+	if err := decode(body, &workspace); err != nil {
+		return contract.WorkspaceView{}, err
+	}
+	if workspace.ValidateShape() != nil || workspace.Meta.Ref() != exact {
+		return contract.WorkspaceView{}, ports.ErrConflict
+	}
+	return workspace, nil
+}
+
 func inspectWorkspaceReadAdmissionBindingV2Tx(
 	ctx context.Context,
 	tx *sql.Tx,
@@ -390,7 +429,9 @@ func validateWorkspaceReadInspectionClosureV2(
 			return ports.ErrConflict
 		}
 	case contract.WorkspaceReadObservedV1, contract.WorkspaceReadFailedV1, contract.WorkspaceReadUnknownV1:
-		if current.Meta.Revision != origin.Meta.Revision+1 {
+		if current.Meta.Revision != origin.Meta.Revision+1 ||
+			current.Meta.CreatedUnixNano < origin.Meta.CreatedUnixNano ||
+			current.Meta.UpdatedUnixNano < origin.Meta.UpdatedUnixNano {
 			return ports.ErrConflict
 		}
 	default:
@@ -402,6 +443,8 @@ func validateWorkspaceReadInspectionClosureV2(
 func validateWorkspaceReadInspectionProjectionV2(
 	current contract.WorkspaceReadAttemptV1,
 	reservation contract.WorkspaceReadReservationV1,
+	command contract.WorkspaceReadCommandV1,
+	workspace contract.WorkspaceView,
 	origin contract.WorkspaceReadAttemptV1,
 	projection contract.WorkspaceReadExecutionProjectionV1,
 ) error {
@@ -412,7 +455,60 @@ func validateWorkspaceReadInspectionProjectionV2(
 		projection.Reservation.PayloadDigest != reservation.PayloadDigest ||
 		projection.Reservation.Command != reservation.Command ||
 		projection.Reservation.WorkspaceView != reservation.WorkspaceView ||
-		projection.AdmissionReceipt != origin.AdmissionReceipt {
+		projection.AdmissionReceipt != origin.AdmissionReceipt ||
+		command.Meta.Ref() != reservation.Command ||
+		command.WorkspaceView != reservation.WorkspaceView ||
+		workspace.Meta.Ref() != reservation.WorkspaceView ||
+		workspace.FileScopeDigest != command.FileScopeDigest ||
+		!workspaceReadStoreAllowedV1(workspace, command.RelativePath) {
+		return ports.ErrConflict
+	}
+	if current.State != contract.WorkspaceReadObservedV1 {
+		return nil
+	}
+	observation := projection.Observation
+	providerReceipt := projection.ProviderReceipt
+	if observation == nil || providerReceipt == nil {
+		return ports.ErrConflict
+	}
+	fileID, err := contract.WorkspaceReadFileIDV1(workspace.Meta.ID, command.RelativePath)
+	if err != nil ||
+		observation.Reservation != reservation.Meta.Ref() ||
+		observation.Command != command.Meta.Ref() ||
+		observation.WorkspaceView != workspace.Meta.Ref() ||
+		observation.RelativePath != command.RelativePath ||
+		observation.File.ID != fileID ||
+		observation.File.Revision != workspace.Meta.Revision ||
+		observation.StartByte != command.StartByte ||
+		observation.ReturnedBytes != uint64(len([]byte(observation.Content))) ||
+		observation.ReturnedBytes > command.MaxBytes ||
+		observation.StartByte > observation.TotalBytes ||
+		observation.ReturnedBytes > observation.TotalBytes-observation.StartByte ||
+		observation.Complete != (observation.StartByte+observation.ReturnedBytes == observation.TotalBytes) ||
+		observation.ContentDigest != contract.WorkspaceReadContentDigestV1(
+			[]byte(observation.Content),
+			observation.StartByte,
+			observation.TotalBytes,
+			observation.Complete,
+		) ||
+		current.Observation == nil ||
+		*current.Observation != observation.Meta.Ref() ||
+		observation.AdmissionReceipt != origin.AdmissionReceipt ||
+		observation.AdmissionReceipt != current.AdmissionReceipt ||
+		observation.ProviderReceipt != *providerReceipt ||
+		providerReceipt.StableKeyDigest != reservation.StableKeyDigest ||
+		observation.Meta.CreatedUnixNano < origin.Meta.CreatedUnixNano ||
+		observation.Meta.UpdatedUnixNano < origin.Meta.UpdatedUnixNano ||
+		current.Meta.CreatedUnixNano < observation.Meta.CreatedUnixNano ||
+		current.Meta.UpdatedUnixNano < observation.Meta.UpdatedUnixNano ||
+		observation.S1CheckedUnixNano < origin.Meta.CreatedUnixNano ||
+		observation.S2CheckedUnixNano < observation.S1CheckedUnixNano ||
+		observation.ProviderReceipt.CheckedUnixNano < origin.Meta.CreatedUnixNano ||
+		observation.ProviderReceipt.CheckedUnixNano < observation.S1CheckedUnixNano ||
+		observation.ProviderReceipt.CheckedUnixNano > observation.S2CheckedUnixNano {
+		return ports.ErrConflict
+	}
+	if command.ExpectedFileRef != nil && observation.File != *command.ExpectedFileRef {
 		return ports.ErrConflict
 	}
 	return nil

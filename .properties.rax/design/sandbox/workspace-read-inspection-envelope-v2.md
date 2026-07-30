@@ -39,7 +39,13 @@ SQLite Reader 在一个只读事务中：
    rev+1 terminal successor；
 7. 比较 stable/request/payload/Reservation/Command/WorkspaceView/
    Authorization/Admission 全闭包；
-8. 读取完整 current projection并 seal Envelope。
+8. 对 Observed terminal逐字段复核 Observation 的Reservation、Command、
+   WorkspaceView、canonical path、File exact identity、range bytes/content digest、
+   Admission/Provider receipt以及Attempt→Observation ref；
+9. 验证terminal current时间不早于origin；Observed的S1/S2、Provider receipt、
+   Observation和terminal current必须保持因果时间单调；
+10. Observation SQLite行必须同时匹配`observation_id`、`stable_digest`和
+    body `Meta.Ref`，之后才可seal Envelope。
 
 没有 Provider、Rust Data Plane、workspace bytes 或 Runtime writer 调用。
 

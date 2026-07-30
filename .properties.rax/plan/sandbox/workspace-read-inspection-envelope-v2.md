@@ -16,6 +16,10 @@
 - origin rev1 到 observed/failed/indeterminate rev2；
 - same ID 换 origin revision/digest拒绝；
 - Reservation、Command、Admission、current 任一 splice拒绝；
+- Observed Observation的Reservation/Command/WorkspaceView/File/path/bytes/digest/
+  receipt任一自洽重Seal splice拒绝；
+- terminal早于origin、Provider receipt早于S1/origin等因果时间倒退拒绝；
+- SQLite Observation `observation_id`或`stable_digest`单列splice在restart后拒绝；
 - restart/lost reply只Inspect original；
 - 过期 historical terminal可Inspect但不可恢复执行；
 - Envelope digest、strict nested JSON、TTL上界、`now==expiry`、clock rollback、
