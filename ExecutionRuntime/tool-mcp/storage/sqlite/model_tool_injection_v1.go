@@ -6,7 +6,9 @@ package sqlite
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -24,6 +26,21 @@ import (
 )
 
 const schemaVersionV1 = 1
+
+const modelToolInjectionMaterialTableSQLV1 = `CREATE TABLE model_tool_injection_material_v1 (
+ material_id TEXT PRIMARY KEY,
+ revision INTEGER NOT NULL,
+ digest TEXT NOT NULL,
+ surface_id TEXT NOT NULL,
+ surface_revision INTEGER NOT NULL,
+ surface_digest TEXT NOT NULL,
+ compiled_tools_digest TEXT NOT NULL,
+ expires_unix_nano INTEGER NOT NULL,
+ compiled_tools_json BLOB NOT NULL,
+ body_json BLOB NOT NULL,
+ row_digest TEXT NOT NULL,
+ UNIQUE(material_id, revision, digest)
+) STRICT`
 
 const schemaV1 = `
 CREATE TABLE IF NOT EXISTS tool_owner_schema_v1 (
@@ -511,7 +528,283 @@ func (s *StoreV1) verifyV1(ctx context.Context) error {
 	if synchronous != 2 {
 		return conflictV1("Tool SQLite FULL synchronous mode is inactive")
 	}
+	if err := s.verifyModelToolInjectionMaterialSchemaV1(ctx); err != nil {
+		return err
+	}
+	if err := s.verifyModelToolInjectionMaterialRowsV1(ctx); err != nil {
+		return err
+	}
+	if err := s.probeModelToolInjectionMaterialConstraintsV1(ctx); err != nil {
+		return err
+	}
 	return nil
+}
+
+type sqliteColumnShapeV1 struct {
+	CID        int
+	Name       string
+	Type       string
+	NotNull    int
+	PK         int
+	Hidden     int
+	HasDefault bool
+	Default    string
+}
+
+type sqliteIndexShapeV1 struct {
+	Name    string
+	Unique  int
+	Origin  string
+	Partial int
+}
+
+type sqliteIndexColumnShapeV1 struct {
+	SeqNo int
+	CID   int
+	Name  string
+	Desc  int
+	Coll  string
+	Key   int
+}
+
+func (s *StoreV1) verifyModelToolInjectionMaterialSchemaV1(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_list('model_tool_injection_material_v1')`)
+	if err != nil {
+		return conflictV1("Tool SQLite Model Tool Injection table metadata is unreadable")
+	}
+	defer rows.Close()
+	tableCount := 0
+	for rows.Next() {
+		var schema, name, kind string
+		var columns, withoutRowID, strict int
+		if err := rows.Scan(&schema, &name, &kind, &columns, &withoutRowID, &strict); err != nil {
+			return conflictV1("Tool SQLite Model Tool Injection table metadata drifted")
+		}
+		tableCount++
+		if schema != "main" || name != "model_tool_injection_material_v1" || kind != "table" ||
+			columns != 11 || withoutRowID != 0 || strict != 1 {
+			return conflictV1("Tool SQLite Model Tool Injection table shape drifted")
+		}
+	}
+	if err := rows.Err(); err != nil || tableCount != 1 {
+		return conflictV1("Tool SQLite Model Tool Injection table is missing or ambiguous")
+	}
+
+	expectedColumns := []sqliteColumnShapeV1{
+		{CID: 0, Name: "material_id", Type: "TEXT", NotNull: 1, PK: 1},
+		{CID: 1, Name: "revision", Type: "INTEGER", NotNull: 1},
+		{CID: 2, Name: "digest", Type: "TEXT", NotNull: 1},
+		{CID: 3, Name: "surface_id", Type: "TEXT", NotNull: 1},
+		{CID: 4, Name: "surface_revision", Type: "INTEGER", NotNull: 1},
+		{CID: 5, Name: "surface_digest", Type: "TEXT", NotNull: 1},
+		{CID: 6, Name: "compiled_tools_digest", Type: "TEXT", NotNull: 1},
+		{CID: 7, Name: "expires_unix_nano", Type: "INTEGER", NotNull: 1},
+		{CID: 8, Name: "compiled_tools_json", Type: "BLOB", NotNull: 1},
+		{CID: 9, Name: "body_json", Type: "BLOB", NotNull: 1},
+		{CID: 10, Name: "row_digest", Type: "TEXT", NotNull: 1},
+	}
+	columnRows, err := s.db.QueryContext(ctx, `PRAGMA table_xinfo('model_tool_injection_material_v1')`)
+	if err != nil {
+		return conflictV1("Tool SQLite Model Tool Injection columns are unreadable")
+	}
+	defer columnRows.Close()
+	actualColumns := make([]sqliteColumnShapeV1, 0, len(expectedColumns))
+	for columnRows.Next() {
+		var column sqliteColumnShapeV1
+		var defaultValue sql.NullString
+		if err := columnRows.Scan(
+			&column.CID, &column.Name, &column.Type, &column.NotNull, &defaultValue, &column.PK, &column.Hidden,
+		); err != nil {
+			return conflictV1("Tool SQLite Model Tool Injection column metadata drifted")
+		}
+		column.HasDefault = defaultValue.Valid
+		column.Default = defaultValue.String
+		actualColumns = append(actualColumns, column)
+	}
+	if err := columnRows.Err(); err != nil || !reflect.DeepEqual(actualColumns, expectedColumns) {
+		return conflictV1("Tool SQLite Model Tool Injection columns, NOT NULL, or primary key drifted")
+	}
+
+	expectedIndexes := map[string]sqliteIndexShapeV1{
+		"sqlite_autoindex_model_tool_injection_material_v1_1": {
+			Name: "sqlite_autoindex_model_tool_injection_material_v1_1", Unique: 1, Origin: "pk",
+		},
+		"sqlite_autoindex_model_tool_injection_material_v1_2": {
+			Name: "sqlite_autoindex_model_tool_injection_material_v1_2", Unique: 1, Origin: "u",
+		},
+	}
+	indexRows, err := s.db.QueryContext(ctx, `PRAGMA index_list('model_tool_injection_material_v1')`)
+	if err != nil {
+		return conflictV1("Tool SQLite Model Tool Injection indexes are unreadable")
+	}
+	defer indexRows.Close()
+	actualIndexes := make(map[string]sqliteIndexShapeV1, len(expectedIndexes))
+	for indexRows.Next() {
+		var sequence int
+		var index sqliteIndexShapeV1
+		if err := indexRows.Scan(&sequence, &index.Name, &index.Unique, &index.Origin, &index.Partial); err != nil {
+			return conflictV1("Tool SQLite Model Tool Injection index metadata drifted")
+		}
+		actualIndexes[index.Name] = index
+	}
+	if err := indexRows.Err(); err != nil || !reflect.DeepEqual(actualIndexes, expectedIndexes) {
+		return conflictV1("Tool SQLite Model Tool Injection primary or unique indexes drifted")
+	}
+
+	expectedIndexColumns := map[string][]sqliteIndexColumnShapeV1{
+		"sqlite_autoindex_model_tool_injection_material_v1_1": {
+			{SeqNo: 0, CID: 0, Name: "material_id", Coll: "BINARY", Key: 1},
+			{SeqNo: 1, CID: -1, Coll: "BINARY"},
+		},
+		"sqlite_autoindex_model_tool_injection_material_v1_2": {
+			{SeqNo: 0, CID: 0, Name: "material_id", Coll: "BINARY", Key: 1},
+			{SeqNo: 1, CID: 1, Name: "revision", Coll: "BINARY", Key: 1},
+			{SeqNo: 2, CID: 2, Name: "digest", Coll: "BINARY", Key: 1},
+			{SeqNo: 3, CID: -1, Coll: "BINARY"},
+		},
+	}
+	for name, expected := range expectedIndexColumns {
+		query := fmt.Sprintf(`PRAGMA index_xinfo('%s')`, name)
+		indexColumnRows, err := s.db.QueryContext(ctx, query)
+		if err != nil {
+			return conflictV1("Tool SQLite Model Tool Injection index columns are unreadable")
+		}
+		actual := make([]sqliteIndexColumnShapeV1, 0, len(expected))
+		for indexColumnRows.Next() {
+			var column sqliteIndexColumnShapeV1
+			var columnName sql.NullString
+			if err := indexColumnRows.Scan(
+				&column.SeqNo, &column.CID, &columnName, &column.Desc, &column.Coll, &column.Key,
+			); err != nil {
+				_ = indexColumnRows.Close()
+				return conflictV1("Tool SQLite Model Tool Injection index column metadata drifted")
+			}
+			column.Name = columnName.String
+			actual = append(actual, column)
+		}
+		rowErr := indexColumnRows.Err()
+		_ = indexColumnRows.Close()
+		if rowErr != nil || !reflect.DeepEqual(actual, expected) {
+			return conflictV1("Tool SQLite Model Tool Injection index columns drifted")
+		}
+	}
+
+	foreignKeyRows, err := s.db.QueryContext(ctx, `PRAGMA foreign_key_list('model_tool_injection_material_v1')`)
+	if err != nil {
+		return conflictV1("Tool SQLite Model Tool Injection foreign-key metadata is unreadable")
+	}
+	hasForeignKey := foreignKeyRows.Next()
+	rowErr := foreignKeyRows.Err()
+	_ = foreignKeyRows.Close()
+	if rowErr != nil || hasForeignKey {
+		return conflictV1("Tool SQLite Model Tool Injection foreign-key shape drifted")
+	}
+
+	var triggerCount int
+	if err := s.db.QueryRowContext(
+		ctx, `SELECT count(*) FROM sqlite_schema WHERE type='trigger' AND tbl_name='model_tool_injection_material_v1'`,
+	).Scan(&triggerCount); err != nil || triggerCount != 0 {
+		return conflictV1("Tool SQLite Model Tool Injection trigger set drifted")
+	}
+	var storedSQL string
+	if err := s.db.QueryRowContext(
+		ctx, `SELECT sql FROM sqlite_schema WHERE type='table' AND name='model_tool_injection_material_v1'`,
+	).Scan(&storedSQL); err != nil {
+		return conflictV1("Tool SQLite Model Tool Injection schema SQL is unreadable")
+	}
+	if normalizeSQLiteSchemaSQLV1(storedSQL) != normalizeSQLiteSchemaSQLV1(modelToolInjectionMaterialTableSQLV1) {
+		return conflictV1("Tool SQLite Model Tool Injection schema SQL drifted")
+	}
+	return nil
+}
+
+func (s *StoreV1) verifyModelToolInjectionMaterialRowsV1(ctx context.Context) error {
+	rows, err := s.db.QueryContext(ctx, `SELECT material_id FROM model_tool_injection_material_v1 ORDER BY material_id`)
+	if err != nil {
+		return conflictV1("Tool SQLite Model Tool Injection rows are unreadable")
+	}
+	ids := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil || strings.TrimSpace(id) == "" {
+			_ = rows.Close()
+			return conflictV1("Tool SQLite Model Tool Injection row identity drifted")
+		}
+		ids = append(ids, id)
+	}
+	rowErr := rows.Err()
+	_ = rows.Close()
+	if rowErr != nil {
+		return conflictV1("Tool SQLite Model Tool Injection row scan failed")
+	}
+	for _, id := range ids {
+		if _, _, err := inspectMaterialQueryV1(ctx, s.db, id); err != nil {
+			return conflictV1("Tool SQLite Model Tool Injection persisted closure drifted")
+		}
+	}
+	return nil
+}
+
+func (s *StoreV1) probeModelToolInjectionMaterialConstraintsV1(ctx context.Context) error {
+	var entropy [16]byte
+	if _, err := rand.Read(entropy[:]); err != nil {
+		return unavailableV1("Tool SQLite Model Tool Injection schema probe entropy is unavailable")
+	}
+	probeID := "tool-schema-proof-" + hex.EncodeToString(entropy[:])
+	var existing int
+	if err := s.db.QueryRowContext(
+		ctx, `SELECT count(*) FROM model_tool_injection_material_v1 WHERE material_id=?`, probeID,
+	).Scan(&existing); err != nil || existing != 0 {
+		return conflictV1("Tool SQLite Model Tool Injection schema probe identity collided")
+	}
+
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable})
+	if err != nil {
+		return mapDBErrorV1(ctx, err, true)
+	}
+	defer func() { _ = tx.Rollback() }()
+	insert := `INSERT INTO model_tool_injection_material_v1
+(material_id,revision,digest,surface_id,surface_revision,surface_digest,compiled_tools_digest,expires_unix_nano,compiled_tools_json,body_json,row_digest)
+VALUES(?,?,?,?,?,?,?,?,?,?,?)`
+	base := []any{
+		probeID, int64(1), "probe-digest", "probe-surface", int64(1), "probe-surface-digest",
+		"probe-compiled-digest", int64(1), []byte(`{}`), []byte(`{}`), "probe-row-digest",
+	}
+	if _, err := tx.ExecContext(ctx, insert, base...); err != nil {
+		return conflictV1("Tool SQLite Model Tool Injection valid schema probe was rejected")
+	}
+	duplicate := append([]any(nil), base...)
+	duplicate[2] = "different-probe-digest"
+	if _, err := tx.ExecContext(ctx, insert, duplicate...); err == nil {
+		return conflictV1("Tool SQLite Model Tool Injection primary key constraint is inactive")
+	}
+	for index := range base {
+		values := append([]any(nil), base...)
+		values[0] = fmt.Sprintf("%s-null-%d", probeID, index)
+		values[index] = nil
+		if _, err := tx.ExecContext(ctx, insert, values...); err == nil {
+			return conflictV1("Tool SQLite Model Tool Injection NOT NULL constraint is inactive")
+		}
+	}
+	wrongType := append([]any(nil), base...)
+	wrongType[0] = probeID + "-wrong-type"
+	wrongType[1] = "not-an-integer"
+	if _, err := tx.ExecContext(ctx, insert, wrongType...); err == nil {
+		return conflictV1("Tool SQLite Model Tool Injection STRICT typing is inactive")
+	}
+	if err := tx.Rollback(); err != nil {
+		return indeterminateV1("Tool SQLite Model Tool Injection schema probe rollback outcome is unknown")
+	}
+	if err := s.db.QueryRowContext(
+		ctx, `SELECT count(*) FROM model_tool_injection_material_v1 WHERE material_id LIKE ?`, probeID+"%",
+	).Scan(&existing); err != nil || existing != 0 {
+		return conflictV1("Tool SQLite Model Tool Injection schema probe was not rolled back")
+	}
+	return nil
+}
+
+func normalizeSQLiteSchemaSQLV1(value string) string {
+	return strings.Join(strings.Fields(value), " ")
 }
 
 func (s *StoreV1) readReadyV1(ctx context.Context) error {
