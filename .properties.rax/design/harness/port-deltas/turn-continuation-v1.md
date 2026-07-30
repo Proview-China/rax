@@ -1,11 +1,11 @@
-# TurnContinuation V1公共合同Port Delta
+# TurnContinuation V1公共合同与Harness Durable Owner Port Delta
 
 ## 1. 结论与范围
 
-- 状态：`public_contract_candidate`；本PR只冻结Go Runtime内部跨Owner合同，不宣称Harness实现、真实Tool执行、production root或SLA完成。
+- 状态：`owner_local_durable_candidate`；本PR冻结Go Runtime内部跨Owner合同，并在Harness `applicationadapter`落成single-node SQLite WAL owner；不宣称Application coordinator、真实Tool执行、production root、HA或SLA完成。
 - 目标顺序：`Settled ToolResult -> ContextTurnRefresh applied_current -> immutable ContextFrame -> Harness CAS ActiveContextRef -> next Model Turn`；本PR只冻结其中continuation CAS/recovery公共合同。
 - 不属于Console合同：Runtime/Review/Timeline/Sandbox正文均未冻结，本PR不新增TypeScript ViewModel、Event或命令，不授权前端据此接线。
-- 证明边界：它只co-seal两个independently sealed exact refs（settled ToolResult ref与Context prepare Attempt ref），不证明Context prepare内容来自SettledToolResult payload。在这两个ref已由调用方提供后，本合同只证明pending、applied-attempt防splice、ActiveContext CAS、Inspect recovery和Model前置门；不声称Application coordinator、Harness owner实现或完整真实Loop已形成。
+- 证明边界：它只co-seal两个independently sealed exact refs（settled ToolResult ref与Context prepare Attempt ref），不证明Context prepare内容来自SettledToolResult payload。在这两个ref已由调用方提供后，本合同与Harness durable owner只证明pending、applied-attempt防splice、ActiveContext CAS、Inspect/restart recovery和Model前置门；不声称Application coordinator、完整真实Loop或下一次Model实际调用已形成。
 
 ## 2. Owner与公共对象
 
@@ -16,7 +16,7 @@
 | `TurnContinuationStartRequestV1` | Application协调 | 并列绑定Source Session/Turn、settled ToolResult、旧ActiveContext和预先冻结的Context prepare Attempt四元组；不证明Tool内容到prepare内容的语义派生 |
 | `TurnContinuationCurrentV1` | Harness | `continuation_pending`或`context_current`的Owner-local current事实 |
 | `HarnessActiveContextRefV1` | Harness | Session内活动不可变ContextFrame的CAS值 |
-| `TurnContinuationPortV1` | Harness实现、Application调用 | `Begin`、`Commit`、`Inspect`三个公共方法 |
+| `TurnContinuationPortV1` | Harness实现、Application调用 | `Begin`、`Commit`、`Inspect`三个公共方法；本PR提供`SQLiteTurnContinuationStoreV1` owner-local实现 |
 
 Application只排序和绑定精确坐标，不取得Tool、Context或Harness领域事实所有权。精确ref也不授予currentness或执行权限。
 
@@ -28,11 +28,11 @@ Application只排序和绑定精确坐标，不取得Tool、Context或Harness领
 3. Context prepare request使用该AttemptID完成seal
 4. Begin前把prepare的 Kind + ID + Revision + Digest
    冻结为ExpectedContextRefreshAttempt
-5. Harness Begin原子发布continuation_pending；此时ActiveContext仍是旧值
+5. Harness SQLite owner用create-once事务原子发布continuation_pending；此时ActiveContext仍是旧值
 6. Context Owner在自己的事务内Apply，返回applied_current
 7. Harness Commit要求AppliedContextRefresh.AttemptRef
    与ExpectedContextRefreshAttempt四元组完全相等
-8. Harness在一个Owner-local事务内CAS旧ActiveContextRef为目标Frame，
+8. Harness在一个SQLite WAL Owner-local事务内CAS旧ActiveContextRef为目标Frame，
    同时发布context_current
 9. 只有ModelTurnAllowedV1通过后，才允许下一Model Turn
 ```
@@ -48,6 +48,8 @@ Start的canonical digest只防止Begin后的坐标替换；它不是`SettledTool
 - ContextFrame只作为不可变精确ref切换；Harness不得改写Frame内容。
 - Begin或Commit出现未知/丢回包后，只能使用原`TurnContinuationAttemptRefV1`调用Inspect；不得生成新Attempt或盲目重发。
 - Attempt ID不含TTL，因此currentness窗口变化仍落在同一Attempt ID；不同请求digest会冲突并迫使Inspect原Attempt。
+- Begin是Attempt create-once：同Attempt+同Start digest返回同一current，同Attempt+不同Start digest冲突；已commit后同Start Begin也只返回既有final。
+- Commit只接受数据库中的exact pending revision/digest、exact ExpectedActiveContext三元组与exact applied refresh AttemptRef；同Commit digest幂等返回既有final，不同Commit digest冲突。
 
 ## 5. 事务语义
 
@@ -58,11 +60,19 @@ Start的canonical digest只防止Begin后的坐标替换；它不是`SettledTool
 - Harness的Begin与`ActiveContextRef + continuation state` Commit分别是Harness-local原子事务；
 - Application崩溃恢复依赖各Owner的exact Inspect和同一Attempt，不使用跨库rollback，也不把任一Owner事实伪装为另一Owner事实。
 
+Harness durable owner的具体闭包：
+
+- `modernc.org/sqlite`，`journal_mode=WAL`、`synchronous=FULL`、`foreign_keys=ON`、`BEGIN IMMEDIATE`；只声明single-node durability。
+- canonical `TurnContinuationCurrentV1`与独立row digest一并保存；Attempt、state、ActiveContext、Commit digest索引列必须与canonical body完全一致，拒绝body/index splice。
+- schema digest必须精确且schema version集合只能含V1；额外版本行fail-closed。
+- Begin/Commit在取得writer lock和事务后重新采样时钟，并在最终返回或mutation前再次验证exclusive TTL，拒绝锁等待越过not-after的旧授权。
+- Commit成功但回包丢失时返回`indeterminate/effect_unknown_outcome`；恢复只能Inspect原Attempt。重启后从同一SQLite文件恢复exact current。
+
 ## 6. 当前已知阻塞
 
-### 6.1 Context零Source不兼容
+### 6.1 Context Source充分性不属于本Owner
 
-当前`ContextTurnRefreshPrepareRequestV1`与coordinator都要求`Memory != nil || Knowledge != nil`。因此`Tool=1 / Memory=0 / Knowledge=0`不能通过现有candidate。本PR不修改该充分性语义；需要Context Owner单独冻结零Source时的Frame/Manifest/Generation语义后再开delta。
+`origin/main@f6014b93`已由PR #32闭合`Tool=1 / Memory=0 / Knowledge=0`的Application contract/coordinator与Context adapter delta，并保留exact SettledAction source reader。本PR不修改Context，也不把该上游闭包冒充为Harness durable owner的实现证据；它只在该已合并基线上消费公共合同。
 
 ### 6.2 永久失败/终止状态未冻结
 
@@ -86,6 +96,8 @@ V1只有`continuation_pending`和`context_current`，没有永久失败或abort 
 - 单元：pending/final seal、严格Frame CAS、Model前置门；
 - fault：prepared-only、Frame splice、同ID/Revision不同Context Attempt digest全部拒绝；
 - currentness：checked/expires边界fail-closed；
-- black-box：Commit丢回包后只Inspect原Attempt，Begin/Commit调用数不增加；
-- race/vet/diff-check通过；#24已修复旧AgentActivation candidate flags。rebase到`origin/main@13f63712`后，Application full ordinary/race/vet、Context full ordinary/vet、Harness相关ordinary/race/vet均通过。
-- 上述验收只支持continuation CAS/recovery合同，不构成完整真实Loop或ToolResult到Context prepare内容绑定证据。
+- durable/fault：Begin create-once、同ID不同digest、Commit同请求幂等/不同请求冲突、lost Begin/Commit reply后只Inspect原Attempt、restart recovery、schema额外版本拒绝；
+- CAS/anti-splice：stale ActiveContext索引、canonical body splice、exact pending revision/digest和exact applied refresh AttemptRef全部fail-closed；
+- currentness/concurrency：锁等待越过Begin/Commit not-after、exclusive TTL、并发同Begin/同Commit、并发不同Commit单winner；返回值deep-copy；
+- 2026-07-30 live验证：`go test ./applicationadapter ./tests/applicationadapter -count=1`、`go test -race ./applicationadapter ./tests/applicationadapter -count=1`、`go vet ./applicationadapter ./tests/applicationadapter`、`git diff --check`全部通过。
+- 当前分支已rebase到`origin/main@f6014b93`（含PR #32 Tool-only Context闭包）；新增Harness相关ordinary/race/vet/diff-check在该基线通过。Application full ordinary/race/vet与Context full ordinary/vet是前一`13f63712`基线的既有证据，不把它冒充为本轮重跑；新增验证只支持continuation合同与Harness Owner-local durability/CAS/recovery，不构成完整真实Loop、ToolResult payload到Context prepare内容绑定或下一Model实际调用证据。
