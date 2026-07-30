@@ -15,6 +15,12 @@ type HostV3 interface {
 	StopV3(context.Context, contract.StopRequestV3) (contract.StopResultV3, error)
 }
 
+// HostV3CurrentReaderV1 is the read-only Host lifecycle surface consumed by
+// actual-point adapters. It deliberately cannot Start or Stop a Host.
+type HostV3CurrentReaderV1 interface {
+	InspectV3(context.Context, contract.InspectRequestV3) (contract.InspectResultV3, error)
+}
+
 // HostDeploymentCurrentReaderV1 is read-only. Opening, migrating and closing
 // resource handles remains the Deployment/Bootstrap Owner's responsibility.
 type HostDeploymentCurrentReaderV1 interface {

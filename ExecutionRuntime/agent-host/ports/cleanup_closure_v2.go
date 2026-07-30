@@ -12,6 +12,12 @@ type HostCleanupClosureFactPortV2 interface {
 	InspectHostCleanupClosureForStartV2(context.Context, string, string) (contract.HostCleanupClosureFactV2, error)
 }
 
+// HostCleanupClosureCurrentReaderV2 is the subject-bound, read-only closure
+// seam. It exposes no Ensure or cleanup dispatch operation.
+type HostCleanupClosureCurrentReaderV2 interface {
+	InspectHostCleanupClosureForStartV2(context.Context, string, string) (contract.HostCleanupClosureFactV2, error)
+}
+
 // HostCleanupPlanTemplateCurrentReaderV2 is a read-only input owned by the
 // cleanup orchestration compiler. The Closure store never manufactures it.
 type HostCleanupPlanTemplateCurrentReaderV2 interface {
