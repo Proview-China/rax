@@ -49,6 +49,9 @@ func (m AgentPackageLockManifestV1) Validate() error {
 	if m.HarnessCompilerVersion != assemblycontract.CompilerVersionV1 {
 		return invalid(core.ReasonInvalidState, "agent package lock compiler version is unsupported")
 	}
+	if err := m.PublicationRef.Validate(); err != nil {
+		return err
+	}
 	if err := m.GenerationRef.Validate(); err != nil {
 		return err
 	}
@@ -61,7 +64,7 @@ func (m AgentPackageLockManifestV1) Validate() error {
 	if err != nil {
 		return err
 	}
-	if m.ManifestRef.ID != publicationID+"/manifest" || m.GraphRef.ID != publicationID+"/graph" || m.HandoffRef.ID != publicationID+"/handoff" || m.ManifestRef.Revision != 1 || m.GraphRef.Revision != 1 || m.HandoffRef.Revision != 1 {
+	if m.PublicationRef.PublicationID != publicationID || m.ManifestRef.ID != publicationID+"/manifest" || m.GraphRef.ID != publicationID+"/graph" || m.HandoffRef.ID != publicationID+"/handoff" || m.ManifestRef.Revision != 1 || m.GraphRef.Revision != 1 || m.HandoffRef.Revision != 1 {
 		return core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, "agent package artifact refs do not use the exact Harness publication coordinates")
 	}
 	want, err := LockDigestV1(m)

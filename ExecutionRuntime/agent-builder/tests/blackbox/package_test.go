@@ -165,7 +165,7 @@ func TestPackageLocksHarnessPublicationArtifactCoordinates(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	publication, err := assemblycontract.NewAssemblyPublicationBundleV2("agent-package-blackbox", compiled)
+	publication, err := assemblycontract.NewAssemblyPublicationBundleV2(result.AssemblyInput.ScopeRef, compiled)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,8 +175,9 @@ func TestPackageLocksHarnessPublicationArtifactCoordinates(t *testing.T) {
 		Graph:      pkg.Lock.GraphRef,
 		Handoff:    pkg.Lock.HandoffRef,
 	}
-	if locked != publication.Publication.Artifacts {
-		t.Fatalf("AgentPackage and Harness Publication exact refs drifted: package=%+v publication=%+v", locked, publication.Publication.Artifacts)
+	publicationRef := assemblycontract.AssemblyPublicationRefV2{PublicationID: publication.Publication.PublicationID, Revision: publication.Publication.Revision, Digest: publication.Publication.Digest}
+	if pkg.Lock.PublicationRef != publicationRef || locked != publication.Publication.Artifacts {
+		t.Fatalf("AgentPackage and Harness Publication exact refs drifted: package=%+v publication=%+v", pkg.Lock, publication.Publication)
 	}
 }
 

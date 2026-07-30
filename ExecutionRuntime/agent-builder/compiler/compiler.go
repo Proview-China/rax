@@ -44,21 +44,20 @@ func (c CompilerV1) Compile(result assemblercontract.ResolveResultV1) (packageco
 	if compiled.Generation == nil || compiled.Manifest == nil || compiled.Graph == nil || compiled.Handoff == nil {
 		return packagecontract.AgentPackageV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonPlanInvalid, "Harness compiler did not return a complete sealed artifact set")
 	}
-	generationRef := assemblycontract.ObjectRefV1{ID: compiled.Generation.GenerationID, Revision: compiled.Generation.Revision, Digest: compiled.Generation.Digest}
-	if compiled.Handoff.GenerationRef != generationRef || compiled.Handoff.ManifestDigest != compiled.Manifest.Digest || compiled.Handoff.GraphDigest != compiled.Graph.Digest {
-		return packagecontract.AgentPackageV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, "Harness compile artifacts are not an exact closure")
-	}
-	publicationID, err := assemblycontract.DeriveAssemblyPublicationIDV2(result.AssemblyInput.Digest, generationRef.ID)
+	publicationBundle, err := assemblycontract.NewAssemblyPublicationBundleV2(result.AssemblyInput.ScopeRef, compiled)
 	if err != nil {
 		return packagecontract.AgentPackageV1{}, err
 	}
+	publication := publicationBundle.Publication
 	lock, err := packagecontract.SealLockManifestV1(packagecontract.AgentPackageLockManifestV1{
 		DefinitionRef: result.Plan.DefinitionRef, ResolvedPlanRef: planRef, ResolutionFactsRef: result.Plan.ResolutionFactsRef, CatalogRef: result.Plan.CatalogRef,
 		ComponentReleaseRefs: refs, BindingPlanDigest: result.BindingPlan.PlanDigest, AssemblyInputDigest: result.AssemblyInput.Digest, FrozenUnixNano: result.AssemblyInput.CreatedUnixNano,
-		HarnessCompilerVersion: assemblycontract.CompilerVersionV1, GenerationRef: generationRef,
-		ManifestRef: assemblycontract.ObjectRefV1{ID: publicationID + "/manifest", Revision: 1, Digest: compiled.Manifest.Digest},
-		GraphRef:    assemblycontract.ObjectRefV1{ID: publicationID + "/graph", Revision: 1, Digest: compiled.Graph.Digest},
-		HandoffRef:  assemblycontract.ObjectRefV1{ID: publicationID + "/handoff", Revision: 1, Digest: compiled.Handoff.Digest},
+		HarnessCompilerVersion: assemblycontract.CompilerVersionV1,
+		PublicationRef:         assemblycontract.AssemblyPublicationRefV2{PublicationID: publication.PublicationID, Revision: publication.Revision, Digest: publication.Digest},
+		GenerationRef:          publication.Artifacts.Generation,
+		ManifestRef:            publication.Artifacts.Manifest,
+		GraphRef:               publication.Artifacts.Graph,
+		HandoffRef:             publication.Artifacts.Handoff,
 	})
 	if err != nil {
 		return packagecontract.AgentPackageV1{}, err

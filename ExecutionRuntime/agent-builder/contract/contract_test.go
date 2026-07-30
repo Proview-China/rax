@@ -33,9 +33,10 @@ func validLock(t *testing.T) AgentPackageLockManifestV1 {
 		ComponentReleaseRefs: []assemblercontract.ComponentReleaseRefV1{{ReleaseID: "release/test", Revision: 1, Digest: digest("release"), ComponentID: runtimeports.ComponentIDV2("component/test")}},
 		BindingPlanDigest:    digest("binding"), AssemblyInputDigest: inputDigest, FrozenUnixNano: 100,
 		HarnessCompilerVersion: assemblycontract.CompilerVersionV1, GenerationRef: generation,
-		ManifestRef: assemblycontract.ObjectRefV1{ID: publicationID + "/manifest", Revision: 1, Digest: digest("manifest")},
-		GraphRef:    assemblycontract.ObjectRefV1{ID: publicationID + "/graph", Revision: 1, Digest: digest("graph")},
-		HandoffRef:  assemblycontract.ObjectRefV1{ID: publicationID + "/handoff", Revision: 1, Digest: digest("handoff")},
+		PublicationRef: assemblycontract.AssemblyPublicationRefV2{PublicationID: publicationID, Revision: 1, Digest: digest("publication")},
+		ManifestRef:    assemblycontract.ObjectRefV1{ID: publicationID + "/manifest", Revision: 1, Digest: digest("manifest")},
+		GraphRef:       assemblycontract.ObjectRefV1{ID: publicationID + "/graph", Revision: 1, Digest: digest("graph")},
+		HandoffRef:     assemblycontract.ObjectRefV1{ID: publicationID + "/handoff", Revision: 1, Digest: digest("handoff")},
 	})
 	if err != nil {
 		t.Fatal(err)
