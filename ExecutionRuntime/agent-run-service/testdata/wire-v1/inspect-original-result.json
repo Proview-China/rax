@@ -1,0 +1,27 @@
+{
+  "contract_version": "praxis.agent-run-service/v1",
+  "request_digest": "sha256:7f5d13269f73487456ea977c64d17109cd8bd24e31d33e73683f675f26ccca5c",
+  "trace_id": "trace-cancel-1",
+  "disposition": "OBSERVED",
+  "command_receipt": {
+    "contract_version": "praxis.agent-run-service/v1",
+    "command_ref": {
+      "kind": "praxis.agent-run-service/command",
+      "id": "command-cancel-1",
+      "revision": "1",
+      "digest": "sha256:3554f74e58c3e6d4acc9185a12c0b8b6662b86c96caeedcbf977354320559c3c"
+    },
+    "idempotency_key": "idem-cancel-1",
+    "canonical_payload_digest": "sha256:fd06a53b1de4eb6aa831b5ebd72889992beb9fd1d94b18a6b2ac74abc7cac97c",
+    "original_request_digest": "sha256:3554f74e58c3e6d4acc9185a12c0b8b6662b86c96caeedcbf977354320559c3c",
+    "status": "COMPLETED",
+    "trace_id": "trace-cancel-1",
+    "recorded_unix_nano": "1900000000000000010",
+    "receipt_digest": "sha256:de19e1526eecef62517c98ef61db538b0895274219a2101a395651c891790d41"
+  },
+  "window": {
+    "checked_unix_nano": "1900000000000000020",
+    "expires_unix_nano": "1900000000000000900"
+  },
+  "result_digest": "sha256:d07f0634634c126ac18784af439047f867595f0fbd91b832e697cd626a10a797"
+}

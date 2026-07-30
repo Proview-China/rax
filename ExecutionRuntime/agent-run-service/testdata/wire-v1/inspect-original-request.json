@@ -1,0 +1,16 @@
+{
+  "contract_version": "praxis.agent-run-service/v1",
+  "request_id": "inspect-original-1",
+  "trace_id": "trace-cancel-1",
+  "original_command_ref": {
+    "kind": "praxis.agent-run-service/command",
+    "id": "command-cancel-1",
+    "revision": "1",
+    "digest": "sha256:3554f74e58c3e6d4acc9185a12c0b8b6662b86c96caeedcbf977354320559c3c"
+  },
+  "original_idempotency_key": "idem-cancel-1",
+  "original_request_digest": "sha256:3554f74e58c3e6d4acc9185a12c0b8b6662b86c96caeedcbf977354320559c3c",
+  "requested_unix_nano": "1900000000000000020",
+  "not_after_unix_nano": "1900000000000001000",
+  "request_digest": "sha256:7f5d13269f73487456ea977c64d17109cd8bd24e31d33e73683f675f26ccca5c"
+}

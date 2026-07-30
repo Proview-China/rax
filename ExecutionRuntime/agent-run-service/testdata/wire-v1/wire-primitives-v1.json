@@ -1,0 +1,28 @@
+{
+  "descriptor": {
+    "contract_version": "praxis.cross-language-wire/v1",
+    "uint64_encoding": "canonical_decimal_string",
+    "signed_int64_encoding": "canonical_signed_decimal_string",
+    "unix_nano_encoding": "canonical_signed_decimal_string",
+    "rfc3339_nano_encoding": "rfc3339_nano_string",
+    "exact_ref_required_parts": [
+      "kind",
+      "id",
+      "revision",
+      "digest"
+    ],
+    "digest_algorithm": "sha256",
+    "descriptor_digest": "sha256:00f4b2d7cc0e1a99f3bb3268bbb5d36679254d4b41892e099d633cc368ce320c"
+  },
+  "uint64_min": "0",
+  "uint64_max": "18446744073709551615",
+  "int64_min": "-9223372036854775808",
+  "int64_max": "9223372036854775807",
+  "unix_nano": "1900000000000000000",
+  "exact_ref": {
+    "kind": "praxis.runtime/agent-run-current",
+    "id": "run-1",
+    "revision": "9",
+    "digest": "sha256:051639f3bc5720342b8b110d93bb2724e9e0ae22c947c84a967574d6519dc121"
+  }
+}

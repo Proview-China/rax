@@ -9,10 +9,24 @@ import (
 )
 
 type strictSampleV1 struct {
-	Name   string `json:"name"`
+	Name   string  `json:"name"`
+	Note   *string `json:"note,omitempty"`
 	Nested struct {
 		Value string `json:"value"`
 	} `json:"nested"`
+}
+
+func TestDecoderV1DistinguishesOptionalAbsenceFromExplicitNull(t *testing.T) {
+	decoder := jsonv1.NewDecoderV1(1024)
+	var omitted strictSampleV1
+	if err := decoder.DecodeStrictV1([]byte(`{"name":"one","nested":{"value":"two"}}`), &omitted); err != nil {
+		t.Fatal(err)
+	}
+	var explicitNull strictSampleV1
+	err := decoder.DecodeStrictV1([]byte(`{"name":"one","note":null,"nested":{"value":"two"}}`), &explicitNull)
+	if err == nil || !strings.Contains(err.Error(), "json_optional_null_forbidden") {
+		t.Fatalf("explicit null err=%v", err)
+	}
 }
 
 func TestDecoderV1AcceptsOneStrictDocument(t *testing.T) {
