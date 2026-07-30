@@ -21,6 +21,10 @@ type ContextModelInputLineageCurrentReaderV1 struct {
 	maxTTL  time.Duration
 }
 
+type contextFrameOwnerBoundReaderV1 interface {
+	ContextOwnerRefV1() contract.OwnerRef
+}
+
 func NewContextModelInputLineageCurrentReaderV1(
 	owner contract.OwnerRef,
 	exact contract.ContextModelInputMaterialExactReaderV1,
@@ -31,6 +35,10 @@ func NewContextModelInputLineageCurrentReaderV1(
 ) (*ContextModelInputLineageCurrentReaderV1, error) {
 	if owner.Validate() != nil || nilLikeModelInputLineageV1(exact) || nilLikeModelInputLineageV1(current) || nilLikeModelInputLineageV1(frames) || clock == nil || maxTTL <= 0 || maxTTL > MaxContextModelInputLineageCurrentTTLV1 {
 		return nil, fmt.Errorf("%w: context model input lineage current reader dependencies", contract.ErrInvalid)
+	}
+	ownerBound, ok := frames.(contextFrameOwnerBoundReaderV1)
+	if !ok || ownerBound.ContextOwnerRefV1() != owner {
+		return nil, fmt.Errorf("%w: context model input lineage Frame reader Owner binding", contract.ErrConflict)
 	}
 	return &ContextModelInputLineageCurrentReaderV1{
 		owner: owner, exact: exact, current: current, frames: frames, clock: clock, maxTTL: maxTTL,

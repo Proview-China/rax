@@ -75,7 +75,7 @@ func TestContextModelInputLineageFailClosedErrorsAndTypedNilV1(t *testing.T) {
 		t.Fatal(err)
 	}
 	var typedNil *testfixture.ModelInputLineageMaterialReaderV1
-	if reader, err := kernel.NewContextModelInputLineageCurrentReaderV1(fixture.Owner, typedNil, typedNil, testfixture.NewModelInputLineageFrameReaderV1(fixture.Frame), func() time.Time { return fixture.Now }, time.Second); err == nil || reader != nil {
+	if reader, err := kernel.NewContextModelInputLineageCurrentReaderV1(fixture.Owner, typedNil, typedNil, testfixture.NewModelInputLineageFrameReaderV1(fixture.Owner, fixture.Frame), func() time.Time { return fixture.Now }, time.Second); err == nil || reader != nil {
 		t.Fatalf("typed nil dependencies accepted: reader=%v err=%v", reader, err)
 	}
 	var typedNilFrame *testfixture.ModelInputLineageFrameReaderV1
@@ -169,7 +169,7 @@ func TestContextModelInputLineageExpiryUsesEveryMinimumV1(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		frames := testfixture.NewModelInputLineageFrameReaderV1(frame)
+		frames := testfixture.NewModelInputLineageFrameReaderV1(fixture.Owner, frame)
 		reader, err := kernel.NewContextModelInputLineageCurrentReaderV1(fixture.Owner, materials, materials, frames, func() time.Time { return fixture.Now }, 30*time.Second)
 		if err != nil {
 			t.Fatal(err)
@@ -250,7 +250,7 @@ func TestContextModelInputLineage64ConcurrentStableBeforeFlipAfterWindowsV1(t *t
 		t.Fatal(err)
 	}
 	afterMaterials := testfixture.NewModelInputLineageMaterialReaderV1(afterMaterial)
-	afterFrames := testfixture.NewModelInputLineageFrameReaderV1(nextFrame)
+	afterFrames := testfixture.NewModelInputLineageFrameReaderV1(fixture.Owner, nextFrame)
 	afterReader, err := kernel.NewContextModelInputLineageCurrentReaderV1(
 		fixture.Owner, afterMaterials, afterMaterials, afterFrames, func() time.Time { return fixture.Now }, 30*time.Second,
 	)
@@ -333,7 +333,7 @@ func lineageReaderFixtureV1(t *testing.T, times []time.Time) (testfixture.ModelI
 	}
 	clock := &clockSequenceV1{values: times}
 	materials := testfixture.NewModelInputLineageMaterialReaderV1(fixture.Material)
-	frames := testfixture.NewModelInputLineageFrameReaderV1(fixture.Frame)
+	frames := testfixture.NewModelInputLineageFrameReaderV1(fixture.Owner, fixture.Frame)
 	reader, err := kernel.NewContextModelInputLineageCurrentReaderV1(fixture.Owner, materials, materials, frames, clock.Now, 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
