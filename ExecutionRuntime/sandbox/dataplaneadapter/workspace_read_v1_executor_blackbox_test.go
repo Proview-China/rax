@@ -30,7 +30,93 @@ import (
 	sqlitestore "github.com/Proview-China/rax/ExecutionRuntime/sandbox/storage/sqlite"
 )
 
+type workspaceReadExecutorCaseV1 struct {
+	setup               func(*testing.T, string)
+	mutateWorkspace     func(*contract.WorkspaceView)
+	startByte           uint64
+	hiddenScopes        []string
+	expectedState       contract.WorkspaceReadStateV1
+	expectedContent     string
+	expectedAdapter     uint64
+	expectedPhysical    uint64
+	expectedBoundary    kernel.WorkspaceReadActualPointBoundaryV1
+	expectBeforeActual  bool
+	runtimeLeaseS2Drift bool
+}
+
 func TestWorkspaceReadPublicExecutorCallsConcreteAdapterAndRustOnce(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{startByte: 6, expectedState: contract.WorkspaceReadObservedV1, expectedContent: "Praxis", expectedAdapter: 1, expectedPhysical: 1})
+}
+
+func TestWorkspaceReadPublicExecutorClassifiesPhysicalBoundariesThroughRustIPC(t *testing.T) {
+	cases := []struct {
+		name string
+		spec workspaceReadExecutorCaseV1
+	}{
+		{name: "symlink", spec: workspaceReadExecutorCaseV1{
+			setup: func(t *testing.T, root string) {
+				outside := filepath.Join(root, "outside.txt")
+				if err := os.WriteFile(outside, []byte("outside"), 0o640); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.Symlink(outside, filepath.Join(root, "src", "main.txt")); err != nil {
+					t.Fatal(err)
+				}
+			},
+			expectedState: contract.WorkspaceReadFailedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1,
+		}},
+		{name: "special-directory", spec: workspaceReadExecutorCaseV1{
+			setup: func(t *testing.T, root string) {
+				if err := os.Mkdir(filepath.Join(root, "src", "main.txt"), 0o750); err != nil {
+					t.Fatal(err)
+				}
+			},
+			expectedState: contract.WorkspaceReadFailedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1,
+		}},
+		{name: "oversized", spec: workspaceReadExecutorCaseV1{
+			setup: func(t *testing.T, root string) {
+				if err := os.WriteFile(filepath.Join(root, "src", "main.txt"), bytes.Repeat([]byte{'x'}, 1_048_577), 0o640); err != nil {
+					t.Fatal(err)
+				}
+			},
+			expectedState: contract.WorkspaceReadFailedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1,
+		}},
+		{name: "hidden-scope", spec: workspaceReadExecutorCaseV1{
+			hiddenScopes: []string{"src"}, expectedAdapter: 0, expectedPhysical: 0, expectBeforeActual: true,
+		}},
+		{name: "workspace-lease-fence-drift", spec: workspaceReadExecutorCaseV1{
+			mutateWorkspace: func(value *contract.WorkspaceView) { value.Lease.FenceEpoch++ },
+			expectedAdapter: 0, expectedPhysical: 0, expectBeforeActual: true,
+		}},
+		{name: "workspace-lease-s2-drift", spec: workspaceReadExecutorCaseV1{
+			expectedState: contract.WorkspaceReadUnknownV1, expectedAdapter: 1, expectedPhysical: 1, runtimeLeaseS2Drift: true,
+		}},
+		{name: "non-utf8", spec: workspaceReadExecutorCaseV1{
+			setup: func(t *testing.T, root string) {
+				if err := os.WriteFile(filepath.Join(root, "src", "main.txt"), []byte{0xff, 0xfe}, 0o640); err != nil {
+					t.Fatal(err)
+				}
+			},
+			expectedState: contract.WorkspaceReadUnknownV1, expectedAdapter: 1, expectedPhysical: 1, expectedBoundary: kernel.WorkspaceReadEffectStartedUnknownV1,
+		}},
+		{name: "eof-empty-success", spec: workspaceReadExecutorCaseV1{
+			setup: func(t *testing.T, root string) {
+				if err := os.WriteFile(filepath.Join(root, "src", "main.txt"), []byte("tiny"), 0o640); err != nil {
+					t.Fatal(err)
+				}
+			},
+			startByte: 4, expectedState: contract.WorkspaceReadObservedV1, expectedContent: "", expectedAdapter: 1, expectedPhysical: 1,
+		}},
+	}
+	for _, testCase := range cases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			runWorkspaceReadPublicExecutorV1(t, testCase.spec)
+		})
+	}
+}
+
+func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCaseV1) {
 	binary := os.Getenv("PRAXIS_SANDBOX_DATAPLANE_BIN")
 	if binary == "" {
 		t.Skip("set PRAXIS_SANDBOX_DATAPLANE_BIN to run the public executor black box")
@@ -45,7 +131,9 @@ func TestWorkspaceReadPublicExecutorCallsConcreteAdapterAndRustOnce(t *testing.T
 	if err := os.MkdirAll(filepath.Join(root, "src"), 0o750); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "src", "main.txt"), []byte("hello Praxis"), 0o640); err != nil {
+	if spec.setup != nil {
+		spec.setup(t, root)
+	} else if err := os.WriteFile(filepath.Join(root, "src", "main.txt"), []byte("hello Praxis"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 
@@ -59,7 +147,7 @@ func TestWorkspaceReadPublicExecutorCallsConcreteAdapterAndRustOnce(t *testing.T
 		Workspace: dataplaneadapter.ExactRefV1{
 			ID: "workspace-view", Revision: 1, Digest: workspaceDigest, ExpiresUnixNano: workspaceExpires.UnixNano(),
 		},
-		FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: 6, MaxBytes: 6, S1Checked: true,
+		FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6, S1Checked: true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -73,8 +161,11 @@ func TestWorkspaceReadPublicExecutorCallsConcreteAdapterAndRustOnce(t *testing.T
 		Meta:            contract.Meta{ContractVersion: contract.ContractFamily, ID: "workspace-view", Revision: 1, Digest: workspaceDigest, CreatedUnixNano: now.UnixNano(), UpdatedUnixNano: now.UnixNano(), ExpiresUnixNano: workspaceExpires.UnixNano()},
 		BaseArtifactRef: contract.Ref{ID: "base-artifact", Revision: 1, Digest: digestWorkspaceReadExecutorTest("base-artifact")}, BaseRevision: "main",
 		OverlayRef: contract.Ref{ID: "overlay", Revision: 1, Digest: digestWorkspaceReadExecutorTest("overlay")}, PolicyRef: contract.Ref{ID: "policy", Revision: 1, Digest: digestWorkspaceReadExecutorTest("policy")},
-		Lease:      contract.RuntimeLeaseBinding{TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), InstanceID: string(current.Sandbox.RuntimeLease.Instance.ID), InstanceEpoch: uint64(current.Sandbox.RuntimeLease.Instance.Epoch), LeaseID: string(current.Sandbox.RuntimeLease.Lease.ID), LeaseEpoch: uint64(current.Sandbox.RuntimeLease.Lease.Epoch), FenceEpoch: uint64(current.Sandbox.RuntimeLease.FenceEpoch), ScopeDigest: string(current.Sandbox.RuntimeLease.ScopeDigest), ObservedRevision: uint64(current.Sandbox.RuntimeLease.ObservedRevision), ExpiresUnixNano: workspaceExpires.UnixNano()},
-		ReadScopes: []string{"src"}, WriteScopes: []string{"src"}, FileScopeDigest: fileScopeDigest,
+		Lease:      contract.RuntimeLeaseBinding{TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), InstanceID: string(current.Sandbox.RuntimeLease.Instance.ID), InstanceEpoch: uint64(current.Sandbox.RuntimeLease.Instance.Epoch), LeaseID: string(current.Sandbox.RuntimeLease.Lease.ID), LeaseEpoch: uint64(current.Sandbox.RuntimeLease.Lease.Epoch), FenceEpoch: uint64(current.Sandbox.RuntimeLease.FenceEpoch), ScopeDigest: string(current.Sandbox.RuntimeLease.ScopeDigest), ObservedRevision: uint64(current.Sandbox.RuntimeLease.ObservedRevision), ExpiresUnixNano: current.Sandbox.RuntimeLease.Ref.ExpiresUnixNano},
+		ReadScopes: []string{"src"}, WriteScopes: []string{"src"}, HiddenScopes: spec.hiddenScopes, FileScopeDigest: fileScopeDigest,
+	}
+	if spec.mutateWorkspace != nil {
+		spec.mutateWorkspace(&workspace)
 	}
 	legacy := current.Dispatch.Record.Permit.LegacyPermit
 	legacyDigest, err := legacy.DigestV3()
@@ -104,7 +195,7 @@ func TestWorkspaceReadPublicExecutorCallsConcreteAdapterAndRustOnce(t *testing.T
 	commandDraft := contract.WorkspaceReadCommandV1{
 		TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), SourceToolCommand: contract.Ref{ID: "tool-command", Revision: 1, Digest: digestWorkspaceReadExecutorTest("tool-command")},
 		SourceToolPayloadSchema: legacy.PayloadSchema.Key(), SourceToolPayloadDigest: string(legacy.PayloadDigest), SourceToolPayloadRevision: uint64(legacy.PayloadRevision),
-		WorkspaceView: workspace.Meta.Ref(), FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: 6, MaxBytes: 6, RequestedNotAfterUnixNano: expires.UnixNano(),
+		WorkspaceView: workspace.Meta.Ref(), FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6, RequestedNotAfterUnixNano: expires.UnixNano(),
 		OperationDigest: string(current.Sandbox.OperationDigest), EffectID: string(current.Sandbox.EffectID), IntentRevision: uint64(current.Sandbox.IntentRevision), IntentDigest: string(current.Sandbox.IntentDigest), AttemptID: current.Sandbox.AttemptID,
 		PreparedDigest: string(prepared.Digest), ProviderComponent: string(current.Sandbox.ProviderBinding.ComponentID), ProviderManifest: string(current.Sandbox.ProviderBinding.ManifestDigest),
 	}
@@ -188,9 +279,83 @@ func TestWorkspaceReadPublicExecutorCallsConcreteAdapterAndRustOnce(t *testing.T
 		t.Fatal(err)
 	}
 	counted := &countingWorkspaceReadActualPointV1{inner: concrete}
-	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(store, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, fixedWorkspaceReadEnforcementReaderV1{current}, store, counted, time.Now)
+	enforcementReader := &sequencedWorkspaceReadEnforcementReaderV1{first: current, second: current}
+	if spec.runtimeLeaseS2Drift {
+		enforcementReader.second.Sandbox.RuntimeLease.FenceEpoch++
+		enforcementReader.second.Sandbox, err = runtimeports.SealOperationDispatchSandboxCurrentProjectionV4(enforcementReader.second.Sandbox)
+		if err != nil {
+			t.Fatal(err)
+		}
+		enforcementReader.second, err = runtimeports.SealCurrentOperationDispatchEnforcementV4(enforcementReader.second)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(store, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, time.Now)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if spec.expectBeforeActual {
+		if _, err = executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); err == nil {
+			t.Fatal("pre-actual scope rejection unexpectedly succeeded")
+		}
+		if counted.calls.Load() != spec.expectedAdapter {
+			t.Fatalf("actual-point adapter calls=%d, want %d", counted.calls.Load(), spec.expectedAdapter)
+		}
+		inspectionDB, openErr := sql.Open("sqlite", databasePath)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		defer inspectionDB.Close()
+		var rows int
+		if countErr := inspectionDB.QueryRowContext(ctx, `SELECT count(*) FROM workspace_read_attempt_origin`).Scan(&rows); countErr != nil || rows != 0 {
+			t.Fatalf("pre-actual rejection created attempt rows=%d err=%v", rows, countErr)
+		}
+		return
+	}
+	if spec.expectedState != contract.WorkspaceReadObservedV1 || spec.expectedContent != "Praxis" {
+		_, callErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization)
+		if spec.expectedState == contract.WorkspaceReadObservedV1 {
+			if callErr != nil {
+				t.Fatalf("expected successful bounded read: %v", callErr)
+			}
+		} else if callErr == nil {
+			t.Fatalf("expected terminal %q error", spec.expectedState)
+		}
+		if counted.calls.Load() != spec.expectedAdapter {
+			t.Fatalf("actual-point adapter calls=%d, want %d", counted.calls.Load(), spec.expectedAdapter)
+		}
+		if spec.expectedBoundary != "" {
+			var boundary *kernel.WorkspaceReadActualPointErrorV1
+			if !errors.As(counted.lastError(), &boundary) || boundary.Boundary != spec.expectedBoundary {
+				t.Fatalf("actual-point boundary=%v, want %q; err=%v", boundary, spec.expectedBoundary, counted.lastError())
+			}
+			var closed *dataplaneadapter.ClosedError
+			if !errors.As(counted.lastError(), &closed) || closed.CrossedActualPoint == nil || closed.PhysicalReadCount == nil || *closed.PhysicalReadCount != spec.expectedPhysical || *closed.CrossedActualPoint != (spec.expectedPhysical != 0) {
+				t.Fatalf("physical evidence=%#v, want reads=%d", closed, spec.expectedPhysical)
+			}
+		}
+		inspectionDB, openErr := sql.Open("sqlite", databasePath)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		defer inspectionDB.Close()
+		var originBody []byte
+		if err = inspectionDB.QueryRowContext(ctx, "SELECT body FROM workspace_read_attempt_origin LIMIT 1").Scan(&originBody); err != nil {
+			t.Fatal(err)
+		}
+		var origin contract.WorkspaceReadAttemptV1
+		if err = json.Unmarshal(originBody, &origin); err != nil {
+			t.Fatal(err)
+		}
+		projection, inspectErr := executor.InspectBoundedWorkspaceReadV1(ctx, contract.WorkspaceReadAttemptRefV1{ID: origin.Meta.ID, Revision: origin.Meta.Revision, Digest: origin.Meta.Digest})
+		if inspectErr != nil || projection.Attempt.State != spec.expectedState {
+			t.Fatalf("exact Inspect state=%q, want %q err=%v", projection.Attempt.State, spec.expectedState, inspectErr)
+		}
+		if spec.expectedState == contract.WorkspaceReadObservedV1 && (projection.Observation == nil || projection.Observation.Content != spec.expectedContent || !projection.Observation.Complete) {
+			t.Fatalf("EOF result drifted: %#v", projection.Observation)
+		}
+		return
 	}
 
 	const workers = 64
@@ -284,6 +449,27 @@ func (r fixedWorkspaceReadEnforcementReaderV1) InspectOperationDispatchEnforceme
 }
 func (r fixedWorkspaceReadEnforcementReaderV1) InspectCurrentOperationDispatchEnforcementV4(context.Context, runtimeports.InspectCurrentOperationDispatchEnforcementRequestV4) (runtimeports.CurrentOperationDispatchEnforcementV4, error) {
 	return r.value, nil
+}
+
+type sequencedWorkspaceReadEnforcementReaderV1 struct {
+	first  runtimeports.CurrentOperationDispatchEnforcementV4
+	second runtimeports.CurrentOperationDispatchEnforcementV4
+	calls  atomic.Uint64
+}
+
+func (r *sequencedWorkspaceReadEnforcementReaderV1) EnforceCurrentOperationDispatchV4(context.Context, runtimeports.EnforceCurrentOperationDispatchRequestV4) (runtimeports.CurrentOperationDispatchEnforcementV4, error) {
+	return runtimeports.CurrentOperationDispatchEnforcementV4{}, errors.New("not supported")
+}
+
+func (r *sequencedWorkspaceReadEnforcementReaderV1) InspectOperationDispatchEnforcementV4(context.Context, runtimeports.InspectOperationDispatchEnforcementRequestV4) (runtimeports.OperationDispatchEnforcementJournalV4, error) {
+	return r.first.Journal, nil
+}
+
+func (r *sequencedWorkspaceReadEnforcementReaderV1) InspectCurrentOperationDispatchEnforcementV4(context.Context, runtimeports.InspectCurrentOperationDispatchEnforcementRequestV4) (runtimeports.CurrentOperationDispatchEnforcementV4, error) {
+	if r.calls.Add(1) == 1 {
+		return r.first, nil
+	}
+	return r.second, nil
 }
 
 type countingWorkspaceReadActualPointV1 struct {

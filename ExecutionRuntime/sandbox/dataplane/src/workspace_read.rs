@@ -408,6 +408,7 @@ fn valid_logical_path(value: &str) -> bool {
     !value.is_empty()
         && !value.starts_with('/')
         && !value.contains('\\')
+        && !value.contains('\0')
         && !value
             .split('/')
             .any(|part| part.is_empty() || part == "." || part == "..")

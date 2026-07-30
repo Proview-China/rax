@@ -289,7 +289,23 @@ func (s *Store) finishWorkspaceReadV1(ctx context.Context, expected contract.Ref
 		if err = observation.ValidateCurrent(now); err != nil {
 			return contract.WorkspaceReadExecutionProjectionV1{}, err
 		}
-		if !contract.SameRef(observation.Reservation, reservation.Meta.Ref()) || !contract.SameRef(observation.Command, reservation.Command) || !contract.SameRef(observation.WorkspaceView, reservation.WorkspaceView) || observation.AdmissionReceipt != current.AdmissionReceipt || observation.Meta.ExpiresUnixNano != minWorkspaceReadStoreExpiryV1(current.Meta.ExpiresUnixNano, reservation.Meta.ExpiresUnixNano, current.AdmissionReceipt.ExpiresUnixNano, observation.ProviderReceipt.ExpiresUnixNano) {
+		command, workspace, inputErr := inspectWorkspaceReadCompletionInputsTxV1(ctx, tx, reservation, now)
+		if inputErr != nil {
+			return contract.WorkspaceReadExecutionProjectionV1{}, inputErr
+		}
+		if !contract.SameRef(observation.Reservation, reservation.Meta.Ref()) ||
+			!contract.SameRef(observation.Command, command.Meta.Ref()) ||
+			!contract.SameRef(observation.WorkspaceView, workspace.Meta.Ref()) ||
+			observation.RelativePath != command.RelativePath ||
+			observation.StartByte != command.StartByte ||
+			observation.ReturnedBytes > command.MaxBytes ||
+			observation.File.Revision != workspace.Meta.Revision ||
+			observation.AdmissionReceipt != current.AdmissionReceipt ||
+			observation.Meta.ExpiresUnixNano != minWorkspaceReadStoreExpiryV1(current.Meta.ExpiresUnixNano, reservation.Meta.ExpiresUnixNano, current.AdmissionReceipt.ExpiresUnixNano, observation.ProviderReceipt.ExpiresUnixNano) {
+			return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
+		}
+		fileID, fileIDErr := contract.WorkspaceReadFileIDV1(workspace.Meta.ID, command.RelativePath)
+		if fileIDErr != nil || observation.File.ID != fileID || command.ExpectedFileRef != nil && !contract.SameRef(observation.File, *command.ExpectedFileRef) {
 			return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
 		}
 		next.State = contract.WorkspaceReadObservedV1
@@ -323,6 +339,62 @@ func (s *Store) finishWorkspaceReadV1(ctx context.Context, expected contract.Ref
 	var res contract.WorkspaceReadReservationV1
 	_ = res
 	return s.inspectWorkspaceReadStableV1(ctx, stable)
+}
+
+func inspectWorkspaceReadCompletionInputsTxV1(ctx context.Context, tx *sql.Tx, reservation contract.WorkspaceReadReservationV1, now time.Time) (contract.WorkspaceReadCommandV1, contract.WorkspaceView, error) {
+	var commandRevision uint64
+	var commandDigest string
+	var commandBody []byte
+	if err := tx.QueryRowContext(ctx, `SELECT revision,digest,body FROM workspace_read_command_current WHERE command_id=?`, reservation.Command.ID).Scan(&commandRevision, &commandDigest, &commandBody); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, ports.ErrNotFound
+		}
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, err
+	}
+	if commandRevision != reservation.Command.Revision || commandDigest != reservation.Command.Digest {
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, ports.ErrConflict
+	}
+	var command contract.WorkspaceReadCommandV1
+	if decode(commandBody, &command) != nil || command.ValidateCurrent(now) != nil || !contract.SameRef(command.Meta.Ref(), reservation.Command) || !contract.SameRef(command.WorkspaceView, reservation.WorkspaceView) {
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, ports.ErrConflict
+	}
+
+	var workspaceRevision uint64
+	var workspaceDigest string
+	var workspaceBody []byte
+	if err := tx.QueryRowContext(ctx, `SELECT revision,digest,body FROM workspace_view_history WHERE view_id=? AND revision=? AND digest=?`, reservation.WorkspaceView.ID, reservation.WorkspaceView.Revision, reservation.WorkspaceView.Digest).Scan(&workspaceRevision, &workspaceDigest, &workspaceBody); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, ports.ErrNotFound
+		}
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, err
+	}
+	if workspaceRevision != reservation.WorkspaceView.Revision || workspaceDigest != reservation.WorkspaceView.Digest {
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, ports.ErrConflict
+	}
+	var workspace contract.WorkspaceView
+	if decode(workspaceBody, &workspace) != nil || workspace.ValidateCurrent(now) != nil || !contract.SameRef(workspace.Meta.Ref(), reservation.WorkspaceView) || workspace.FileScopeDigest != command.FileScopeDigest || !workspaceReadStoreAllowedV1(workspace, command.RelativePath) {
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, ports.ErrConflict
+	}
+	return command, workspace, nil
+}
+
+func workspaceReadStoreAllowedV1(workspace contract.WorkspaceView, relative string) bool {
+	allowed := false
+	for _, scope := range workspace.ReadScopes {
+		if relative == scope || len(relative) > len(scope) && relative[:len(scope)+1] == scope+"/" {
+			allowed = true
+			break
+		}
+	}
+	if !allowed {
+		return false
+	}
+	for _, scope := range workspace.HiddenScopes {
+		if relative == scope || len(relative) > len(scope) && relative[:len(scope)+1] == scope+"/" {
+			return false
+		}
+	}
+	return contract.ValidateLogicalPath(relative) == nil
 }
 
 func (s *Store) InspectBoundedWorkspaceReadV1(ctx context.Context, exact contract.WorkspaceReadAttemptRefV1) (contract.WorkspaceReadExecutionProjectionV1, error) {

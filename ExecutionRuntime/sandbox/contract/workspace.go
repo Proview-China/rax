@@ -68,7 +68,7 @@ func (v WorkspaceView) ValidateCurrent(now time.Time) error {
 }
 
 func ValidateLogicalPath(value string) error {
-	if value == "" || path.IsAbs(value) || strings.Contains(value, "\\") {
+	if value == "" || path.IsAbs(value) || strings.Contains(value, "\\") || strings.ContainsRune(value, '\x00') {
 		return fmt.Errorf("path %q must be a non-empty logical slash path", value)
 	}
 	clean := path.Clean(value)

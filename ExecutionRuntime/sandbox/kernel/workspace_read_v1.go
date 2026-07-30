@@ -111,6 +111,9 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 	if err != nil {
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
+	if err = validateWorkspaceReadRuntimeLeaseV1(workspace.Lease, runtimeCurrent); err != nil {
+		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
+	}
 	expiresNano := minWorkspaceReadExpiryV1(
 		authorization.UnifiedNotAfterUnixNano,
 		runtimeCurrent.ExpiresUnixNano,
@@ -219,6 +222,9 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 			err = runtimecore.NewError(runtimecore.ErrorConflict, runtimecore.ReasonBindingDrift, "workspace read Runtime current drifted at S2")
 		}
 		return receipt, e.markWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), "s2-runtime-current", err)
+	}
+	if err = validateWorkspaceReadRuntimeLeaseV1(workspaceS2.Lease, runtimeCurrentS2); err != nil {
+		return receipt, e.markWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), "s2-workspace-lease", err)
 	}
 	if err = validateWorkspaceReadActualPointResultV1(result, reservation, command, workspace, s2); err != nil {
 		return receipt, e.markWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), "provider-result", err)
@@ -377,6 +383,22 @@ func validateWorkspaceReadActualPointResultV1(r WorkspaceReadActualPointResultV1
 	}
 	if r.File.Revision != workspace.Meta.Revision || command.ExpectedFileRef != nil && !contract.SameRef(r.File, *command.ExpectedFileRef) {
 		return errors.New("workspace read exact file ref drifted")
+	}
+	return nil
+}
+
+func validateWorkspaceReadRuntimeLeaseV1(binding contract.RuntimeLeaseBinding, current runtimeports.CurrentOperationDispatchEnforcementV4) error {
+	runtimeLease := current.Sandbox.RuntimeLease
+	if binding.TenantID != string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID) ||
+		binding.InstanceID != string(runtimeLease.Instance.ID) ||
+		binding.InstanceEpoch != uint64(runtimeLease.Instance.Epoch) ||
+		binding.LeaseID != string(runtimeLease.Lease.ID) ||
+		binding.LeaseEpoch != uint64(runtimeLease.Lease.Epoch) ||
+		binding.FenceEpoch != uint64(runtimeLease.FenceEpoch) ||
+		binding.ScopeDigest != string(runtimeLease.ScopeDigest) ||
+		binding.ObservedRevision != uint64(runtimeLease.ObservedRevision) ||
+		binding.ExpiresUnixNano != runtimeLease.Ref.ExpiresUnixNano {
+		return runtimecore.NewError(runtimecore.ErrorConflict, runtimecore.ReasonBindingDrift, "workspace read WorkspaceView lease differs from Runtime current")
 	}
 	return nil
 }

@@ -143,12 +143,13 @@ func (a *WorkspaceReadActualPointAdapterV1) dispatchSealedWorkspaceReadV1(ctx co
 		ProviderS2Checked: observation.S2Checked,
 		PhysicalReadCount: observation.PhysicalReadCount,
 		ProviderReceipt: contract.WorkspaceReadReceiptBindingV1{
-			ID:              "workspace-read-provider-receipt-" + trimWorkspaceReadDigestV1(receipt.Digest),
-			Revision:        1,
-			Digest:          receipt.Digest,
-			StableKeyDigest: stableKeyDigest,
-			CheckedUnixNano: receipt.RecordedUnixNano,
-			ExpiresUnixNano: receipt.ExpiresUnixNano,
+			ID:                "workspace-read-provider-receipt-" + trimWorkspaceReadDigestV1(receipt.Digest),
+			Revision:          1,
+			Digest:            receipt.Digest,
+			ObservationDigest: receipt.ObservationDigest,
+			StableKeyDigest:   stableKeyDigest,
+			CheckedUnixNano:   receipt.RecordedUnixNano,
+			ExpiresUnixNano:   receipt.ExpiresUnixNano,
 		},
 	}, nil
 }

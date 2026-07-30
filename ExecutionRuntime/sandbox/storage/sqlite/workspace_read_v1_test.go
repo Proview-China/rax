@@ -77,15 +77,16 @@ func TestWorkspaceReadOriginalAttemptRecoversLatestCurrent(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "request-a")
+	seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
 	started, created, err := store.ReserveWorkspaceReadV1(ctx, reservation, attempt)
 	if err != nil || !created || started.Attempt.State != contract.WorkspaceReadStartedV1 || started.AdmissionReceipt != attempt.AdmissionReceipt {
 		t.Fatalf("reserve: created=%v state=%q err=%v", created, started.Attempt.State, err)
 	}
-	providerReceipt := contract.WorkspaceReadReceiptBindingV1{ID: "provider-receipt", Revision: 1, Digest: mustWorkspaceReadDigest(t, "provider-receipt"), StableKeyDigest: reservation.StableKeyDigest, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano()}
+	providerReceipt := contract.WorkspaceReadReceiptBindingV1{ID: "provider-receipt", Revision: 1, Digest: mustWorkspaceReadDigest(t, "provider-receipt"), ObservationDigest: mustWorkspaceReadDigest(t, "provider-observation"), StableKeyDigest: reservation.StableKeyDigest, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano()}
 	content := "hello"
 	observation, err := contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
 		Reservation: reservation.Meta.Ref(), Command: reservation.Command, WorkspaceView: reservation.WorkspaceView,
-		File:         contract.Ref{ID: "workspace-file", Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
 		RelativePath: "src/main.txt", ReturnedBytes: uint64(len(content)), TotalBytes: uint64(len(content)), Complete: true,
 		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 0, uint64(len(content)), true),
 		S1CheckedUnixNano: now.UnixNano(), S2CheckedUnixNano: now.UnixNano(),
@@ -139,6 +140,7 @@ func TestWorkspaceReadConcurrentInspectCannotPoisonActiveCompletion(t *testing.T
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "request-concurrent-inspect")
+	seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
 	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt); reserveErr != nil || !created {
 		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
 	}
@@ -146,11 +148,12 @@ func TestWorkspaceReadConcurrentInspectCannotPoisonActiveCompletion(t *testing.T
 	content := "hello"
 	providerReceipt := contract.WorkspaceReadReceiptBindingV1{
 		ID: "provider-concurrent", Revision: 1, Digest: mustWorkspaceReadDigest(t, "provider-concurrent"),
-		StableKeyDigest: reservation.StableKeyDigest, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano(),
+		ObservationDigest: mustWorkspaceReadDigest(t, "provider-observation-concurrent"),
+		StableKeyDigest:   reservation.StableKeyDigest, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano(),
 	}
 	observation, err := contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
 		Reservation: reservation.Meta.Ref(), Command: reservation.Command, WorkspaceView: reservation.WorkspaceView,
-		File:         contract.Ref{ID: "workspace-file", Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
 		RelativePath: "src/main.txt", ReturnedBytes: uint64(len(content)), TotalBytes: uint64(len(content)), Complete: true,
 		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 0, uint64(len(content)), true),
 		S1CheckedUnixNano: now.UnixNano(), S2CheckedUnixNano: now.UnixNano(),
@@ -308,7 +311,8 @@ func TestWorkspaceReadStoreEnforcesSealedTTLClosureAtWriteBoundaries(t *testing.
 	content := "ttl"
 	overlongProvider := contract.WorkspaceReadReceiptBindingV1{
 		ID: "ttl-provider", Revision: 1, Digest: mustWorkspaceReadDigest(t, "ttl-provider"),
-		StableKeyDigest: stable, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: outer.UnixNano(),
+		ObservationDigest: mustWorkspaceReadDigest(t, "ttl-provider-observation"),
+		StableKeyDigest:   stable, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: outer.UnixNano(),
 	}
 	if _, err = contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
 		Reservation: reservation.Meta.Ref(), Command: reservation.Command, WorkspaceView: reservation.WorkspaceView,
@@ -343,6 +347,7 @@ func TestWorkspaceReadStoreRejectsFutureReceiptAndObservation(t *testing.T) {
 	}
 
 	reservation, attempt = workspaceReadReservationFixture(t, now, expires, "request-observation-future")
+	seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
 	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt); reserveErr != nil || !created {
 		t.Fatalf("reserve observation fixture: created=%v err=%v", created, reserveErr)
 	}
@@ -350,11 +355,12 @@ func TestWorkspaceReadStoreRejectsFutureReceiptAndObservation(t *testing.T) {
 	content := "hello"
 	providerReceipt := contract.WorkspaceReadReceiptBindingV1{
 		ID: "provider-future", Revision: 1, Digest: mustWorkspaceReadDigest(t, "provider-future"),
-		StableKeyDigest: reservation.StableKeyDigest, CheckedUnixNano: future.UnixNano(), ExpiresUnixNano: expires.UnixNano(),
+		ObservationDigest: mustWorkspaceReadDigest(t, "provider-future-observation"),
+		StableKeyDigest:   reservation.StableKeyDigest, CheckedUnixNano: future.UnixNano(), ExpiresUnixNano: expires.UnixNano(),
 	}
 	observation, err := contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
 		Reservation: reservation.Meta.Ref(), Command: reservation.Command, WorkspaceView: reservation.WorkspaceView,
-		File:         contract.Ref{ID: "workspace-file", Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
 		RelativePath: "src/main.txt", ReturnedBytes: uint64(len(content)), TotalBytes: uint64(len(content)), Complete: true,
 		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 0, uint64(len(content)), true),
 		S1CheckedUnixNano: now.UnixNano(), S2CheckedUnixNano: future.UnixNano(),
@@ -410,8 +416,104 @@ func TestWorkspaceReadSameAttemptIDDifferentOriginalDigestConflicts(t *testing.T
 	}
 }
 
+func TestWorkspaceReadCompletionRejectsExactCoordinateSplicesAndMissingInputs(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		mutate func(*testing.T, *Store, *contract.WorkspaceReadObservationV1)
+	}{
+		{name: "relative-path", mutate: func(_ *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
+			value.RelativePath = "src/other.txt"
+		}},
+		{name: "start-byte", mutate: func(_ *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
+			value.StartByte = 1
+			value.TotalBytes = value.StartByte + value.ReturnedBytes
+			value.ContentDigest = contract.WorkspaceReadContentDigestV1([]byte(value.Content), value.StartByte, value.TotalBytes, true)
+		}},
+		{name: "returned-over-command-max", mutate: func(_ *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
+			value.Content = "helloo"
+			value.ReturnedBytes = uint64(len(value.Content))
+			value.TotalBytes = value.ReturnedBytes
+			value.ContentDigest = contract.WorkspaceReadContentDigestV1([]byte(value.Content), 0, value.TotalBytes, true)
+		}},
+		{name: "command-ref", mutate: func(t *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
+			value.Command = contract.Ref{ID: "other-command", Revision: 1, Digest: mustWorkspaceReadDigest(t, "other-command")}
+		}},
+		{name: "workspace-view-ref", mutate: func(t *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
+			value.WorkspaceView = contract.Ref{ID: "other-workspace", Revision: 1, Digest: mustWorkspaceReadDigest(t, "other-workspace")}
+		}},
+		{name: "file-id", mutate: func(_ *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
+			value.File.ID = "workspace-file-spliced"
+		}},
+		{name: "file-digest", mutate: func(t *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
+			value.File.Digest = mustWorkspaceReadDigest(t, "spliced-file")
+		}},
+		{name: "missing-command", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
+			if _, err := store.db.Exec(`DELETE FROM workspace_read_command_current`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "missing-view", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
+			if _, err := store.db.Exec(`DELETE FROM workspace_view_history`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "file-scope", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
+			var body []byte
+			if err := store.db.QueryRow(`SELECT body FROM workspace_view_history WHERE view_id='workspace'`).Scan(&body); err != nil {
+				t.Fatal(err)
+			}
+			var workspace contract.WorkspaceView
+			if err := decode(body, &workspace); err != nil {
+				t.Fatal(err)
+			}
+			workspace.FileScopeDigest = mustWorkspaceReadDigest(t, "other-file-scope")
+			body, err := encode(workspace)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err = store.db.Exec(`UPDATE workspace_view_history SET body=? WHERE view_id='workspace'`, body); err != nil {
+				t.Fatal(err)
+			}
+		}},
+	}
+	for _, testCase := range cases {
+		testCase := testCase
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			ctx := context.Background()
+			now := time.Unix(1_900_000_000, 0)
+			expires := now.Add(time.Hour)
+			store, err := OpenWithClock(ctx, filepath.Join(t.TempDir(), "sandbox.db"), func() time.Time { return now })
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = store.Close() })
+			reservation, attempt := workspaceReadReservationFixture(t, now, expires, "splice-"+testCase.name)
+			seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
+			if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt); reserveErr != nil || !created {
+				t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
+			}
+			observation := workspaceReadCompletionObservationFixtureV1(t, reservation, attempt, now, expires)
+			testCase.mutate(t, store, &observation)
+			observation, err = contract.SealWorkspaceReadObservationV1(observation, "observation-"+testCase.name, now, expires)
+			if err != nil {
+				t.Fatalf("seal mutated but structurally valid observation: %v", err)
+			}
+			if _, err = store.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), observation); err == nil {
+				t.Fatal("spliced completion reached durable observed state")
+			}
+			projection, inspectErr := store.InspectBoundedWorkspaceReadV1(ctx, contract.WorkspaceReadAttemptRefV1{ID: attempt.Meta.ID, Revision: attempt.Meta.Revision, Digest: attempt.Meta.Digest})
+			if inspectErr != nil || projection.Attempt.State != contract.WorkspaceReadStartedV1 || projection.Observation != nil {
+				t.Fatalf("rejected splice mutated current: %#v err=%v", projection, inspectErr)
+			}
+		})
+	}
+}
+
 func workspaceReadReservationFixture(t *testing.T, now, expires time.Time, request string) (contract.WorkspaceReadReservationV1, contract.WorkspaceReadAttemptV1) {
 	t.Helper()
+	workspace, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
 	stable := mustWorkspaceReadDigest(t, "stable")
 	admission := contract.WorkspaceReadReceiptBindingV1{ID: "admission", Revision: 1, Digest: mustWorkspaceReadDigest(t, "admission"), StableKeyDigest: stable, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano()}
 	ttlClosure, err := contract.SealWorkspaceReadTTLClosureV1(contract.WorkspaceReadTTLClosureV1{
@@ -426,7 +528,7 @@ func workspaceReadReservationFixture(t *testing.T, now, expires time.Time, reque
 	if err != nil {
 		t.Fatal(err)
 	}
-	reservation, err := contract.SealWorkspaceReadReservationV1(contract.WorkspaceReadReservationV1{StableKeyDigest: stable, AuthorizationDigest: mustWorkspaceReadDigest(t, "authorization"), RequestDigest: mustWorkspaceReadDigest(t, request), PayloadDigest: mustWorkspaceReadDigest(t, "payload"), Command: contract.Ref{ID: "command", Revision: 1, Digest: mustWorkspaceReadDigest(t, "command")}, WorkspaceView: contract.Ref{ID: "workspace", Revision: 1, Digest: mustWorkspaceReadDigest(t, "workspace")}, AttemptID: "attempt-1", TTLClosure: ttlClosure}, "reservation", now, expires)
+	reservation, err := contract.SealWorkspaceReadReservationV1(contract.WorkspaceReadReservationV1{StableKeyDigest: stable, AuthorizationDigest: mustWorkspaceReadDigest(t, "authorization"), RequestDigest: mustWorkspaceReadDigest(t, request), PayloadDigest: mustWorkspaceReadDigest(t, "payload"), Command: command.Meta.Ref(), WorkspaceView: workspace.Meta.Ref(), AttemptID: "attempt-1", TTLClosure: ttlClosure}, "reservation", now, expires)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -435,6 +537,75 @@ func workspaceReadReservationFixture(t *testing.T, now, expires time.Time, reque
 		t.Fatal(err)
 	}
 	return reservation, attempt
+}
+
+func workspaceReadCompletionInputFixtureV1(t *testing.T, now, expires time.Time) (contract.WorkspaceView, contract.WorkspaceReadCommandV1) {
+	t.Helper()
+	scope := mustWorkspaceReadDigest(t, "file-scope")
+	workspace := contract.WorkspaceView{
+		Meta:            contract.Meta{ContractVersion: contract.ContractFamily, ID: "workspace", Revision: 1, Digest: mustWorkspaceReadDigest(t, "workspace"), CreatedUnixNano: now.UnixNano(), UpdatedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano()},
+		BaseArtifactRef: contract.Ref{ID: "base", Revision: 1, Digest: mustWorkspaceReadDigest(t, "base")},
+		BaseRevision:    "main",
+		OverlayRef:      contract.Ref{ID: "overlay", Revision: 1, Digest: mustWorkspaceReadDigest(t, "overlay")},
+		PolicyRef:       contract.Ref{ID: "policy", Revision: 1, Digest: mustWorkspaceReadDigest(t, "policy")},
+		Lease: contract.RuntimeLeaseBinding{
+			TenantID: "tenant", InstanceID: "instance", InstanceEpoch: 1, LeaseID: "lease", LeaseEpoch: 1,
+			FenceEpoch: 1, ScopeDigest: mustWorkspaceReadDigest(t, "scope"), ObservedRevision: 1, ExpiresUnixNano: expires.UnixNano(),
+		},
+		ReadScopes: []string{"src"}, WriteScopes: []string{"src"}, FileScopeDigest: scope,
+	}
+	command, err := contract.SealWorkspaceReadCommandV1(contract.WorkspaceReadCommandV1{
+		TenantID: "tenant", SourceToolCommand: contract.Ref{ID: "tool-command", Revision: 1, Digest: mustWorkspaceReadDigest(t, "tool-command")},
+		SourceToolPayloadSchema: "praxis.tool/workspace-read@1", SourceToolPayloadDigest: mustWorkspaceReadDigest(t, "payload"), SourceToolPayloadRevision: 1,
+		WorkspaceView: workspace.Meta.Ref(), FileScopeDigest: scope, RelativePath: "src/main.txt", MaxBytes: 5,
+		ExpectedFileRef:           &contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: workspace.Meta.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		RequestedNotAfterUnixNano: expires.UnixNano(), OperationDigest: mustWorkspaceReadDigest(t, "operation"), EffectID: "effect",
+		IntentRevision: 1, IntentDigest: mustWorkspaceReadDigest(t, "intent"), AttemptID: "attempt-1",
+		PreparedDigest: mustWorkspaceReadDigest(t, "prepared"), DispatchDigest: mustWorkspaceReadDigest(t, "dispatch"),
+		ProviderComponent: "provider", ProviderManifest: mustWorkspaceReadDigest(t, "provider-manifest"),
+	}, "command", now, expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return workspace, command
+}
+
+func seedWorkspaceReadCompletionInputsV1(t *testing.T, store *Store, now, expires time.Time) {
+	t.Helper()
+	workspace, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
+	if _, err := store.CreateWorkspaceViewV1(context.Background(), workspace); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.CreateWorkspaceReadCommandV1(context.Background(), command); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func workspaceReadCompletionObservationFixtureV1(t *testing.T, reservation contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1, now, expires time.Time) contract.WorkspaceReadObservationV1 {
+	t.Helper()
+	content := "hello"
+	return contract.WorkspaceReadObservationV1{
+		Reservation: reservation.Meta.Ref(), Command: reservation.Command, WorkspaceView: reservation.WorkspaceView,
+		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		RelativePath: "src/main.txt", ReturnedBytes: uint64(len(content)), TotalBytes: uint64(len(content)), Complete: true,
+		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 0, uint64(len(content)), true),
+		S1CheckedUnixNano: now.UnixNano(), S2CheckedUnixNano: now.UnixNano(),
+		AdmissionReceipt: attempt.AdmissionReceipt,
+		ProviderReceipt: contract.WorkspaceReadReceiptBindingV1{
+			ID: "provider-receipt", Revision: 1, Digest: mustWorkspaceReadDigest(t, "provider-receipt"),
+			ObservationDigest: mustWorkspaceReadDigest(t, "provider-observation"),
+			StableKeyDigest:   reservation.StableKeyDigest, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano(),
+		},
+	}
+}
+
+func mustWorkspaceReadFileIDV1(t *testing.T) string {
+	t.Helper()
+	id, err := contract.WorkspaceReadFileIDV1("workspace", "src/main.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id
 }
 
 func mustWorkspaceReadDigest(t *testing.T, value string) string {

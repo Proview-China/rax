@@ -227,16 +227,17 @@ func SealWorkspaceReadReservationV1(r WorkspaceReadReservationV1, id string, now
 }
 
 type WorkspaceReadReceiptBindingV1 struct {
-	ID              string `json:"id"`
-	Revision        uint64 `json:"revision"`
-	Digest          string `json:"digest"`
-	StableKeyDigest string `json:"stable_key_digest"`
-	CheckedUnixNano int64  `json:"checked_unix_nano"`
-	ExpiresUnixNano int64  `json:"expires_unix_nano"`
+	ID                string `json:"id"`
+	Revision          uint64 `json:"revision"`
+	Digest            string `json:"digest"`
+	ObservationDigest string `json:"observation_digest,omitempty"`
+	StableKeyDigest   string `json:"stable_key_digest"`
+	CheckedUnixNano   int64  `json:"checked_unix_nano"`
+	ExpiresUnixNano   int64  `json:"expires_unix_nano"`
 }
 
 func (r WorkspaceReadReceiptBindingV1) Validate() error {
-	if strings.TrimSpace(r.ID) == "" || r.Revision == 0 || !ValidDigest(r.Digest) || !ValidDigest(r.StableKeyDigest) || r.CheckedUnixNano <= 0 || r.ExpiresUnixNano <= r.CheckedUnixNano {
+	if strings.TrimSpace(r.ID) == "" || r.Revision == 0 || !ValidDigest(r.Digest) || r.ObservationDigest != "" && !ValidDigest(r.ObservationDigest) || !ValidDigest(r.StableKeyDigest) || r.CheckedUnixNano <= 0 || r.ExpiresUnixNano <= r.CheckedUnixNano {
 		return errors.New("workspace read receipt binding is incomplete")
 	}
 	return nil
@@ -292,7 +293,7 @@ func (o WorkspaceReadObservationV1) ValidateShape() error {
 	if err := o.Meta.ValidateShape(); err != nil {
 		return err
 	}
-	if o.Reservation.ValidateShape("reservation") != nil || o.Command.ValidateShape("command") != nil || o.WorkspaceView.ValidateShape("workspace view") != nil || o.File.ValidateShape("file") != nil || ValidateLogicalPath(o.RelativePath) != nil || o.ReturnedBytes != uint64(len([]byte(o.Content))) || o.TotalBytes > WorkspaceReadMaxBytesV1 || o.StartByte > o.TotalBytes || o.ReturnedBytes > o.TotalBytes-o.StartByte || o.Complete != (o.StartByte+o.ReturnedBytes == o.TotalBytes) || !ValidDigest(o.ContentDigest) || o.S1CheckedUnixNano <= 0 || o.S2CheckedUnixNano < o.S1CheckedUnixNano || o.S2CheckedUnixNano > o.Meta.CreatedUnixNano || o.AdmissionReceipt.Validate() != nil || o.ProviderReceipt.Validate() != nil || o.AdmissionReceipt.CheckedUnixNano > o.S1CheckedUnixNano || o.ProviderReceipt.CheckedUnixNano > o.S2CheckedUnixNano || o.AdmissionReceipt.StableKeyDigest != o.ProviderReceipt.StableKeyDigest || o.Meta.ExpiresUnixNano > o.AdmissionReceipt.ExpiresUnixNano || o.Meta.ExpiresUnixNano > o.ProviderReceipt.ExpiresUnixNano {
+	if o.Reservation.ValidateShape("reservation") != nil || o.Command.ValidateShape("command") != nil || o.WorkspaceView.ValidateShape("workspace view") != nil || o.File.ValidateShape("file") != nil || ValidateLogicalPath(o.RelativePath) != nil || o.ReturnedBytes != uint64(len([]byte(o.Content))) || o.TotalBytes > WorkspaceReadMaxBytesV1 || o.StartByte > o.TotalBytes || o.ReturnedBytes > o.TotalBytes-o.StartByte || o.Complete != (o.StartByte+o.ReturnedBytes == o.TotalBytes) || !ValidDigest(o.ContentDigest) || o.S1CheckedUnixNano <= 0 || o.S2CheckedUnixNano < o.S1CheckedUnixNano || o.S2CheckedUnixNano > o.Meta.CreatedUnixNano || o.AdmissionReceipt.Validate() != nil || o.ProviderReceipt.Validate() != nil || !ValidDigest(o.ProviderReceipt.ObservationDigest) || o.AdmissionReceipt.ObservationDigest != "" || o.AdmissionReceipt.CheckedUnixNano > o.S1CheckedUnixNano || o.ProviderReceipt.CheckedUnixNano > o.S2CheckedUnixNano || o.AdmissionReceipt.StableKeyDigest != o.ProviderReceipt.StableKeyDigest || o.Meta.ExpiresUnixNano > o.AdmissionReceipt.ExpiresUnixNano || o.Meta.ExpiresUnixNano > o.ProviderReceipt.ExpiresUnixNano {
 		return errors.New("workspace read observation is incomplete")
 	}
 	if o.ContentDigest != WorkspaceReadContentDigestV1([]byte(o.Content), o.StartByte, o.TotalBytes, o.Complete) {
@@ -335,6 +336,18 @@ func WorkspaceReadContentDigestV1(content []byte, start, total uint64, complete 
 	_, _ = fmt.Fprintf(h, "praxis.sandbox/workspace-read-range/v1%c%d%c%d%c%t%c", 0, start, 0, total, 0, complete, 0)
 	_, _ = h.Write(content)
 	return "sha256:" + hex.EncodeToString(h.Sum(nil))
+}
+
+// WorkspaceReadFileIDV1 binds the public file identity to the exact
+// WorkspaceView and canonical logical path. The whole-file digest remains the
+// content coordinate while this ID prevents a valid file ref from being
+// spliced across another path in the same view.
+func WorkspaceReadFileIDV1(workspaceViewID, relativePath string) (string, error) {
+	if strings.TrimSpace(workspaceViewID) == "" || ValidateLogicalPath(relativePath) != nil {
+		return "", errors.New("workspace read file identity coordinates are invalid")
+	}
+	sum := sha256.Sum256([]byte(workspaceViewID + "\x00" + relativePath))
+	return "workspace-file-" + hex.EncodeToString(sum[:]), nil
 }
 
 type WorkspaceReadAttemptV1 struct {
