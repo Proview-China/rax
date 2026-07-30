@@ -72,6 +72,14 @@ type WorkspaceReadCommandCurrentReaderV1 interface {
 	InspectWorkspaceReadCommandCurrentV1(context.Context, contract.Ref) (contract.WorkspaceReadCommandV1, error)
 }
 
+// WorkspaceReadCommandExactReaderV1 reads one immutable Sandbox-owned Command
+// by its complete exact Ref. It is a historical reader: implementations must
+// validate the stored shape and exact coordinate, but must not require the
+// Command to remain current or renew any execution lifetime.
+type WorkspaceReadCommandExactReaderV1 interface {
+	InspectWorkspaceReadCommandExactV1(context.Context, contract.Ref) (contract.WorkspaceReadCommandV1, error)
+}
+
 type WorkspaceReadAdmissionAttemptReaderV1 interface {
 	InspectWorkspaceReadAttemptForAdmissionV1(context.Context, runtimeports.ControlledOperationProviderAdmissionReceiptRefV2) (WorkspaceReadAdmissionAttemptBindingV1, error)
 }

@@ -22,7 +22,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 16
+const schemaVersion = 17
 
 type Store struct {
 	db                            *sql.DB
@@ -93,6 +93,9 @@ func (s *Store) initialize(ctx context.Context) error {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create Sandbox SQLite schema: %w", err)
 		}
+	}
+	if err := verifyWorkspaceReadCommandBodySealSchemaV1(ctx, tx); err != nil {
+		return err
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
 		return fmt.Errorf("set Sandbox SQLite schema version: %w", err)
@@ -240,6 +243,9 @@ var schemaStatements = []string{
 		change_set_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_command_current (
 		command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_command_body_seal (
+		command_id TEXT NOT NULL PRIMARY KEY, revision INTEGER NOT NULL,
+		digest TEXT NOT NULL, canonical_body_digest TEXT NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_reservation (
 		stable_digest TEXT PRIMARY KEY, reservation_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_attempt_current (
@@ -269,6 +275,71 @@ var schemaStatements = []string{
 		UNIQUE(tenant_id,scope_digest,request_id),
 		UNIQUE(tenant_id,scope_digest,idempotency_key),
 		UNIQUE(planned_change_set_id,planned_change_set_revision,planned_change_set_digest))`,
+}
+
+func verifyWorkspaceReadCommandBodySealSchemaV1(ctx context.Context, tx *sql.Tx) error {
+	if ctx == nil || tx == nil {
+		return errors.New("verify workspace read Command body seal schema requires context and transaction")
+	}
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_xinfo(workspace_read_command_body_seal)`)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Command body seal schema: %w", err)
+	}
+	defer rows.Close()
+	expected := []struct {
+		name       string
+		kind       string
+		notNull    int
+		primaryKey int
+	}{
+		{name: "command_id", kind: "TEXT", notNull: 1, primaryKey: 1},
+		{name: "revision", kind: "INTEGER", notNull: 1},
+		{name: "digest", kind: "TEXT", notNull: 1},
+		{name: "canonical_body_digest", kind: "TEXT", notNull: 1},
+	}
+	index := 0
+	for rows.Next() {
+		var (
+			columnID    int
+			name        string
+			kind        string
+			notNull     int
+			defaultBody sql.NullString
+			primaryKey  int
+			hidden      int
+		)
+		if err := rows.Scan(
+			&columnID,
+			&name,
+			&kind,
+			&notNull,
+			&defaultBody,
+			&primaryKey,
+			&hidden,
+		); err != nil {
+			return fmt.Errorf("decode workspace read Command body seal schema: %w", err)
+		}
+		if index >= len(expected) || columnID != index ||
+			name != expected[index].name ||
+			kind != expected[index].kind ||
+			notNull != expected[index].notNull ||
+			primaryKey != expected[index].primaryKey ||
+			hidden != 0 ||
+			defaultBody.Valid {
+			return errors.New("workspace read Command body seal schema is incompatible")
+		}
+		index++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect workspace read Command body seal schema rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Command body seal schema rows: %w", err)
+	}
+	if index != len(expected) {
+		return errors.New("workspace read Command body seal schema is incomplete")
+	}
+	return nil
 }
 
 func encode(value any) ([]byte, error) {

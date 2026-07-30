@@ -1,6 +1,7 @@
 package sqlite
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"errors"
@@ -19,11 +20,56 @@ func (s *Store) CreateWorkspaceReadCommandV1(ctx context.Context, value contract
 	if err != nil {
 		return contract.WorkspaceReadCommandV1{}, err
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO workspace_read_command_current(command_id,revision,digest,body) VALUES(?,?,?,?) ON CONFLICT(command_id) DO NOTHING`, value.Meta.ID, value.Meta.Revision, value.Meta.Digest, body)
+	bodySeal, err := workspaceReadCommandCanonicalBodySealV1(value.Meta.Ref(), body)
+	if err != nil {
+		return contract.WorkspaceReadCommandV1{}, err
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return contract.WorkspaceReadCommandV1{}, err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO workspace_read_command_current(command_id,revision,digest,body)
+		 VALUES(?,?,?,?)
+		 ON CONFLICT(command_id) DO NOTHING`,
+		value.Meta.ID,
+		value.Meta.Revision,
+		value.Meta.Digest,
+		body,
+	)
 	if err != nil {
 		return contract.WorkspaceReadCommandV1{}, classifyWrite(err)
 	}
-	return s.InspectWorkspaceReadCommandCurrentV1(ctx, value.Meta.Ref())
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return contract.WorkspaceReadCommandV1{}, err
+	}
+	if rows == 1 {
+		if _, err = tx.ExecContext(
+			ctx,
+			`INSERT INTO workspace_read_command_body_seal(
+				command_id,revision,digest,canonical_body_digest
+			 ) VALUES(?,?,?,?)`,
+			value.Meta.ID,
+			value.Meta.Revision,
+			value.Meta.Digest,
+			bodySeal,
+		); err != nil {
+			return contract.WorkspaceReadCommandV1{}, classifyWrite(err)
+		}
+	} else if rows != 0 {
+		return contract.WorkspaceReadCommandV1{}, ports.ErrConflict
+	}
+	if err = tx.Commit(); err != nil {
+		return contract.WorkspaceReadCommandV1{}, err
+	}
+	stored, err := s.InspectWorkspaceReadCommandExactV1(ctx, value.Meta.Ref())
+	if err != nil {
+		return contract.WorkspaceReadCommandV1{}, err
+	}
+	return stored, stored.ValidateCurrent(s.clock())
 }
 
 func (s *Store) InspectWorkspaceReadCommandCurrentV1(ctx context.Context, exact contract.Ref) (contract.WorkspaceReadCommandV1, error) {
@@ -47,6 +93,103 @@ func (s *Store) InspectWorkspaceReadCommandCurrentV1(ctx context.Context, exact 
 		return value, err
 	}
 	return value, value.ValidateCurrent(s.clock())
+}
+
+// InspectWorkspaceReadCommandExactV1 returns the immutable Command body sealed
+// at creation. The stored expiry remains evidence in that body; it is not a
+// currentness gate for historical inspection and is never refreshed here.
+func (s *Store) InspectWorkspaceReadCommandExactV1(ctx context.Context, exact contract.Ref) (contract.WorkspaceReadCommandV1, error) {
+	if ctx == nil {
+		return contract.WorkspaceReadCommandV1{}, errors.New("workspace read exact Command context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return contract.WorkspaceReadCommandV1{}, err
+	}
+	if s == nil || s.db == nil {
+		return contract.WorkspaceReadCommandV1{}, errors.New("workspace read exact Command reader is unavailable")
+	}
+	if err := exact.ValidateShape("workspace read command"); err != nil {
+		return contract.WorkspaceReadCommandV1{}, err
+	}
+	var revision uint64
+	var digest string
+	var body []byte
+	var sealRevision sql.NullInt64
+	var sealDigest sql.NullString
+	var canonicalBodyDigest sql.NullString
+	if err := s.db.QueryRowContext(
+		ctx,
+		`SELECT command.revision,command.digest,command.body,
+		        seal.revision,seal.digest,seal.canonical_body_digest
+		   FROM workspace_read_command_current AS command
+		   LEFT JOIN workspace_read_command_body_seal AS seal
+		     ON seal.command_id=command.command_id
+		  WHERE command.command_id=?`,
+		exact.ID,
+	).Scan(
+		&revision,
+		&digest,
+		&body,
+		&sealRevision,
+		&sealDigest,
+		&canonicalBodyDigest,
+	); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return contract.WorkspaceReadCommandV1{}, ports.ErrNotFound
+		}
+		return contract.WorkspaceReadCommandV1{}, err
+	}
+	if revision != exact.Revision || digest != exact.Digest {
+		return contract.WorkspaceReadCommandV1{}, ports.ErrConflict
+	}
+	if !sealRevision.Valid || sealRevision.Int64 <= 0 ||
+		uint64(sealRevision.Int64) != exact.Revision ||
+		!sealDigest.Valid || sealDigest.String != exact.Digest ||
+		!canonicalBodyDigest.Valid ||
+		!contract.ValidDigest(canonicalBodyDigest.String) {
+		return contract.WorkspaceReadCommandV1{}, ports.ErrConflict
+	}
+	var command contract.WorkspaceReadCommandV1
+	if err := decode(body, &command); err != nil {
+		return contract.WorkspaceReadCommandV1{}, ports.ErrConflict
+	}
+	canonical, err := encode(command)
+	if err != nil || !bytes.Equal(canonical, body) {
+		return contract.WorkspaceReadCommandV1{}, ports.ErrConflict
+	}
+	expectedBodySeal, err := workspaceReadCommandCanonicalBodySealV1(exact, canonical)
+	if err != nil || expectedBodySeal != canonicalBodyDigest.String {
+		return contract.WorkspaceReadCommandV1{}, ports.ErrConflict
+	}
+	if err := command.ValidateShape(); err != nil {
+		return contract.WorkspaceReadCommandV1{}, ports.ErrConflict
+	}
+	if command.Meta.Ref() != exact {
+		return contract.WorkspaceReadCommandV1{}, ports.ErrConflict
+	}
+	return command, nil
+}
+
+func workspaceReadCommandCanonicalBodySealV1(
+	exact contract.Ref,
+	canonical []byte,
+) (string, error) {
+	if err := exact.ValidateShape("workspace read command body seal"); err != nil {
+		return "", err
+	}
+	if len(canonical) == 0 {
+		return "", errors.New("workspace read Command canonical body is required")
+	}
+	return contract.Digest(
+		"workspace-read-command-canonical-body-row/v1",
+		struct {
+			Exact         contract.Ref `json:"exact"`
+			CanonicalBody string       `json:"canonical_body"`
+		}{
+			Exact:         exact,
+			CanonicalBody: string(canonical),
+		},
+	)
 }
 
 func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1, binding ports.WorkspaceReadAdmissionAttemptBindingV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
@@ -156,6 +299,8 @@ func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.Workspa
 	}
 	return projection, rows == 1, nil
 }
+
+var _ ports.WorkspaceReadCommandExactReaderV1 = (*Store)(nil)
 
 func (s *Store) InspectWorkspaceReadAttemptForAdmissionV1(ctx context.Context, admission runtimeports.ControlledOperationProviderAdmissionReceiptRefV2) (ports.WorkspaceReadAdmissionAttemptBindingV1, error) {
 	if err := admission.Validate(); err != nil || !admission.Admitted || admission.NoEffect {
