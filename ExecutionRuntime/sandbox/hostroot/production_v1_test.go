@@ -29,7 +29,7 @@ func TestProductionHostV1ServesAPIAndCurrentPlaneAsOneLifecycle(t *testing.T) {
 	}
 	defer store.Close()
 	surfaces := &hostSurfacesV1{}
-	current := &currentPlaneStubV1{path: filepath.Join(t.TempDir(), "current.sock"), started: make(chan struct{})}
+	current := &currentPlaneStubV1{path: testkit.ShortUnixSocketPath(t, "current.sock"), started: make(chan struct{})}
 	root, err := NewProductionHostV1(ProductionHostConfigV1{
 		Backends: []contract.BackendDescriptor{testkit.Backend()}, Facts: surfaces, Lifecycle: surfaces, WorkspaceCapture: surfaces,
 		Checkpoint: surfaces, SnapshotArtifact: surfaces, WorkspaceRestore: surfaces, WorkspaceRewind: surfaces, Operations: store, Authorization: transportAuthorizationStubV1{}, CurrentPlane: current,
@@ -98,12 +98,46 @@ func TestProductionHostV1RejectsIncompleteProductionSurfaces(t *testing.T) {
 	}
 }
 
+func TestProductionHostV1ReturnsCurrentPlaneListenFailureWithoutReadiness(t *testing.T) {
+	store, err := sqlite.OpenWithClock(context.Background(), filepath.Join(t.TempDir(), "sandbox.db"), func() time.Time { return testkit.FixedNow })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	surfaces := &hostSurfacesV1{}
+	listenErr := errors.New("current plane bind failed")
+	current := &currentPlaneStubV1{listenErr: listenErr}
+	root, err := NewProductionHostV1(ProductionHostConfigV1{
+		Backends: []contract.BackendDescriptor{testkit.Backend()}, Facts: surfaces, Lifecycle: surfaces, WorkspaceCapture: surfaces,
+		Checkpoint: surfaces, SnapshotArtifact: surfaces, WorkspaceRestore: surfaces, WorkspaceRewind: surfaces, Operations: store, Authorization: transportAuthorizationStubV1{}, CurrentPlane: current,
+		Clock: func() time.Time { return testkit.FixedNow }, ReadHeaderTimeout: time.Second, IdleTimeout: time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	if err := root.Serve(context.Background(), listener); !errors.Is(err, listenErr) {
+		t.Fatalf("host root current-plane bind error = %v, want %v", err, listenErr)
+	}
+	if root.Ready() {
+		t.Fatal("host root published readiness after current-plane bind failure")
+	}
+}
+
 type currentPlaneStubV1 struct {
-	path    string
-	started chan struct{}
+	path      string
+	started   chan struct{}
+	listenErr error
 }
 
 func (s *currentPlaneStubV1) Listen() (*net.UnixListener, error) {
+	if s.listenErr != nil {
+		return nil, s.listenErr
+	}
 	_ = os.Remove(s.path)
 	return net.ListenUnix("unix", &net.UnixAddr{Name: s.path, Net: "unix"})
 }
