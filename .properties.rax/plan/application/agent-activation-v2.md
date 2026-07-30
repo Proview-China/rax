@@ -65,3 +65,9 @@ Runtime、Sandbox、Harness 的窄Reader、stable Gateway与adapter由各Owner�
 ## 4. 完成门
 
 P0-P3、Owner联合审计与production current后端全部通过前，不得用V1 fake或generic Observation声明Agent Activation可用于生产。
+
+基线Conformance纠偏不改变上述计划完成状态：单个
+`AgentActivationCoordinationFactV2`只能证明聚合内部闭包，
+`VersionClaimAtomicPayload`和`AppendOnlyHistory`继续由Store级测试证明，不能在
+aggregate-only candidate中置为true；Committed Scope按治理值比较；所有此类
+candidate仍固定`ProductionEligible=false`。

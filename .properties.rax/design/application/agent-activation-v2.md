@@ -110,6 +110,13 @@ Sandbox需要：AllocateStartOrInspectGatewayV2、ActivateStartOrInspectGatewayV
 - 64 个 Coordinator 共享 Fact Store，每个 exact step 只允许一个正常CAS Start权。
 - Application adapter 导入 Runtime/Sandbox/Harness 实现包或写 Store，import/conformance 拒绝。
 
+单聚合事实的 Conformance 只允许报告该事实内部可验证的八步闭包、
+invocation write-ahead、unknown inspect-only 与 committed scope exact。后者按
+`SameExecutionScopeV2` 的治理值语义比较，`SandboxLease` 指针地址不属于身份。
+`VersionClaimAtomicPayload` 与 `AppendOnlyHistory` 必须保持 `false`，因为这两项
+只能由 Store/Owner Conformance 证明；`ProductionEligible` 同样固定为 `false`。
+通过单聚合检查不得替代 durable Store、Owner current Reader 或 production root。
+
 测试编号至少覆盖：AAV2-01 proposed/committed Scope type-pun；AAV2-02 pre-Commit Activate/Open；AAV2-03 unknown Allocate无Lease；AAV2-04 unknown Open无Endpoint；AAV2-05 Availability循环；AAV2-06/07 V1/V2双向Claim；AAV2-08 Observation冒充Fact；AAV2-09 S1/S2 TTL crossing；AAV2-10 clock rollback；AAV2-11 invocation CAS lost reply；AAV2-12 64独立Coordinator。
 
 ## 9. 完成门
