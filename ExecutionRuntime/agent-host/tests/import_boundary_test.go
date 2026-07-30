@@ -76,6 +76,10 @@ func TestProductionImportBoundary(t *testing.T) {
 				filepath.Join("contract", "bootstrap_v1.go"): {
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports": true,
 				},
+				filepath.Join("contract", "deployment_current_v2.go"): {
+					"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract": true,
+					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports":          true,
+				},
 				filepath.Join("contract", "cleanup_closure_v2.go"): {
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":  true,
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports": true,
@@ -110,6 +114,16 @@ func TestProductionImportBoundary(t *testing.T) {
 					"github.com/Proview-China/rax/ExecutionRuntime/application/contract": true,
 					"github.com/Proview-China/rax/ExecutionRuntime/application/ports":    true,
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports":        true,
+				},
+				filepath.Join("ports", "deployment_current_v2.go"): {
+					"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/ports": true,
+					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports":       true,
+				},
+				filepath.Join("deployment", "current_v2.go"): {
+					"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract":   true,
+					"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycontract": true,
+					"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":             true,
+					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports":            true,
 				},
 				filepath.Join("lifecycle", "host_v2.go"): {
 					"github.com/Proview-China/rax/ExecutionRuntime/application/contract": true,

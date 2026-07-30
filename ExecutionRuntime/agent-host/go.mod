@@ -4,6 +4,7 @@ go 1.25.0
 
 require (
 	github.com/Proview-China/rax/ExecutionRuntime/agent-assembler v0.0.0
+	github.com/Proview-China/rax/ExecutionRuntime/agent-builder v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/agent-definition v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/application v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/harness v0.0.0
@@ -28,6 +29,8 @@ require (
 )
 
 replace github.com/Proview-China/rax/ExecutionRuntime/agent-assembler => ../agent-assembler
+
+replace github.com/Proview-China/rax/ExecutionRuntime/agent-builder => ../agent-builder
 
 replace github.com/Proview-China/rax/ExecutionRuntime/agent-definition => ../agent-definition
 

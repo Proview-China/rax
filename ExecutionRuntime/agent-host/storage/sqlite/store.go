@@ -19,12 +19,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Version 6 adds the Host-owned Cleanup Closure/embedded Plan store. Version 5
-// added the HostStart InputV3 sidecar and version 4 added the Host-owned Review
-// Attempt to governed Model invocation association history/current index. The
-// full idempotent DDL upgrades earlier stores in place, while every historical
-// schema proof is read back and verified before the new proof is committed.
-const schemaVersionV1 = 6
+// Version 7 adds HostDeploymentCurrentV2 append-only history and current CAS.
+// Version 6 added the Host-owned Cleanup Closure/embedded Plan store. Version
+// 5 added the HostStart InputV3 sidecar and version 4 added the Host-owned
+// Review Attempt to governed Model invocation association history/current
+// index. Every historical schema proof is read back and the V7 physical schema
+// is independently verified before the new proof is committed.
+const schemaVersionV1 = 7
 
 type Config struct {
 	Path         string
@@ -42,6 +43,11 @@ type Store struct {
 	faultMu       sync.Mutex
 	loseNextReply bool
 }
+
+// schemaOpenMu serializes the migration plus physical-schema proof for
+// independent handles in this process. Every Open still executes the complete
+// proof; only the SQLite write-lock acquisition is serialized.
+var schemaOpenMu sync.Mutex
 
 func Open(ctx context.Context, config Config) (*Store, error) {
 	if ctx == nil || ctx.Err() != nil {
@@ -73,7 +79,7 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 		return nil, contract.NewError(contract.ErrorInvalidArgument, "sqlite_path_invalid", "agent-host sqlite path is invalid")
 	}
 	dsn := (&url.URL{Scheme: "file", Path: abs}).String()
-	dsn += fmt.Sprintf("?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=busy_timeout(%d)&_txlock=immediate", config.BusyTimeout.Milliseconds())
+	dsn += fmt.Sprintf("?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)&_pragma=synchronous(FULL)&_pragma=busy_timeout(%d)&_txlock=immediate", config.BusyTimeout.Milliseconds())
 	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, mapDBError(ctx, err, false)
@@ -81,6 +87,8 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 	db.SetMaxOpenConns(config.MaxOpenConns)
 	db.SetMaxIdleConns(config.MaxOpenConns)
 	store := &Store{db: db, owner: config.Owner, clock: config.Clock}
+	schemaOpenMu.Lock()
+	defer schemaOpenMu.Unlock()
 	if err := store.migrate(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -108,7 +116,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		return mapDBError(ctx, err, true)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err = tx.ExecContext(ctx, schemaV6); err != nil {
+	if _, err = tx.ExecContext(ctx, schemaV7); err != nil {
 		return mapDBError(ctx, err, true)
 	}
 	now := s.clock()
@@ -122,7 +130,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		{3, core.DigestBytes([]byte(schemaBaseV3))},
 		{4, core.DigestBytes([]byte(schemaV1))},
 		{5, core.DigestBytes([]byte(schemaV5))},
-		{schemaVersionV1, core.DigestBytes([]byte(schemaV6))},
+		{6, core.DigestBytes([]byte(schemaV6))},
+		{schemaVersionV1, core.DigestBytes([]byte(schemaV7))},
 	}
 	for _, proof := range proofs {
 		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO agent_host_schema(version,digest,applied_unix_nano) VALUES(?,?,?)`, proof.version, string(proof.digest), now.UnixNano()); err != nil {
@@ -135,6 +144,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		if stored != string(proof.digest) {
 			return contract.NewError(contract.ErrorConflict, "sqlite_schema_digest_drift", "agent-host sqlite schema digest drifted")
 		}
+	}
+	if err = verifyDeploymentCurrentSchemaV2(ctx, tx); err != nil {
+		return err
 	}
 	if err = tx.Commit(); err != nil {
 		return contract.NewError(contract.ErrorUnknownOutcome, "sqlite_commit_unknown", "agent-host sqlite migration commit outcome is unknown")
@@ -150,12 +162,15 @@ func (s *Store) verifyPragmas(ctx context.Context) error {
 	if !strings.EqualFold(journal, "wal") {
 		return contract.NewError(contract.ErrorPrecondition, "sqlite_wal_inactive", "agent-host sqlite WAL mode is not active")
 	}
-	var foreignKeys int
+	var foreignKeys, synchronous int
 	if err := s.db.QueryRowContext(ctx, `PRAGMA foreign_keys`).Scan(&foreignKeys); err != nil {
 		return mapDBError(ctx, err, false)
 	}
-	if foreignKeys != 1 {
-		return contract.NewError(contract.ErrorPrecondition, "sqlite_foreign_keys_inactive", "agent-host sqlite foreign keys are not active")
+	if err := s.db.QueryRowContext(ctx, `PRAGMA synchronous`).Scan(&synchronous); err != nil {
+		return mapDBError(ctx, err, false)
+	}
+	if foreignKeys != 1 || synchronous != 2 {
+		return contract.NewError(contract.ErrorPrecondition, "sqlite_durability_inactive", "agent-host sqlite foreign keys or FULL synchronous mode are not active")
 	}
 	return nil
 }
