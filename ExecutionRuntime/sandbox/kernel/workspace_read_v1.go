@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path"
+	"reflect"
 	"strings"
 	"time"
 
@@ -375,6 +376,17 @@ func (e *WorkspaceReadPhysicalExecutorV1) InspectBoundedWorkspaceReadV1(ctx cont
 	return e.store.InspectBoundedWorkspaceReadV1(ctx, ref)
 }
 
+func (e *WorkspaceReadPhysicalExecutorV1) InspectBoundedWorkspaceReadV2(ctx context.Context, ref contract.WorkspaceReadAttemptRefV1) (sandboxports.WorkspaceReadInspectionEnvelopeV2, error) {
+	if e == nil || e.store == nil {
+		return sandboxports.WorkspaceReadInspectionEnvelopeV2{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read exact Inspect v2 is unavailable")
+	}
+	reader, ok := e.store.(sandboxports.WorkspaceReadInspectionReaderV2)
+	if !ok || nilLikeWorkspaceReadInspectionV2(reader) {
+		return sandboxports.WorkspaceReadInspectionEnvelopeV2{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read exact Inspect v2 is unavailable")
+	}
+	return reader.InspectBoundedWorkspaceReadV2(ctx, ref)
+}
+
 func (e *WorkspaceReadPhysicalExecutorV1) InspectWorkspaceReadAttemptForAdmissionV1(ctx context.Context, receipt runtimeports.ControlledOperationProviderAdmissionReceiptRefV2) (sandboxports.WorkspaceReadAdmissionAttemptBindingV1, error) {
 	if e == nil || e.store == nil {
 		return sandboxports.WorkspaceReadAdmissionAttemptBindingV1{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read admission handoff Inspect is unavailable")
@@ -537,4 +549,18 @@ func minWorkspaceReadExpiryV1(values ...int64) int64 {
 	return result
 }
 
+func nilLikeWorkspaceReadInspectionV2(value any) bool {
+	if value == nil {
+		return true
+	}
+	reflected := reflect.ValueOf(value)
+	switch reflected.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Pointer, reflect.Slice:
+		return reflected.IsNil()
+	default:
+		return false
+	}
+}
+
 var _ sandboxports.WorkspaceReadExecutionPortV1 = (*WorkspaceReadPhysicalExecutorV1)(nil)
+var _ sandboxports.WorkspaceReadExecutionPortV2 = (*WorkspaceReadPhysicalExecutorV1)(nil)
