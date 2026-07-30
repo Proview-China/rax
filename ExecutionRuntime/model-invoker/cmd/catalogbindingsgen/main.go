@@ -19,7 +19,7 @@ func main() {
 	if err != nil {
 		fail(err)
 	}
-	generated, err := catalog.RenderCurrentBindingsMarkdown(catalog.DefaultDocument(), time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC))
+	generated, err := catalog.RenderCurrentBindingsMarkdown(catalog.DefaultDocument(), time.Date(2026, 7, 30, 10, 45, 0, 0, time.UTC))
 	if err != nil {
 		fail(err)
 	}

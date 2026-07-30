@@ -11,7 +11,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/upstream"
 )
 
-var testNow = time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC)
+var testNow = time.Date(2026, 7, 30, 10, 45, 0, 0, time.UTC)
 
 func TestRouteFacadeV1BindsCatalogOwnedSelectorsWithoutMutatingCall(t *testing.T) {
 	provider := &fakeProvider{id: "openai"}

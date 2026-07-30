@@ -20,7 +20,7 @@ Tool Call完整候选批次、公共Union exact投影及Gateway读取边界见[T
 4. 超时、重试、流生命周期、错误和 Raw 数据由统一规则控制。
 5. Direct API、App Server、Agent SDK、官方 CLI 与 ACP 可以保持原生 Mechanism 差异，同时收敛为统一 Intent、Effect、Verification 和 Result。
 
-代码位于 `ExecutionRuntime/model-invoker/`。第二阶段、第三阶段A-E1、上游调用最终候选A→F、信任闭合、宿主激活再验证与Factory A/B双层信任闭合均在同一模块内实施。根包 `RouteInvoker`负责Policy/Authorization/Audit；`catalog.ApplyActivationPlan`负责原子激活快照；`routegateway.NewHost`负责宿主依赖、工厂、可信订阅Resolver和Gateway就绪事务。机器资产包括39×20语义矩阵、39条Provider缓存事实和18行Factory双层信任矩阵；16条订阅Route保留实现但默认host-blocked。
+代码位于 `ExecutionRuntime/model-invoker/`。第二阶段、第三阶段A-E1、上游调用最终候选A→F、信任闭合、宿主激活再验证与Factory A/B双层信任闭合均在同一模块内实施。根包 `RouteInvoker`负责Policy/Authorization/Audit；`catalog.ApplyActivationPlan`负责原子激活快照；`routegateway.NewHost`负责宿主依赖、工厂、可信订阅Resolver和Gateway就绪事务。机器资产包括39×20语义矩阵、39条Provider缓存事实和18行Factory双层信任矩阵；16条订阅Route保留实现但默认host-blocked。2026-07-30官方证据复核后，39条默认callable路线保持fresh；MiMo Token Plan六条host-blocked路线因当前资料不能证明旧版精确用途限制而标记stale并保持NO-GO。
 
 ## 2. 当前产物
 

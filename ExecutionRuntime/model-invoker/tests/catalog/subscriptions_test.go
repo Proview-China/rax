@@ -44,7 +44,11 @@ func TestSubscriptionCatalogRecordsSeparateApprovedCallableAndBlockedRoutes(t *t
 			}
 			continue
 		}
-		if entry.Evidence.Status != catalog.EvidenceFresh ||
+		expectedEvidence := catalog.EvidenceFresh
+		if entry.Route.Offering.ID == "mimo.token-plan" {
+			expectedEvidence = catalog.EvidenceStale
+		}
+		if entry.Evidence.Status != expectedEvidence ||
 			entry.Route.Offering.Entitlement.AllowedUsage != upstream.AllowedUsageInteractiveCodingOnly ||
 			!entry.Route.Offering.Entitlement.RequiresExplicitContext || !entry.Route.Offering.Entitlement.RequiresClientIdentity {
 			t.Errorf("interactive route %q policy/status is incomplete", entry.ID)

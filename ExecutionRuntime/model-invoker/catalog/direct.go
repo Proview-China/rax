@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	directCheckedAt  = time.Date(2026, 7, 11, 9, 0, 0, 0, time.UTC)
+	directCheckedAt  = time.Date(2026, 7, 30, 10, 45, 0, 0, time.UTC)
 	directValidUntil = directCheckedAt.Add(7 * 24 * time.Hour)
 )
 
@@ -45,12 +45,12 @@ func xAIAPIEntry() Entry {
 		Maturity:       MaturityUnknown,
 		ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryStaticCatalog, AliasPolicy: ModelAliasExactProviderID, Aliases: []ModelAlias{{Alias: "grok-4.5", ProviderModelRef: "grok-4.5", Stable: true}}},
 		Sources: []OfficialSource{
-			{ID: "xai.responses.2026-07-11", Publisher: "xAI", Kind: SourceAPIReference, URL: "https://docs.x.ai/developers/rest-api-reference/inference/chat"},
-			{ID: "xai.grok-4.5.2026-07-11", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/grok-4-5"},
-			{ID: "xai.function-calling.2026-07-11", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/tools/function-calling"},
-			{ID: "xai.reasoning.2026-07-11", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/model-capabilities/text/reasoning"},
-			{ID: "xai.errors.2026-07-11", Publisher: "xAI", Kind: SourceAPIReference, URL: "https://docs.x.ai/developers/debugging"},
-			{ID: "xai.prompt-cache.2026-07-11", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits"},
+			{ID: "xai.responses.2026-07-30", Publisher: "xAI", Kind: SourceAPIReference, URL: "https://docs.x.ai/developers/rest-api-reference/inference/chat"},
+			{ID: "xai.grok-4.5.2026-07-30", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/grok-4-5"},
+			{ID: "xai.function-calling.2026-07-30", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/tools/function-calling"},
+			{ID: "xai.reasoning.2026-07-30", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/model-capabilities/text/reasoning"},
+			{ID: "xai.errors.2026-07-30", Publisher: "xAI", Kind: SourceAPIReference, URL: "https://docs.x.ai/developers/debugging"},
+			{ID: "xai.prompt-cache.2026-07-30", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://docs.x.ai/developers/advanced-api-usage/prompt-caching/maximizing-cache-hits"},
 		},
 		Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: directCheckedAt, ValidUntil: directValidUntil},
 		SDKs:     []SDKMetadata{openAISDK()},
@@ -81,13 +81,13 @@ func qwenPlatformEntries() []Entry {
 	models := []string{"qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash"}
 	offering := cloudPAYGOffering("alibaba.model-studio.payg")
 	sources := []OfficialSource{
-		{ID: "alibaba.qwen.reference.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://www.alibabacloud.com/help/en/model-studio/qwen-api-reference"},
-		{ID: "alibaba.qwen.responses.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceAPIReference, URL: "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-responses"},
-		{ID: "alibaba.qwen.chat.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceAPIReference, URL: "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"},
-		{ID: "alibaba.base-url.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://help.aliyun.com/en/model-studio/base-url"},
-		{ID: "alibaba.regions.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://help.aliyun.com/en/model-studio/regions/"},
-		{ID: "alibaba.api-key.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://www.alibabacloud.com/help/en/model-studio/get-api-key"},
-		{ID: "alibaba.errors.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceAPIReference, URL: "https://www.alibabacloud.com/help/en/model-studio/error-code"},
+		{ID: "alibaba.qwen.reference.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://www.alibabacloud.com/help/en/model-studio/qwen-api-reference"},
+		{ID: "alibaba.qwen.responses.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceAPIReference, URL: "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-responses"},
+		{ID: "alibaba.qwen.chat.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceAPIReference, URL: "https://www.alibabacloud.com/help/en/model-studio/qwen-api-via-openai-chat-completions"},
+		{ID: "alibaba.base-url.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://help.aliyun.com/en/model-studio/base-url"},
+		{ID: "alibaba.regions.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://help.aliyun.com/en/model-studio/regions/"},
+		{ID: "alibaba.api-key.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://www.alibabacloud.com/help/en/model-studio/get-api-key"},
+		{ID: "alibaba.errors.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceAPIReference, URL: "https://www.alibabacloud.com/help/en/model-studio/error-code"},
 	}
 	regions := []struct {
 		id string
@@ -171,15 +171,14 @@ func mimoPlatformEntries() []Entry {
 	offering := cloudPAYGOffering("xiaomi.mimo.payg")
 	deployment := upstream.Deployment{ID: "xiaomi.mimo.global", Kind: upstream.DeploymentDirect, Region: "global"}
 	sources := []OfficialSource{
-		{ID: "mimo.index.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceProductDocs, URL: "https://platform.xiaomimimo.com/llms.txt"},
-		{ID: "mimo.first-call.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceProductDocs, URL: "https://platform.xiaomimimo.com/static/docs/quick-start/first-api-call.md"},
-		{ID: "mimo.models.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceProductDocs, URL: "https://platform.xiaomimimo.com/static/docs/quick-start/model.md"},
-		{ID: "mimo.openai.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceAPIReference, URL: "https://platform.xiaomimimo.com/static/docs/api/chat/openai-api.md"},
-		{ID: "mimo.anthropic.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceAPIReference, URL: "https://platform.xiaomimimo.com/static/docs/api/chat/anthropic-api.md"},
-		{ID: "mimo.errors.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceAPIReference, URL: "https://platform.xiaomimimo.com/static/docs/quick-start/error-codes.md"},
-		{ID: "mimo.deprecation.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceProductDocs, URL: "https://platform.xiaomimimo.com/static/docs/updates/deprecate.md"},
-		{ID: "mimo.payg.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceTerms, URL: "https://platform.xiaomimimo.com/static/docs/price/pay-as-you-go.md"},
-		{ID: "mimo.token-plan.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceTerms, URL: "https://platform.xiaomimimo.com/static/docs/price/tokenplan/quick-access.md"},
+		{ID: "mimo.models.2026-07-30", Publisher: "Xiaomi MiMo", Kind: SourceModelCatalog, URL: "https://mimo.mi.com/docs/quick-start/summary/model"},
+		{ID: "mimo.first-call.2026-07-30", Publisher: "Xiaomi MiMo", Kind: SourceProductDocs, URL: "https://mimo.mi.com/docs/quick-start/first-api-call"},
+		{ID: "mimo.openai.2026-07-30", Publisher: "Xiaomi MiMo", Kind: SourceAPIReference, URL: "https://mimo.mi.com/docs/api/chat/openai-api"},
+		{ID: "mimo.anthropic.2026-07-30", Publisher: "Xiaomi MiMo", Kind: SourceAPIReference, URL: "https://mimo.mi.com/docs/api/chat/anthropic-api"},
+		{ID: "mimo.errors.2026-07-30", Publisher: "Xiaomi MiMo", Kind: SourceAPIReference, URL: "https://mimo.mi.com/docs/quick-start/error-codes"},
+		{ID: "mimo.deprecation.2026-07-30", Publisher: "Xiaomi MiMo", Kind: SourceProductDocs, URL: "https://mimo.mi.com/docs/updates/deprecate"},
+		{ID: "mimo.payg.2026-07-30", Publisher: "Xiaomi MiMo", Kind: SourceTerms, URL: "https://mimo.mi.com/docs/price/pay-as-you-go"},
+		{ID: "mimo.token-plan.2026-07-30", Publisher: "Xiaomi MiMo", Kind: SourceTerms, URL: "https://mimo.mi.com/docs/tokenplan/quick-access"},
 	}
 	type definition struct {
 		id         upstream.RouteID
@@ -261,11 +260,11 @@ func minimaxPlatformEntries() []Entry {
 	offering := cloudPAYGOffering("minimax.platform.payg")
 	deployment := upstream.Deployment{ID: "minimax.platform.global", Kind: upstream.DeploymentDirect, Region: "global"}
 	sources := []OfficialSource{
-		{ID: "minimax.api.overview.2026-07-11", Publisher: "MiniMax", Kind: SourceProductDocs, URL: "https://platform.minimax.io/docs/api-reference/api-overview"},
-		{ID: "minimax.anthropic.2026-07-11", Publisher: "MiniMax", Kind: SourceAPIReference, URL: "https://platform.minimax.io/docs/api-reference/text-anthropic-api"},
-		{ID: "minimax.openai.2026-07-11", Publisher: "MiniMax", Kind: SourceAPIReference, URL: "https://platform.minimax.io/docs/api-reference/text-openai-api"},
-		{ID: "minimax.responses.2026-07-11", Publisher: "MiniMax", Kind: SourceAPIReference, URL: "https://platform.minimax.io/docs/api-reference/responses-create"},
-		{ID: "minimax.errors.2026-07-11", Publisher: "MiniMax", Kind: SourceAPIReference, URL: "https://platform.minimax.io/docs/api-reference/errorcode"},
+		{ID: "minimax.api.overview.2026-07-30", Publisher: "MiniMax", Kind: SourceProductDocs, URL: "https://platform.minimax.io/docs/api-reference/api-overview"},
+		{ID: "minimax.anthropic.2026-07-30", Publisher: "MiniMax", Kind: SourceAPIReference, URL: "https://platform.minimax.io/docs/api-reference/text-anthropic-api"},
+		{ID: "minimax.openai.2026-07-30", Publisher: "MiniMax", Kind: SourceAPIReference, URL: "https://platform.minimax.io/docs/api-reference/text-openai-api"},
+		{ID: "minimax.responses.2026-07-30", Publisher: "MiniMax", Kind: SourceAPIReference, URL: "https://platform.minimax.io/docs/api-reference/responses-create"},
+		{ID: "minimax.errors.2026-07-30", Publisher: "MiniMax", Kind: SourceAPIReference, URL: "https://platform.minimax.io/docs/api-reference/errorcode"},
 	}
 	type definition struct {
 		id         upstream.RouteID
@@ -360,12 +359,12 @@ func zaiPlatformEntry() Entry {
 		Route:    upstream.UpstreamRoute{ID: routeID, Model: upstream.ModelIdentity{CanonicalFamily: "glm", ProviderModelRef: models[0]}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: upstream.ProtocolChatCompletions, APIVersion: "paas-v4"}, Endpoint: endpoint, Credential: credential},
 		Maturity: MaturityUnknown, ModelDiscovery: exactProviderModels(models),
 		Sources: []OfficialSource{
-			{ID: "zai.introduction.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/api-reference/introduction"},
-			{ID: "zai.chat.2026-07-11", Publisher: "Z.AI", Kind: SourceAPIReference, URL: "https://docs.z.ai/api-reference/llm/chat-completion"},
-			{ID: "zai.thinking.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/guides/capabilities/thinking-mode"},
-			{ID: "zai.function-calling.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/guides/capabilities/function-calling"},
-			{ID: "zai.streaming.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/guides/capabilities/streaming"},
-			{ID: "zai.errors.2026-07-11", Publisher: "Z.AI", Kind: SourceAPIReference, URL: "https://docs.z.ai/api-reference/api-code"},
+			{ID: "zai.introduction.2026-07-30", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/api-reference/introduction"},
+			{ID: "zai.chat.2026-07-30", Publisher: "Z.AI", Kind: SourceAPIReference, URL: "https://docs.z.ai/api-reference/llm/chat-completion"},
+			{ID: "zai.thinking.2026-07-30", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/guides/capabilities/thinking-mode"},
+			{ID: "zai.function-calling.2026-07-30", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/guides/capabilities/function-calling"},
+			{ID: "zai.streaming.2026-07-30", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/guides/capabilities/streaming"},
+			{ID: "zai.errors.2026-07-30", Publisher: "Z.AI", Kind: SourceAPIReference, URL: "https://docs.z.ai/api-reference/api-code"},
 		},
 		Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: directCheckedAt, ValidUntil: directValidUntil},
 		SDKs:     []SDKMetadata{openAISDK()},
@@ -403,10 +402,10 @@ func kimiPlatformEntry() Entry {
 		Route:    upstream.UpstreamRoute{ID: routeID, Model: upstream.ModelIdentity{CanonicalFamily: "kimi", ProviderModelRef: models[0]}, Provider: providerID, Offering: offering, Deployment: deployment, Protocol: upstream.ProtocolBinding{ID: upstream.ProtocolChatCompletions, APIVersion: "kimi-2026-07-11"}, Endpoint: endpoint, Credential: credential},
 		Maturity: MaturityUnknown, ModelDiscovery: exactProviderModels(models),
 		Sources: []OfficialSource{
-			{ID: "kimi.platform.overview.2026-07-11", Publisher: "Moonshot AI", Kind: SourceProductDocs, URL: "https://platform.kimi.com/docs/api/overview"},
-			{ID: "kimi.platform.models.2026-07-11", Publisher: "Moonshot AI", Kind: SourceProductDocs, URL: "https://platform.kimi.com/docs/models"},
-			{ID: "kimi.platform.reasoning.2026-07-11", Publisher: "Moonshot AI", Kind: SourceAPIReference, URL: "https://platform.kimi.com/docs/guide/use-kimi-k2-thinking-model"},
-			{ID: "kimi.platform.errors.2026-07-11", Publisher: "Moonshot AI", Kind: SourceAPIReference, URL: "https://platform.kimi.com/docs/api/errors"},
+			{ID: "kimi.platform.overview.2026-07-30", Publisher: "Moonshot AI", Kind: SourceProductDocs, URL: "https://platform.kimi.com/docs/api/overview"},
+			{ID: "kimi.platform.models.2026-07-30", Publisher: "Moonshot AI", Kind: SourceProductDocs, URL: "https://platform.kimi.com/docs/models"},
+			{ID: "kimi.platform.reasoning.2026-07-30", Publisher: "Moonshot AI", Kind: SourceAPIReference, URL: "https://platform.kimi.com/docs/guide/use-kimi-k2-thinking-model"},
+			{ID: "kimi.platform.errors.2026-07-30", Publisher: "Moonshot AI", Kind: SourceAPIReference, URL: "https://platform.kimi.com/docs/api/errors"},
 		},
 		Evidence: Evidence{Status: EvidenceFresh, TTLClass: EvidenceTTL7Days, CheckedAt: directCheckedAt, ValidUntil: directValidUntil},
 		SDKs:     []SDKMetadata{openAISDK()},
@@ -457,9 +456,9 @@ func deepSeekEntries() []Entry {
 		},
 	}
 	sources := []OfficialSource{
-		{ID: "deepseek.quickstart.2026-07-11", Publisher: "DeepSeek", Kind: SourceProductDocs, URL: "https://api-docs.deepseek.com/"},
-		{ID: "deepseek.chat.reference.2026-07-11", Publisher: "DeepSeek", Kind: SourceAPIReference, URL: "https://api-docs.deepseek.com/api/create-chat-completion/"},
-		{ID: "deepseek.anthropic.2026-07-11", Publisher: "DeepSeek", Kind: SourceAPIReference, URL: "https://api-docs.deepseek.com/guides/anthropic_api/"},
+		{ID: "deepseek.quickstart.2026-07-30", Publisher: "DeepSeek", Kind: SourceProductDocs, URL: "https://api-docs.deepseek.com/"},
+		{ID: "deepseek.chat.reference.2026-07-30", Publisher: "DeepSeek", Kind: SourceAPIReference, URL: "https://api-docs.deepseek.com/api/create-chat-completion/"},
+		{ID: "deepseek.anthropic.2026-07-30", Publisher: "DeepSeek", Kind: SourceAPIReference, URL: "https://api-docs.deepseek.com/guides/anthropic_api/"},
 	}
 	definitions := []struct {
 		id       upstream.RouteID
