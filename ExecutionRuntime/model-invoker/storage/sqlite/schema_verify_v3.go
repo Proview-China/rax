@@ -675,8 +675,8 @@ func indexKeyColumnsV3(ctx context.Context, db *sql.DB, name string) ([]string, 
 	if err != nil {
 		return nil, mapDBErrorV1(ctx, "verify_v3", err, false)
 	}
-	defer rows.Close()
 	var physical []IndexXInfoConformanceRowV4
+	var scanErr error
 	for rows.Next() {
 		var row IndexXInfoConformanceRowV4
 		if err := rows.Scan(
@@ -687,11 +687,14 @@ func indexKeyColumnsV3(ctx context.Context, db *sql.DB, name string) ([]string, 
 			&row.Collation,
 			&row.Key,
 		); err != nil {
-			return nil, mapDBErrorV1(ctx, "verify_v3", err, false)
+			scanErr = err
+			break
 		}
 		physical = append(physical, row)
 	}
-	if err := rows.Err(); err != nil {
+	iterationErr := errors.Join(scanErr, rows.Err())
+	closeErr := rows.Close()
+	if err := errors.Join(iterationErr, closeErr); err != nil {
 		return nil, mapDBErrorV1(ctx, "verify_v3", err, false)
 	}
 	columns, err := ValidateIndexXInfoRowsForConformanceV4(physical)

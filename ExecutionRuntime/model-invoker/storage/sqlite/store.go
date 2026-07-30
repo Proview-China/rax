@@ -24,6 +24,7 @@ const (
 	schemaVersionV2 = 2
 	schemaVersionV3 = 3
 	schemaVersionV4 = 4
+	schemaVersionV5 = 5
 )
 
 type Config struct {
@@ -84,6 +85,10 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := store.migrateV5(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := store.verifyV1(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -96,7 +101,91 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := store.verifyV5(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return store, nil
+}
+
+func (s *Store) migrateV5(ctx context.Context) error {
+	tx, err := s.beginV1(ctx, "migrate_v5")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	digest := core.DigestBytes([]byte(schemaV5))
+	var stored string
+	switch err := tx.QueryRowContext(
+		ctx,
+		`SELECT digest FROM model_invoker_schema WHERE version=?`,
+		schemaVersionV5,
+	).Scan(&stored); {
+	case err == nil:
+		if stored != string(digest) {
+			return errorV1(
+				modelinvoker.GovernedModelInvocationErrorConflict,
+				"migrate_v5",
+				"sqlite schema v5 digest drifted",
+				nil,
+			)
+		}
+		if err := tx.Commit(); err != nil {
+			return errorV1(
+				modelinvoker.GovernedModelInvocationErrorIndeterminate,
+				"migrate_v5",
+				"sqlite schema v5 ledger inspection commit outcome is unknown",
+				err,
+			)
+		}
+		// An existing V5 ledger is an immutable claim about existing physical
+		// objects. Verify those objects as-is; never repair or recreate them.
+		return s.verifyV5(ctx)
+	case errors.Is(err, sql.ErrNoRows):
+		// A fresh V5 migration is allowed only when no V5-owned object exists.
+	default:
+		return mapDBErrorV1(ctx, "migrate_v5", err, false)
+	}
+
+	var existingObjects int
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM sqlite_master
+		 WHERE name LIKE 'governed_model_turn_v3_provider_boundary_%'
+		    OR tbl_name LIKE 'governed_model_turn_v3_provider_boundary_%'`,
+	).Scan(&existingObjects); err != nil {
+		return mapDBErrorV1(ctx, "migrate_v5", err, false)
+	}
+	if existingObjects != 0 {
+		return errorV1(
+			modelinvoker.GovernedModelInvocationErrorConflict,
+			"migrate_v5",
+			"sqlite schema v5 objects exist without the V5 ledger",
+			nil,
+		)
+	}
+	if _, err := tx.ExecContext(ctx, schemaV5); err != nil {
+		return mapDBErrorV1(ctx, "migrate_v5", err, true)
+	}
+	now := time.Now()
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO model_invoker_schema(version,digest,applied_unix_nano) VALUES(?,?,?)`,
+		schemaVersionV5,
+		string(digest),
+		now.UnixNano(),
+	); err != nil {
+		return mapDBErrorV1(ctx, "migrate_v5", err, true)
+	}
+	if err := tx.Commit(); err != nil {
+		return errorV1(
+			modelinvoker.GovernedModelInvocationErrorIndeterminate,
+			"migrate_v5",
+			"sqlite migration commit outcome is unknown",
+			err,
+		)
+	}
+	return nil
 }
 
 func (s *Store) migrateV4(ctx context.Context) error {
