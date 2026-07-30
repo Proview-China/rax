@@ -19,13 +19,14 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Version 7 adds HostDeploymentCurrentV2 append-only history and current CAS.
+// Version 8 adds the immutable HostStart-to-PackageSelection association.
+// Version 7 added HostDeploymentCurrentV2 append-only history and current CAS.
 // Version 6 added the Host-owned Cleanup Closure/embedded Plan store. Version
 // 5 added the HostStart InputV3 sidecar and version 4 added the Host-owned
 // Review Attempt to governed Model invocation association history/current
-// index. Every historical schema proof is read back and the V7 physical schema
+// index. Every historical schema proof is read back and the V8 physical schema
 // is independently verified before the new proof is committed.
-const schemaVersionV1 = 7
+const schemaVersionV1 = 8
 
 type Config struct {
 	Path         string
@@ -116,7 +117,7 @@ func (s *Store) migrate(ctx context.Context) error {
 		return mapDBError(ctx, err, true)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err = tx.ExecContext(ctx, schemaV7); err != nil {
+	if _, err = tx.ExecContext(ctx, schemaV8); err != nil {
 		return mapDBError(ctx, err, true)
 	}
 	now := s.clock()
@@ -131,7 +132,8 @@ func (s *Store) migrate(ctx context.Context) error {
 		{4, core.DigestBytes([]byte(schemaV1))},
 		{5, core.DigestBytes([]byte(schemaV5))},
 		{6, core.DigestBytes([]byte(schemaV6))},
-		{schemaVersionV1, core.DigestBytes([]byte(schemaV7))},
+		{7, core.DigestBytes([]byte(schemaV7))},
+		{schemaVersionV1, core.DigestBytes([]byte(schemaV8))},
 	}
 	for _, proof := range proofs {
 		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO agent_host_schema(version,digest,applied_unix_nano) VALUES(?,?,?)`, proof.version, string(proof.digest), now.UnixNano()); err != nil {
@@ -146,6 +148,9 @@ func (s *Store) migrate(ctx context.Context) error {
 		}
 	}
 	if err = verifyDeploymentCurrentSchemaV2(ctx, tx); err != nil {
+		return err
+	}
+	if err = verifyHostStartPackageSelectionSchemaV1(ctx, tx); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {

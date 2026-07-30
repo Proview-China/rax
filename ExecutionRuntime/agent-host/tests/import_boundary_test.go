@@ -80,6 +80,9 @@ func TestProductionImportBoundary(t *testing.T) {
 					"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract": true,
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports":          true,
 				},
+				filepath.Join("contract", "start_package_selection_binding_v1.go"): {
+					"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract": true,
+				},
 				filepath.Join("contract", "cleanup_closure_v2.go"): {
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":  true,
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports": true,

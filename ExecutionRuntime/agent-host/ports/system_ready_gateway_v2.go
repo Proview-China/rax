@@ -27,6 +27,12 @@ type ComponentProductionCurrentReaderV2 interface {
 type ComponentProductionCurrentReaderRegistryV2 interface {
 	ReaderForComponentProductionCurrentV2(runtimeports.NamespacedNameV2) (ComponentProductionCurrentReaderV2, error)
 }
+
+// SystemReadyFactCurrentReaderV2 exposes only immutable SystemReady Fact
+// inspection. It is intentionally separate from the writable Fact Port.
+type SystemReadyFactCurrentReaderV2 interface {
+	InspectSystemReadyFactV2(context.Context, contract.SystemReadyFactRefV2) (contract.SystemReadyFactV2, error)
+}
 type SystemReadyGovernancePortV2 interface {
 	StartOrInspectSystemReadyV2(context.Context, contract.SystemReadyEnsureRequestV2) (contract.SystemReadyGatewayResultV2, error)
 	InspectSystemReadyV2(context.Context, contract.SystemReadyInspectRequestV2) (contract.SystemReadyGatewayResultV2, error)
