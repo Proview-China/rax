@@ -83,6 +83,11 @@ func TestProductionImportBoundary(t *testing.T) {
 				filepath.Join("contract", "start_package_selection_binding_v1.go"): {
 					"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract": true,
 				},
+				filepath.Join("contract", "component_factory_v2.go"): {
+					"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract":   true,
+					"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycontract": true,
+					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports":            true,
+				},
 				filepath.Join("contract", "cleanup_closure_v2.go"): {
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":  true,
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports": true,
@@ -128,6 +133,12 @@ func TestProductionImportBoundary(t *testing.T) {
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":             true,
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports":            true,
 				},
+				filepath.Join("composition", "component_factory_preflight_v2.go"): {
+					"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract":   true,
+					"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycontract": true,
+					"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":             true,
+					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports":            true,
+				},
 				filepath.Join("lifecycle", "host_v2.go"): {
 					"github.com/Proview-China/rax/ExecutionRuntime/application/contract": true,
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":         true,
@@ -158,6 +169,40 @@ func TestProductionImportBoundary(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestComponentFactoryPreflightV2HasOnlyReadOnlyImports(t *testing.T) {
+	_, filename, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot locate import boundary test")
+	}
+	root := filepath.Dir(filepath.Dir(filename))
+	path := filepath.Join(root, "composition", "component_factory_preflight_v2.go")
+	parsed, err := parser.ParseFile(token.NewFileSet(), path, nil, parser.ImportsOnly)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := map[string]bool{
+		"context": true,
+		"reflect": true,
+		"slices":  true,
+		"time":    true,
+		"github.com/Proview-China/rax/ExecutionRuntime/agent-builder/contract":   true,
+		"github.com/Proview-China/rax/ExecutionRuntime/agent-host/contract":      true,
+		"github.com/Proview-China/rax/ExecutionRuntime/agent-host/ports":         true,
+		"github.com/Proview-China/rax/ExecutionRuntime/harness/assemblycontract": true,
+		"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":             true,
+		"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports":            true,
+	}
+	for _, spec := range parsed.Imports {
+		value, err := strconv.Unquote(spec.Path.Value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !allowed[value] {
+			t.Errorf("ComponentFactoryV2 preflight imports non-read-only dependency %s", value)
+		}
 	}
 }
 
