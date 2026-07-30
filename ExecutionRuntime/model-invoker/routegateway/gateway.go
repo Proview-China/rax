@@ -63,6 +63,17 @@ func WithGovernedModelInvocationsV1(dependencies GovernedModelInvocationDependen
 	}
 }
 
+func WithGovernedModelTurnsV2(dependencies GovernedModelTurnDependenciesV2) Option {
+	return func(gateway *Gateway) error {
+		if err := dependencies.validate(); err != nil {
+			return err
+		}
+		copy := dependencies
+		gateway.governedTurnV2 = &copy
+		return nil
+	}
+}
+
 type Gateway struct {
 	catalog                   *catalog.Catalog
 	policy                    *modelinvoker.RouteInvoker
@@ -74,6 +85,7 @@ type Gateway struct {
 	httpClient                *http.Client
 	subscriptionAuthorization modelinvoker.SubscriptionAuthorizationResolver
 	governedV1                *GovernedModelInvocationDependenciesV1
+	governedTurnV2            *GovernedModelTurnDependenciesV2
 	closeOnce                 sync.Once
 	closeErr                  error
 }

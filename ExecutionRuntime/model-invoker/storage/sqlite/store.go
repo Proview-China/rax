@@ -19,7 +19,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersionV1 = 1
+const (
+	schemaVersionV1 = 1
+	schemaVersionV2 = 2
+)
 
 type Config struct {
 	Path         string
@@ -67,11 +70,49 @@ func Open(ctx context.Context, config Config) (*Store, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := store.migrateV2(ctx); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	if err := store.verifyV1(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
 	}
 	return store, nil
+}
+
+func (s *Store) migrateV2(ctx context.Context) error {
+	tx, err := s.beginV1(ctx, "migrate_v2")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(ctx, schemaV2); err != nil {
+		return mapDBErrorV1(ctx, "migrate_v2", err, true)
+	}
+	digest := core.DigestBytes([]byte(schemaV2))
+	now := time.Now()
+	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO model_invoker_schema(version,digest,applied_unix_nano) VALUES(?,?,?)`, schemaVersionV2, string(digest), now.UnixNano())
+	if err != nil {
+		return mapDBErrorV1(ctx, "migrate_v2", err, true)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return mapDBErrorV1(ctx, "migrate_v2", err, true)
+	}
+	if affected == 0 {
+		var stored string
+		if err := tx.QueryRowContext(ctx, `SELECT digest FROM model_invoker_schema WHERE version=?`, schemaVersionV2).Scan(&stored); err != nil {
+			return mapDBErrorV1(ctx, "migrate_v2", err, false)
+		}
+		if stored != string(digest) {
+			return errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "migrate_v2", "sqlite schema v2 digest drifted", nil)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return errorV1(modelinvoker.GovernedModelInvocationErrorIndeterminate, "migrate_v2", "sqlite migration commit outcome is unknown", err)
+	}
+	return nil
 }
 
 func (s *Store) Close() error {

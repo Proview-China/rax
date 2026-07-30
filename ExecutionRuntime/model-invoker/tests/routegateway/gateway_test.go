@@ -450,6 +450,8 @@ func TestGLMCodingPlanRemainsNonCallableForPraxis(t *testing.T) {
 type callState struct {
 	authorization, binding, secret, factory, capabilities, invoke, stream, closed atomic.Int64
 	wrongModel, missingModel, forgedIdentity                                      atomic.Bool
+	governedV2, governedV2CompletedText, governedV2UnknownTool                    atomic.Bool
+	governedV2MultipleCalls, governedV2TextAndCall, governedV2InvalidArguments    atomic.Bool
 	beforeInvokeReturn                                                            func()
 }
 
@@ -597,6 +599,40 @@ func (p *fakeProvider) Invoke(_ context.Context, request modelinvoker.Request) (
 	provider, protocol, endpoint := p.id, request.Protocol, request.Endpoint
 	if p.state.forgedIdentity.Load() {
 		provider, protocol, endpoint = "forged-provider", modelinvoker.ProtocolMessages, "https://forged.invalid/v1"
+	}
+	if p.state.governedV2.Load() {
+		if p.state.beforeInvokeReturn != nil {
+			p.state.beforeInvokeReturn()
+		}
+		if p.state.governedV2CompletedText.Load() {
+			return modelinvoker.Response{
+				ID: "response-governed-v2", Provider: provider, Protocol: protocol, Model: model,
+				Status: modelinvoker.ResponseStatusCompleted, StopReason: modelinvoker.StopReasonEndTurn,
+				Output: []modelinvoker.OutputItem{{Type: modelinvoker.OutputItemText, Text: "completed"}},
+				Usage:  modelinvoker.Usage{InputTokens: 3, OutputTokens: 1, TotalTokens: 4},
+			}, nil
+		}
+		name := "workspace.read"
+		if p.state.governedV2UnknownTool.Load() {
+			name = "workspace.unknown"
+		}
+		first := modelinvoker.FunctionCall{ID: "call-governed-v2-1", Name: name, Arguments: []byte(`{"path":"README.md"}`)}
+		if p.state.governedV2InvalidArguments.Load() {
+			first.Arguments = []byte(`{"path":`)
+		}
+		output := []modelinvoker.OutputItem{{Type: modelinvoker.OutputItemFunctionCall, FunctionCall: &first}}
+		if p.state.governedV2MultipleCalls.Load() {
+			second := modelinvoker.FunctionCall{ID: "call-governed-v2-2", Name: name, Arguments: []byte(`{"path":"AGENTS.md"}`)}
+			output = append(output, modelinvoker.OutputItem{Type: modelinvoker.OutputItemFunctionCall, FunctionCall: &second})
+		}
+		if p.state.governedV2TextAndCall.Load() {
+			output = append(output, modelinvoker.OutputItem{Type: modelinvoker.OutputItemText, Text: "must not coexist"})
+		}
+		return modelinvoker.Response{
+			ID: "response-governed-v2", Provider: provider, Protocol: protocol, Model: model,
+			Status: modelinvoker.ResponseStatusCompleted, StopReason: modelinvoker.StopReasonToolCall,
+			Output: output, Usage: modelinvoker.Usage{InputTokens: 3, OutputTokens: 2, TotalTokens: 5},
+		}, nil
 	}
 	if request.Output.Type == modelinvoker.OutputJSONSchema {
 		if p.state.beforeInvokeReturn != nil {
