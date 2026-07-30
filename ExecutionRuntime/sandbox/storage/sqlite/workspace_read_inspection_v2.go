@@ -430,7 +430,7 @@ func validateWorkspaceReadInspectionClosureV2(
 		}
 	case contract.WorkspaceReadObservedV1, contract.WorkspaceReadFailedV1, contract.WorkspaceReadUnknownV1:
 		if current.Meta.Revision != origin.Meta.Revision+1 ||
-			current.Meta.CreatedUnixNano < origin.Meta.CreatedUnixNano ||
+			current.Meta.CreatedUnixNano < origin.Meta.UpdatedUnixNano ||
 			current.Meta.UpdatedUnixNano < origin.Meta.UpdatedUnixNano {
 			return ports.ErrConflict
 		}
@@ -497,9 +497,9 @@ func validateWorkspaceReadInspectionProjectionV2(
 		observation.AdmissionReceipt != current.AdmissionReceipt ||
 		observation.ProviderReceipt != *providerReceipt ||
 		providerReceipt.StableKeyDigest != reservation.StableKeyDigest ||
-		observation.Meta.CreatedUnixNano < origin.Meta.CreatedUnixNano ||
+		observation.Meta.CreatedUnixNano < origin.Meta.UpdatedUnixNano ||
 		observation.Meta.UpdatedUnixNano < origin.Meta.UpdatedUnixNano ||
-		current.Meta.CreatedUnixNano < observation.Meta.CreatedUnixNano ||
+		current.Meta.CreatedUnixNano < observation.Meta.UpdatedUnixNano ||
 		current.Meta.UpdatedUnixNano < observation.Meta.UpdatedUnixNano ||
 		observation.S1CheckedUnixNano < origin.Meta.CreatedUnixNano ||
 		observation.S2CheckedUnixNano < observation.S1CheckedUnixNano ||

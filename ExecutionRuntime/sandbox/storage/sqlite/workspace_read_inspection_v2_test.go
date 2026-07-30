@@ -441,6 +441,158 @@ func TestWorkspaceReadInspectionV2RejectsTerminalTimeAndObservationRowSplicesAft
 		}
 	})
 
+	for _, test := range []struct {
+		name   string
+		slug   string
+		mutate func(*contract.WorkspaceReadAttemptV1, *contract.WorkspaceReadObservationV1, *contract.WorkspaceReadAttemptV1)
+	}{
+		{
+			name: "terminal and observation created before origin update",
+			slug: "origin-update",
+			mutate: func(
+				origin *contract.WorkspaceReadAttemptV1,
+				observation *contract.WorkspaceReadObservationV1,
+				current *contract.WorkspaceReadAttemptV1,
+			) {
+				origin.Meta.UpdatedUnixNano = now.Add(time.Nanosecond).UnixNano()
+				observation.Meta.UpdatedUnixNano = now.Add(time.Nanosecond).UnixNano()
+				current.Meta.UpdatedUnixNano = now.Add(2 * time.Nanosecond).UnixNano()
+			},
+		},
+		{
+			name: "terminal created before observation update",
+			slug: "observation-update",
+			mutate: func(
+				_ *contract.WorkspaceReadAttemptV1,
+				observation *contract.WorkspaceReadObservationV1,
+				current *contract.WorkspaceReadAttemptV1,
+			) {
+				observation.Meta.UpdatedUnixNano = now.Add(time.Nanosecond).UnixNano()
+				current.Meta.UpdatedUnixNano = now.Add(2 * time.Nanosecond).UnixNano()
+			},
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			database := filepath.Join(t.TempDir(), "sandbox.db")
+			store, err := OpenWithClock(ctx, database, func() time.Time { return now })
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, attempt := seedWorkspaceReadInspectionTerminalV2(
+				t,
+				store,
+				contract.WorkspaceReadObservedV1,
+				now,
+				expires,
+				"causal-time-"+test.slug,
+			)
+
+			var originBody []byte
+			if err = store.db.QueryRow(
+				`SELECT body FROM workspace_read_attempt_origin WHERE attempt_id=?`,
+				attempt.Meta.ID,
+			).Scan(&originBody); err != nil {
+				t.Fatal(err)
+			}
+			var observationBody []byte
+			if err = store.db.QueryRow(
+				`SELECT body FROM workspace_read_observation WHERE stable_digest=?`,
+				attempt.StableKeyDigest,
+			).Scan(&observationBody); err != nil {
+				t.Fatal(err)
+			}
+			var currentBody []byte
+			if err = store.db.QueryRow(
+				`SELECT body FROM workspace_read_attempt_current WHERE attempt_id=?`,
+				attempt.Meta.ID,
+			).Scan(&currentBody); err != nil {
+				t.Fatal(err)
+			}
+
+			var origin contract.WorkspaceReadAttemptV1
+			var observation contract.WorkspaceReadObservationV1
+			var current contract.WorkspaceReadAttemptV1
+			if decode(originBody, &origin) != nil ||
+				decode(observationBody, &observation) != nil ||
+				decode(currentBody, &current) != nil {
+				t.Fatal("decode causal-time fixtures")
+			}
+			originRef := workspaceReadOriginRefV2(origin)
+			originDigest := origin.Meta.Digest
+			observationDigest := observation.Meta.Digest
+			currentDigest := current.Meta.Digest
+			test.mutate(&origin, &observation, &current)
+			if origin.ValidateShape() != nil ||
+				observation.ValidateShape() != nil ||
+				current.ValidateShape() != nil {
+				t.Fatal("timestamp-only splice must remain shape-valid")
+			}
+			if origin.Meta.Digest != originDigest ||
+				observation.Meta.Digest != observationDigest ||
+				current.Meta.Digest != currentDigest {
+				t.Fatal("timestamp-only splice unexpectedly changed an exact digest")
+			}
+
+			originBody, err = encode(origin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			observationBody, err = encode(observation)
+			if err != nil {
+				t.Fatal(err)
+			}
+			currentBody, err = encode(current)
+			if err != nil {
+				t.Fatal(err)
+			}
+			tx, err := store.db.Begin()
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tx.Rollback()
+			if _, err = tx.Exec(
+				`UPDATE workspace_read_attempt_origin SET body=? WHERE attempt_id=?`,
+				originBody,
+				attempt.Meta.ID,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = tx.Exec(
+				`UPDATE workspace_read_observation SET body=? WHERE stable_digest=?`,
+				observationBody,
+				attempt.StableKeyDigest,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if _, err = tx.Exec(
+				`UPDATE workspace_read_attempt_current SET body=? WHERE attempt_id=?`,
+				currentBody,
+				attempt.Meta.ID,
+			); err != nil {
+				t.Fatal(err)
+			}
+			if err = tx.Commit(); err != nil {
+				t.Fatal(err)
+			}
+			if err = store.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			reopened, err := OpenWithClock(ctx, database, func() time.Time {
+				return now.Add(3 * time.Nanosecond)
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = reopened.Close() })
+			envelope, inspectErr := reopened.InspectBoundedWorkspaceReadV2(ctx, originRef)
+			if !errors.Is(inspectErr, ports.ErrConflict) ||
+				envelope != (ports.WorkspaceReadInspectionEnvelopeV2{}) {
+				t.Fatalf("causal timestamp splice was accepted after restart: envelope=%#v err=%v", envelope, inspectErr)
+			}
+		})
+	}
+
 	for _, column := range []string{"observation_id", "stable_digest"} {
 		t.Run(column, func(t *testing.T) {
 			database := filepath.Join(t.TempDir(), "sandbox.db")
