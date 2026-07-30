@@ -117,14 +117,22 @@ func (r *ModelInputLineageMaterialReaderV1) CallsV1() (int, int) {
 
 type ModelInputLineageFrameReaderV1 struct {
 	mu         sync.Mutex
+	Owner      contract.OwnerRef
 	Sequence   []contract.ContextFrameExactCurrentProjectionV1
 	Err        error
 	calls      int
 	BeforeCall func(int)
 }
 
-func NewModelInputLineageFrameReaderV1(frame contract.ContextFrameExactCurrentProjectionV1) *ModelInputLineageFrameReaderV1 {
-	return &ModelInputLineageFrameReaderV1{Sequence: []contract.ContextFrameExactCurrentProjectionV1{frame}}
+func NewModelInputLineageFrameReaderV1(owner contract.OwnerRef, frame contract.ContextFrameExactCurrentProjectionV1) *ModelInputLineageFrameReaderV1 {
+	return &ModelInputLineageFrameReaderV1{Owner: owner, Sequence: []contract.ContextFrameExactCurrentProjectionV1{frame}}
+}
+
+func (r *ModelInputLineageFrameReaderV1) ContextOwnerRefV1() contract.OwnerRef {
+	if r == nil {
+		return contract.OwnerRef{}
+	}
+	return r.Owner
 }
 
 func (r *ModelInputLineageFrameReaderV1) InspectContextFrameExactCurrentV1(ctx context.Context, _ contract.FactRef, _ int64) (contract.ContextFrameExactCurrentProjectionV1, error) {

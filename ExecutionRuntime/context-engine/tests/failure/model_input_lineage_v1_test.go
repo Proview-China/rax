@@ -32,7 +32,7 @@ func TestModelInputLineageOwnerFailuresReturnNoProjectionV1(t *testing.T) {
 				t.Fatal(err)
 			}
 			materials := testfixture.NewModelInputLineageMaterialReaderV1(fixture.Material)
-			frames := testfixture.NewModelInputLineageFrameReaderV1(fixture.Frame)
+			frames := testfixture.NewModelInputLineageFrameReaderV1(fixture.Owner, fixture.Frame)
 			switch tt.target {
 			case "exact":
 				materials.ExactErr = tt.err
@@ -69,7 +69,7 @@ func TestModelInputLineageFrameDigestSwapFailsClosedV1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	frames := testfixture.NewModelInputLineageFrameReaderV1(frame)
+	frames := testfixture.NewModelInputLineageFrameReaderV1(fixture.Owner, frame)
 	reader, err := kernel.NewContextModelInputLineageCurrentReaderV1(fixture.Owner, materials, materials, frames, func() time.Time { return fixture.Now }, 30*time.Second)
 	if err != nil {
 		t.Fatal(err)

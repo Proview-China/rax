@@ -4,6 +4,8 @@
 
 Context Owner 已实现 Review public `ReviewerContextPublisherV1` / `ReviewerContextCurrentReaderV1`：Memory 仅是 reference store；SQLite WAL durable repository 使用 stable subject-derived ID、append-only history、highest/current full-ref CAS 单事务、strict row digest、重启恢复和 exact historical lost-reply recovery。`OpenDurableReviewerContextAdapterV1`只构造单节点/单 writer-domain Owner capability，不安装宿主 composition root，也不声明多节点 HA、备份、远程持久性或 SLA。current读取每次以 fresh clock验证固定的 Checked/Expires/Digest，不因时间前进重封projection。
 
+Context Frame exact-current 现已具备Context-owned单节点SQLite durable store：Frame/Manifest/Generation完整closure与Generation current pointer在WAL/FULL事务中以expected-current CAS发布，history与current分离，operation ledger保存完整Owner/scope/run/session/predecessor/next坐标及state row digest。公开Reader按exact Frame ref证明仍为current，并执行S1/S2、fresh Owner clock、TTL最小值与history maximum复核；同ID跨scope歧义、旧Frame、row/index/ledger漂移均Fail Closed。该store不安装Application/Harness/Model production composition root，不注册Capability，也不声明多节点HA、备份或SLA。
+
 `ContextCompactionV1` Owner-local闭环已实现：exact Source Frame Range、Compaction Summary、expected Generation current绑定、确定性候选Generation Prepare、S2 current复读、同一Owner backend锁域内的原子Generation current CAS、Inspect-only恢复，以及压缩后未保留Anchor必须重新物化。Prepare后候选Manifest/Frame/Generation不可见；只有Apply CAS成功才一起发布。全链不写Runtime Settlement、Continuity或任何外部Effect。
 
 `ContextOutcomeV1` Owner-local事实链已实现：Outcome只关联Frame/Recipe/Generation与外部Owner exact refs，并记录token/cache/cost/latency等量化Observation；Evaluation逐项Inspect Outcome并校验Recipe/Policy/TTL；Feedback Candidate再exact绑定Evaluation。三类事实均Put-once/Inspect、同ID换内容Conflict，不包含Task/Runtime Outcome、Cache hit、Review Verdict或自动Recipe发布能力。
@@ -28,6 +30,7 @@ PromptAsset Owner-local闭环已实现：资产直接内嵌规范化`instruction
 - CTX-D09 N=1 Owner-local Refresh：`Refresh -> pending DomainResult（current不可见）-> S2 fresh reread/TTL -> atomic local ApplySettlement + expected Generation current CAS -> Inspect`，零Runtime settlement；
 - 线程安全的内存内容寻址reference store。
 - CTX-D10 ParentFrame Applicability Current Reader：distinct四元Source Coordinate、完整subject seal、exact Frame/Manifest/Generation metadata readers、Generation current pointer、S1/S2完整`InspectFrame`和最长30秒的owner-TTL最小值；
+- `framestore.SQLiteV1`：Context-owned Frame closure append-only history、Generation current expected-CAS、完整operation ledger、WAL/FULL重启恢复与public Frame exact-current Reader；单节点durable Owner store，不是production composition root或HA/SLA；
 - Runtime V3只读Context-kind adapter：只把`Kind/ID/Revision/Digest`交给Context Owner Reader并投影公共current结果，不缓存metadata/binding snapshot，不创建Fact或Evidence。
 - Review ReviewerContext Owner port：Memory reference与SQLite WAL durable repository共享同一公开Review合同；Resolve按exact subject取current full ref，current Inspect原子核对index/highest/history，historical Inspect不借current，lost mutation reply只Inspect原exact历史对象。
 - `ContextOfflineIngressV1`：六request公开Seal/streaming Encode、六typed/strict JSON API，以及`context recipe validate|compare|compile|preview`、`context frame inspect`、`context cache inspect`六条stdin/stdout CLI；Compare只返回结构field-path与before/after digest，不作质量、兼容或发布结论；Cache Inspect只核验调用者给定的provider-neutral Plan/Profile exact闭包、TTL/currentness与离线经济性，不生成Plan、不调用Provider、不声明cache hit；与Engineering五入口共同保持无Store、listener、Capability或写命令。

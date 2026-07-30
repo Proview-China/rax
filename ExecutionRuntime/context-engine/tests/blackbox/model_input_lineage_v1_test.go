@@ -128,7 +128,7 @@ func blackboxLineageReaderV1(t *testing.T) (testfixture.ModelInputLineageFixture
 		t.Fatal(err)
 	}
 	materials := testfixture.NewModelInputLineageMaterialReaderV1(fixture.Material)
-	frames := testfixture.NewModelInputLineageFrameReaderV1(fixture.Frame)
+	frames := testfixture.NewModelInputLineageFrameReaderV1(fixture.Owner, fixture.Frame)
 	reader, err := kernel.NewContextModelInputLineageCurrentReaderV1(fixture.Owner, materials, materials, frames, func() time.Time { return fixture.Now }, 30*time.Second)
 	if err != nil {
 		t.Fatal(err)
