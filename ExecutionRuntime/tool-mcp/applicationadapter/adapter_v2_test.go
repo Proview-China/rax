@@ -2,6 +2,8 @@ package applicationadapter
 
 import (
 	"context"
+	"encoding/json"
+	"path/filepath"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -12,6 +14,7 @@ import (
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	toolcontract "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/internal/testkit"
+	toolsqlite "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/storage/sqlite"
 )
 
 type ownerExecutionV2 struct {
@@ -227,6 +230,144 @@ func TestSingleCallToolActionAdapterV2ConcurrentSingleWinner(t *testing.T) {
 	}
 	if _, err = fixture.adapter.InspectSingleCallToolActionV2(context.Background(), key); err != nil {
 		t.Fatalf("winner result was not inspectable after concurrent start: %v", err)
+	}
+}
+
+func TestSingleCallToolActionAdapterV2SQLiteCloseExactInspectConcurrentRestartAndSplice(t *testing.T) {
+	fixture := newAdapterV2Fixture(t)
+	path := filepath.Join(t.TempDir(), "application-result-v2.db")
+	open := func() *toolsqlite.StoreV1 {
+		store, err := toolsqlite.OpenApplicationResultStoreV2(context.Background(), toolsqlite.ConfigV1{
+			Path: path, Clock: func() time.Time { return fixture.binding.now }, Owner: testkit.Owner(),
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return store
+	}
+	store := open()
+	fixture.adapter.results = store
+	result, err := fixture.adapter.ExecuteSingleCallToolActionV2(context.Background(), fixture.binding.request.ApplicationRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := result.RefV2()
+	first, err := store.InspectApplicationResultExactV2(context.Background(), original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBody, err := json.Marshal(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executeCalls := fixture.execution.executeCalls.Load()
+
+	const workers = 64
+	var wait sync.WaitGroup
+	bodies := make(chan []byte, workers)
+	errs := make(chan error, workers)
+	for range workers {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			exact, inspectErr := store.InspectApplicationResultExactV2(context.Background(), original)
+			if inspectErr != nil {
+				errs <- inspectErr
+				return
+			}
+			body, marshalErr := json.Marshal(exact)
+			if marshalErr != nil {
+				errs <- marshalErr
+				return
+			}
+			bodies <- body
+		}()
+	}
+	wait.Wait()
+	close(errs)
+	close(bodies)
+	for inspectErr := range errs {
+		t.Fatal(inspectErr)
+	}
+	for body := range bodies {
+		if string(body) != string(firstBody) {
+			t.Fatal("same original Application result ref produced non-byte-identical exact records")
+		}
+	}
+	if fixture.execution.executeCalls.Load() != executeCalls {
+		t.Fatal("exact Application result Inspect reached Tool execution")
+	}
+
+	for name, splice := range map[string]func(*applicationcontract.SingleCallToolActionResultRefV2){
+		"result digest": func(ref *applicationcontract.SingleCallToolActionResultRefV2) {
+			ref.Digest = testkit.Digest("spliced-application-result")
+		},
+		"Tool result digest": func(ref *applicationcontract.SingleCallToolActionResultRefV2) {
+			ref.ToolResultDigest = testkit.Digest("spliced-tool-result")
+		},
+		"request digest": func(ref *applicationcontract.SingleCallToolActionResultRefV2) {
+			ref.RequestDigest = testkit.Digest("spliced-request")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			spliced := original
+			splice(&spliced)
+			if _, inspectErr := store.InspectApplicationResultExactV2(context.Background(), spliced); inspectErr == nil {
+				t.Fatal("spliced original Application result ref was accepted")
+			}
+		})
+	}
+	other := original
+	other.ID = "another-application-result"
+	if _, err = store.InspectApplicationResultExactV2(context.Background(), other); err == nil ||
+		!core.HasCategory(err, core.ErrorNotFound) {
+		t.Fatalf("different result ID error=%v, want NotFound", err)
+	}
+
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restarted := open()
+	t.Cleanup(func() { _ = restarted.Close() })
+	afterRestart, err := restarted.InspectApplicationResultExactV2(context.Background(), original)
+	if err != nil {
+		t.Fatal(err)
+	}
+	afterRestartBody, err := json.Marshal(afterRestart)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(afterRestartBody) != string(firstBody) {
+		t.Fatal("SQLite restart changed exact Application result bytes")
+	}
+	if fixture.execution.executeCalls.Load() != executeCalls {
+		t.Fatal("restart exact Application result Inspect reached Tool execution")
+	}
+}
+
+func TestSingleCallToolActionAdapterV2SQLiteLostCreateReplyRecoversAndExactInspects(t *testing.T) {
+	fixture := newAdapterV2Fixture(t)
+	store, err := toolsqlite.OpenApplicationResultStoreV2(context.Background(), toolsqlite.ConfigV1{
+		Path:  filepath.Join(t.TempDir(), "lost-application-result-v2.db"),
+		Clock: func() time.Time { return fixture.binding.now },
+		Owner: testkit.Owner(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	fixture.adapter.results = lostReplyApplicationResultStoreV2{delegate: store}
+	result, err := fixture.adapter.ExecuteSingleCallToolActionV2(context.Background(), fixture.binding.request.ApplicationRequest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executeCalls := fixture.execution.executeCalls.Load()
+	exact, err := store.InspectApplicationResultExactV2(context.Background(), result.RefV2())
+	if err != nil || exact.Result.Digest != result.Digest {
+		t.Fatalf("lost create reply exact Inspect result=%#v err=%v", exact.Result.RefV2(), err)
+	}
+	if fixture.execution.executeCalls.Load() != executeCalls || executeCalls != 1 {
+		t.Fatalf("lost reply exact Inspect changed Tool execute calls=%d", fixture.execution.executeCalls.Load())
 	}
 }
 
@@ -624,7 +765,7 @@ type fixedBindingReaderV2 struct {
 }
 
 type lostReplyApplicationResultStoreV2 struct {
-	delegate *InMemoryApplicationResultStoreV2
+	delegate ApplicationResultStoreV2
 }
 
 type lostReplyToolOwnerClaimStoreV2 struct {
