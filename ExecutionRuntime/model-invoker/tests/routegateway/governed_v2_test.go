@@ -3,6 +3,7 @@ package routegateway_test
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"reflect"
 	"strings"
 	"sync"
@@ -170,6 +171,78 @@ func TestGovernedModelTurnV2ReadsRejectSplicedOwnerIndexes(t *testing.T) {
 	}
 }
 
+func TestGovernedModelTurnV2AllReadsRejectNonCanonicalHistoryBytes(t *testing.T) {
+	for _, revision := range []int{1, 2, 3} {
+		t.Run(fmt.Sprintf("revision_%d", revision), func(t *testing.T) {
+			path := t.TempDir() + "/turn-v2.db"
+			fixture := newGovernedFixtureV2(t, path, nil)
+			outcome, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+			if err != nil || outcome.Observation == nil || outcome.Observation.ToolCallProjection == nil {
+				t.Fatalf("governed model turn = %#v, %v", outcome, err)
+			}
+			attemptRef, err := modelinvoker.DeriveGovernedModelTurnAttemptRefV2(fixture.command)
+			if err != nil {
+				t.Fatal(err)
+			}
+			db, err := sql.Open("sqlite", path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var payload []byte
+			if err := db.QueryRowContext(context.Background(), `SELECT canonical_json FROM governed_model_turn_history WHERE turn_id=? AND revision=?`, outcome.ID, revision).Scan(&payload); err != nil {
+				t.Fatal(err)
+			}
+			nonCanonical := append([]byte(" \n"), payload...)
+			if _, err := db.ExecContext(context.Background(), `UPDATE governed_model_turn_history SET canonical_json=? WHERE turn_id=? AND revision=?`, nonCanonical, outcome.ID, revision); err != nil {
+				t.Fatal(err)
+			}
+			if err := db.Close(); err != nil {
+				t.Fatal(err)
+			}
+			assertGovernedTurnCanonicalClosureRejectedV2(t, fixture.store, fixture.initial, attemptRef, outcome)
+			if err := fixture.gateway.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := fixture.store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			restarted, err := modelsqlite.Open(context.Background(), modelsqlite.Config{Path: path})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer restarted.Close()
+			assertGovernedTurnCanonicalClosureRejectedV2(t, restarted, fixture.initial, attemptRef, outcome)
+		})
+	}
+}
+
+func assertGovernedTurnCanonicalClosureRejectedV2(t *testing.T, store *modelsqlite.Store, initial modelinvoker.GovernedModelTurnOutcomeV2, attemptRef modelinvoker.GovernedModelTurnAttemptRefV2, outcome modelinvoker.GovernedModelTurnOutcomeV2) {
+	t.Helper()
+	ctx := context.Background()
+	checks := []struct {
+		name string
+		call func() error
+	}{
+		{"exact", func() error { _, err := store.InspectExactGovernedModelTurnV2(ctx, outcome.RefV2()); return err }},
+		{"current", func() error { _, err := store.InspectCurrentGovernedModelTurnV2(ctx, outcome.ID); return err }},
+		{"attempt", func() error { _, err := store.InspectGovernedModelTurnAttemptV2(ctx, attemptRef); return err }},
+		{"create", func() error { _, err := store.CreateGovernedModelTurnV2(ctx, initial); return err }},
+		{"cas", func() error {
+			_, err := store.CompareAndSwapObservedGovernedModelTurnV2(ctx, modelinvoker.GovernedModelTurnCASV2{Expected: outcome.Observation.TurnRef, Next: outcome})
+			return err
+		}},
+		{"projection", func() error {
+			_, err := store.InspectExactGovernedModelTurnToolCallProjectionV2(ctx, outcome.Observation.ToolCallProjection.Ref)
+			return err
+		}},
+	}
+	for _, check := range checks {
+		if err := check.call(); modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorConflict {
+			t.Fatalf("%s accepted non-canonical history: %v", check.name, err)
+		}
+	}
+}
+
 func TestGovernedModelTurnV2ConcurrentCallersOnlyOneProvider(t *testing.T) {
 	fixture := newGovernedFixtureV2(t, t.TempDir()+"/turn-v2.db", nil)
 	defer fixture.close(t)
@@ -196,6 +269,120 @@ func TestGovernedModelTurnV2ConcurrentCallersOnlyOneProvider(t *testing.T) {
 	current, err := fixture.store.InspectCurrentGovernedModelTurnV2(context.Background(), fixture.turnID)
 	if err != nil || current.State != modelinvoker.GovernedModelTurnObservedV2 {
 		t.Fatalf("current = %#v, %v", current, err)
+	}
+}
+
+func TestGovernedModelTurnV2StableAttemptReplaySurvivesTTLRestartAndRejectsDifferentPayload(t *testing.T) {
+	var clock atomic.Int64
+	clock.Store(gatewayNow.UnixNano())
+	path := t.TempDir() + "/turn-v2.db"
+	fixture := newGovernedFixtureV2(t, path, []routegateway.Option{
+		routegateway.WithClock(func() time.Time { return time.Unix(0, clock.Load()) }),
+	})
+	outcome, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+	if err != nil || outcome.State != modelinvoker.GovernedModelTurnObservedV2 || fixture.state.invoke.Load() != 1 {
+		t.Fatalf("first stable attempt = %#v, %v provider=%d", outcome, err, fixture.state.invoke.Load())
+	}
+	attemptRef, err := modelinvoker.DeriveGovernedModelTurnAttemptRefV2(fixture.command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second, err := modelinvoker.DeriveGovernedModelTurnAttemptRefV2(fixture.command); err != nil || second != attemptRef {
+		t.Fatalf("stable AttemptRef = %#v/%#v, %v", attemptRef, second, err)
+	}
+	clock.Store(gatewayNow.Add(24 * time.Hour).UnixNano())
+	replayed, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+	if err != nil || replayed.RefV2() != outcome.RefV2() || fixture.state.invoke.Load() != 1 {
+		t.Fatalf("expired same-command replay = %#v, %v provider=%d", replayed, err, fixture.state.invoke.Load())
+	}
+	inspected, err := fixture.gateway.InspectGovernedModelTurnAttemptV2(context.Background(), attemptRef)
+	if err != nil || inspected.RefV2() != outcome.RefV2() {
+		t.Fatalf("expired attempt Inspect = %#v, %v", inspected, err)
+	}
+	different := fixture.command
+	different.CurrentRef.CheckedUnixNano++
+	if _, err := modelinvoker.DeriveGovernedModelTurnAttemptRefV2(different); err != nil {
+		t.Fatalf("different payload is not syntactically valid: %v", err)
+	}
+	if _, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), different); modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorConflict || fixture.state.invoke.Load() != 1 {
+		t.Fatalf("different payload replay = %v provider=%d", err, fixture.state.invoke.Load())
+	}
+	if err := fixture.gateway.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := fixture.store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	restartedStore, err := modelsqlite.Open(context.Background(), modelsqlite.Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer restartedStore.Close()
+	restartedState := &callState{}
+	restartedState.governedV2.Store(true)
+	restartedGate := &governedGateV1{ack: fixture.ack}
+	restartedGateway := fakeGateway(
+		t, defaultCatalog(t),
+		countingBinding{state: restartedState},
+		countingSecret{state: restartedState, version: "v1"},
+		restartedState,
+		routegateway.WithClock(func() time.Time { return time.Unix(0, clock.Load()) }),
+		routegateway.WithGovernedModelTurnsV2(routegateway.GovernedModelTurnDependenciesV2{
+			PreparedHistory: restartedStore, PreparedCurrent: restartedStore, CommitGate: restartedGate, Materials: restartedStore, Turns: restartedStore,
+		}),
+	)
+	defer restartedGateway.Close()
+	restarted, err := restartedGateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+	if err != nil || restarted.RefV2() != outcome.RefV2() || restartedState.invoke.Load() != 0 {
+		t.Fatalf("restart stable replay = %#v, %v provider=%d", restarted, err, restartedState.invoke.Load())
+	}
+}
+
+func TestGovernedModelTurnV2ReadSnapshotDoesNotReportHealthyObservedCASAsConflict(t *testing.T) {
+	path := t.TempDir() + "/turn-v2.db"
+	base, err := modelsqlite.Open(context.Background(), modelsqlite.Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &blockingObservedCASRepositoryV2{inner: base, ready: make(chan struct{}), release: make(chan struct{})}
+	fixture := newGovernedFixtureV2WithStore(t, base, repository, nil)
+	defer fixture.close(t)
+	result := make(chan error, 1)
+	go func() {
+		_, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+		result <- err
+	}()
+	<-repository.ready
+	boundary, err := base.InspectCurrentGovernedModelTurnV2(context.Background(), fixture.turnID)
+	if err != nil || boundary.State != modelinvoker.GovernedModelTurnProviderBoundaryCrossedV2 {
+		t.Fatalf("boundary before observed CAS = %#v, %v", boundary, err)
+	}
+	const readers = 128
+	start := make(chan struct{})
+	errorsSeen := make(chan error, readers*2)
+	var wait sync.WaitGroup
+	for index := 0; index < readers; index++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			<-start
+			_, exactErr := base.InspectExactGovernedModelTurnV2(context.Background(), boundary.RefV2())
+			errorsSeen <- exactErr
+			_, currentErr := base.InspectCurrentGovernedModelTurnV2(context.Background(), boundary.ID)
+			errorsSeen <- currentErr
+		}()
+	}
+	close(start)
+	close(repository.release)
+	wait.Wait()
+	close(errorsSeen)
+	if err := <-result; err != nil {
+		t.Fatalf("observed CAS = %v", err)
+	}
+	for err := range errorsSeen {
+		if err != nil {
+			t.Fatalf("healthy concurrent journal read = %v", err)
+		}
 	}
 }
 
@@ -247,6 +434,25 @@ func TestGovernedModelTurnV2BoundaryLostReplyIsInspectOnly(t *testing.T) {
 	replayed, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
 	if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorIndeterminate || replayed.RefV2() != result.RefV2() || fixture.state.invoke.Load() != 0 {
 		t.Fatalf("lost boundary replay = %#v, %v provider=%d", replayed, err, fixture.state.invoke.Load())
+	}
+}
+
+func TestGovernedModelTurnV2CreateLostReplyRecoversStableAttempt(t *testing.T) {
+	path := t.TempDir() + "/turn-v2.db"
+	base, err := modelsqlite.Open(context.Background(), modelsqlite.Config{Path: path})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repository := &lostCreateReplyRepositoryV2{inner: base}
+	fixture := newGovernedFixtureV2WithStore(t, base, repository, nil)
+	defer fixture.close(t)
+	result, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+	if err != nil || result.State != modelinvoker.GovernedModelTurnObservedV2 || fixture.state.invoke.Load() != 1 {
+		t.Fatalf("lost create reply = %#v, %v provider=%d", result, err, fixture.state.invoke.Load())
+	}
+	replayed, err := fixture.gateway.StartOrInspectGovernedModelTurnV2(context.Background(), fixture.command)
+	if err != nil || replayed.RefV2() != result.RefV2() || fixture.state.invoke.Load() != 1 {
+		t.Fatalf("lost create replay = %#v, %v provider=%d", replayed, err, fixture.state.invoke.Load())
 	}
 }
 
@@ -450,6 +656,7 @@ type governedFixtureV2 struct {
 	state    *callState
 	gate     *governedGateV1
 	command  modelinvoker.GovernedModelTurnCommandV2
+	initial  modelinvoker.GovernedModelTurnOutcomeV2
 	prepared modelinvoker.PreparedModelInvocationFactV1
 	ack      modelinvoker.PreparedModelInvocationCommitAckV1
 	turnID   string
@@ -565,7 +772,7 @@ func newGovernedFixtureV2WithStoreConfigured(t *testing.T, store *modelsqlite.St
 	if err != nil {
 		t.Fatal(err)
 	}
-	return governedFixtureV2{gateway: gateway, store: store, state: state, gate: gate, command: command, prepared: prepared, ack: ack, turnID: initial.ID}
+	return governedFixtureV2{gateway: gateway, store: store, state: state, gate: gate, command: command, initial: initial, prepared: prepared, ack: ack, turnID: initial.ID}
 }
 
 func (fixture governedFixtureV2) close(t *testing.T) {
@@ -682,8 +889,70 @@ type lostBoundaryReplyRepositoryV2 struct {
 	once  atomic.Bool
 }
 
+type lostCreateReplyRepositoryV2 struct {
+	inner modelinvoker.GovernedModelTurnRepositoryV2
+	once  atomic.Bool
+}
+
 type ordinaryObservedCASRepositoryV2 struct {
 	inner modelinvoker.GovernedModelTurnRepositoryV2
+}
+
+func (repository *lostCreateReplyRepositoryV2) CreateGovernedModelTurnV2(ctx context.Context, outcome modelinvoker.GovernedModelTurnOutcomeV2) (modelinvoker.GovernedModelTurnMutationV2, error) {
+	mutation, err := repository.inner.CreateGovernedModelTurnV2(ctx, outcome)
+	if err == nil && repository.once.CompareAndSwap(false, true) {
+		return modelinvoker.GovernedModelTurnMutationV2{}, &modelinvoker.GovernedModelInvocationErrorV1{Kind: modelinvoker.GovernedModelInvocationErrorIndeterminate, Operation: "create_turn", Message: "lost create reply"}
+	}
+	return mutation, err
+}
+func (repository *lostCreateReplyRepositoryV2) CompareAndSwapGovernedModelTurnV2(ctx context.Context, request modelinvoker.GovernedModelTurnCASV2) (modelinvoker.GovernedModelTurnMutationV2, error) {
+	return repository.inner.CompareAndSwapGovernedModelTurnV2(ctx, request)
+}
+func (repository *lostCreateReplyRepositoryV2) CompareAndSwapObservedGovernedModelTurnV2(ctx context.Context, request modelinvoker.GovernedModelTurnCASV2) (modelinvoker.GovernedModelTurnMutationV2, error) {
+	return repository.inner.CompareAndSwapObservedGovernedModelTurnV2(ctx, request)
+}
+func (repository *lostCreateReplyRepositoryV2) InspectGovernedModelTurnAttemptV2(ctx context.Context, ref modelinvoker.GovernedModelTurnAttemptRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	return repository.inner.InspectGovernedModelTurnAttemptV2(ctx, ref)
+}
+func (repository *lostCreateReplyRepositoryV2) InspectExactGovernedModelTurnV2(ctx context.Context, ref modelinvoker.GovernedModelTurnRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	return repository.inner.InspectExactGovernedModelTurnV2(ctx, ref)
+}
+func (repository *lostCreateReplyRepositoryV2) InspectCurrentGovernedModelTurnV2(ctx context.Context, id string) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	return repository.inner.InspectCurrentGovernedModelTurnV2(ctx, id)
+}
+func (repository *lostCreateReplyRepositoryV2) InspectExactGovernedModelTurnToolCallProjectionV2(ctx context.Context, ref modelinvoker.ToolCallCandidateObservationRefV1) (modelinvoker.ToolCallCandidateObservationProjectionV1, error) {
+	return repository.inner.InspectExactGovernedModelTurnToolCallProjectionV2(ctx, ref)
+}
+
+type blockingObservedCASRepositoryV2 struct {
+	inner   modelinvoker.GovernedModelTurnRepositoryV2
+	ready   chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (repository *blockingObservedCASRepositoryV2) CreateGovernedModelTurnV2(ctx context.Context, outcome modelinvoker.GovernedModelTurnOutcomeV2) (modelinvoker.GovernedModelTurnMutationV2, error) {
+	return repository.inner.CreateGovernedModelTurnV2(ctx, outcome)
+}
+func (repository *blockingObservedCASRepositoryV2) CompareAndSwapGovernedModelTurnV2(ctx context.Context, request modelinvoker.GovernedModelTurnCASV2) (modelinvoker.GovernedModelTurnMutationV2, error) {
+	return repository.inner.CompareAndSwapGovernedModelTurnV2(ctx, request)
+}
+func (repository *blockingObservedCASRepositoryV2) CompareAndSwapObservedGovernedModelTurnV2(ctx context.Context, request modelinvoker.GovernedModelTurnCASV2) (modelinvoker.GovernedModelTurnMutationV2, error) {
+	repository.once.Do(func() { close(repository.ready) })
+	<-repository.release
+	return repository.inner.CompareAndSwapObservedGovernedModelTurnV2(ctx, request)
+}
+func (repository *blockingObservedCASRepositoryV2) InspectGovernedModelTurnAttemptV2(ctx context.Context, ref modelinvoker.GovernedModelTurnAttemptRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	return repository.inner.InspectGovernedModelTurnAttemptV2(ctx, ref)
+}
+func (repository *blockingObservedCASRepositoryV2) InspectExactGovernedModelTurnV2(ctx context.Context, ref modelinvoker.GovernedModelTurnRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	return repository.inner.InspectExactGovernedModelTurnV2(ctx, ref)
+}
+func (repository *blockingObservedCASRepositoryV2) InspectCurrentGovernedModelTurnV2(ctx context.Context, id string) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	return repository.inner.InspectCurrentGovernedModelTurnV2(ctx, id)
+}
+func (repository *blockingObservedCASRepositoryV2) InspectExactGovernedModelTurnToolCallProjectionV2(ctx context.Context, ref modelinvoker.ToolCallCandidateObservationRefV1) (modelinvoker.ToolCallCandidateObservationProjectionV1, error) {
+	return repository.inner.InspectExactGovernedModelTurnToolCallProjectionV2(ctx, ref)
 }
 
 func (repository *ordinaryObservedCASRepositoryV2) CreateGovernedModelTurnV2(ctx context.Context, outcome modelinvoker.GovernedModelTurnOutcomeV2) (modelinvoker.GovernedModelTurnMutationV2, error) {
@@ -694,6 +963,9 @@ func (repository *ordinaryObservedCASRepositoryV2) CompareAndSwapGovernedModelTu
 }
 func (repository *ordinaryObservedCASRepositoryV2) CompareAndSwapObservedGovernedModelTurnV2(ctx context.Context, request modelinvoker.GovernedModelTurnCASV2) (modelinvoker.GovernedModelTurnMutationV2, error) {
 	return repository.inner.CompareAndSwapGovernedModelTurnV2(ctx, request)
+}
+func (repository *ordinaryObservedCASRepositoryV2) InspectGovernedModelTurnAttemptV2(ctx context.Context, ref modelinvoker.GovernedModelTurnAttemptRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	return repository.inner.InspectGovernedModelTurnAttemptV2(ctx, ref)
 }
 func (repository *ordinaryObservedCASRepositoryV2) InspectExactGovernedModelTurnV2(ctx context.Context, ref modelinvoker.GovernedModelTurnRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
 	return repository.inner.InspectExactGovernedModelTurnV2(ctx, ref)
@@ -717,6 +989,9 @@ func (repository *lostBoundaryReplyRepositoryV2) CompareAndSwapGovernedModelTurn
 }
 func (repository *lostBoundaryReplyRepositoryV2) CompareAndSwapObservedGovernedModelTurnV2(ctx context.Context, request modelinvoker.GovernedModelTurnCASV2) (modelinvoker.GovernedModelTurnMutationV2, error) {
 	return repository.inner.CompareAndSwapObservedGovernedModelTurnV2(ctx, request)
+}
+func (repository *lostBoundaryReplyRepositoryV2) InspectGovernedModelTurnAttemptV2(ctx context.Context, ref modelinvoker.GovernedModelTurnAttemptRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	return repository.inner.InspectGovernedModelTurnAttemptV2(ctx, ref)
 }
 func (repository *lostBoundaryReplyRepositoryV2) InspectExactGovernedModelTurnV2(ctx context.Context, ref modelinvoker.GovernedModelTurnRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
 	return repository.inner.InspectExactGovernedModelTurnV2(ctx, ref)
@@ -745,6 +1020,9 @@ func (repository *lostObservedReplyRepositoryV2) CompareAndSwapObservedGovernedM
 		return modelinvoker.GovernedModelTurnMutationV2{}, &modelinvoker.GovernedModelInvocationErrorV1{Kind: modelinvoker.GovernedModelInvocationErrorIndeterminate, Operation: "cas_observed", Message: "lost observed reply"}
 	}
 	return mutation, err
+}
+func (repository *lostObservedReplyRepositoryV2) InspectGovernedModelTurnAttemptV2(ctx context.Context, ref modelinvoker.GovernedModelTurnAttemptRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	return repository.inner.InspectGovernedModelTurnAttemptV2(ctx, ref)
 }
 func (repository *lostObservedReplyRepositoryV2) InspectExactGovernedModelTurnV2(ctx context.Context, ref modelinvoker.GovernedModelTurnRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
 	return repository.inner.InspectExactGovernedModelTurnV2(ctx, ref)

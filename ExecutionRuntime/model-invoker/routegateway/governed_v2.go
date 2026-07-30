@@ -32,35 +32,59 @@ func (g *Gateway) StartOrInspectGovernedModelTurnV2(ctx context.Context, command
 	if ctx == nil || ctx.Err() != nil {
 		return modelinvoker.GovernedModelTurnOutcomeV2{}, governedGatewayErrorV1(modelinvoker.GovernedModelInvocationErrorInvalid, "start_turn_v2", "live context is required", nil)
 	}
-	baseline := g.now()
-	if baseline.IsZero() {
-		return modelinvoker.GovernedModelTurnOutcomeV2{}, governedGatewayErrorV1(modelinvoker.GovernedModelInvocationErrorInvalid, "start_turn_v2", "clock returned zero", nil)
-	}
-	historical0, current0, material0, err := g.readGovernedTurnInputsV2(ctx, command, baseline)
+	attemptRef, err := modelinvoker.DeriveGovernedModelTurnAttemptRefV2(command)
 	if err != nil {
 		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
 	}
-	if err := current0.ValidateCurrent(command.CurrentRef, baseline); err != nil {
-		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
-	}
-	prepared, err := modelinvoker.NewPreparedGovernedModelTurnV2(command, baseline)
-	if err != nil {
-		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
-	}
-	created, err := g.governedTurnV2.Turns.CreateGovernedModelTurnV2(ctx, prepared)
-	if err != nil {
-		if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorIndeterminate {
+	attempt, inspectErr := g.governedTurnV2.Turns.InspectGovernedModelTurnAttemptV2(ctx, attemptRef)
+	baseline := time.Time{}
+	var historical0 modelinvoker.PreparedModelInvocationFactV1
+	var current0 modelinvoker.PreparedModelInvocationCurrentProjectionV1
+	var material0 modelinvoker.InvocationMaterialV1
+	createdNow := false
+	if inspectErr == nil {
+		if attempt.State != modelinvoker.GovernedModelTurnPreparedV2 {
+			return turnResultForStateV2(attempt)
+		}
+		baseline = time.Unix(0, attempt.CreatedUnixNano)
+	} else {
+		if modelinvoker.GovernedModelInvocationErrorKindOfV1(inspectErr) != modelinvoker.GovernedModelInvocationErrorNotFound {
+			return modelinvoker.GovernedModelTurnOutcomeV2{}, inspectErr
+		}
+		baseline = g.now()
+		if baseline.IsZero() {
+			return modelinvoker.GovernedModelTurnOutcomeV2{}, governedGatewayErrorV1(modelinvoker.GovernedModelInvocationErrorInvalid, "start_turn_v2", "clock returned zero", nil)
+		}
+		historical0, current0, material0, err = g.readGovernedTurnInputsV2(ctx, command, baseline)
+		if err != nil {
 			return modelinvoker.GovernedModelTurnOutcomeV2{}, err
 		}
-		recovered, inspectErr := g.governedTurnV2.Turns.InspectExactGovernedModelTurnV2(context.WithoutCancel(ctx), prepared.RefV2())
-		if inspectErr != nil {
-			return modelinvoker.GovernedModelTurnOutcomeV2{}, errors.Join(err, inspectErr)
+		if err := current0.ValidateCurrent(command.CurrentRef, baseline); err != nil {
+			return modelinvoker.GovernedModelTurnOutcomeV2{}, err
 		}
-		created = modelinvoker.GovernedModelTurnMutationV2{Outcome: recovered}
-	}
-	attempt := created.Outcome
-	if attempt.State != modelinvoker.GovernedModelTurnPreparedV2 {
-		return turnResultForStateV2(attempt)
+		prepared, err := modelinvoker.NewPreparedGovernedModelTurnV2(command, baseline)
+		if err != nil {
+			return modelinvoker.GovernedModelTurnOutcomeV2{}, err
+		}
+		created, err := g.governedTurnV2.Turns.CreateGovernedModelTurnV2(ctx, prepared)
+		if err != nil {
+			if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) != modelinvoker.GovernedModelInvocationErrorIndeterminate {
+				return modelinvoker.GovernedModelTurnOutcomeV2{}, err
+			}
+			recovered, recoverErr := g.governedTurnV2.Turns.InspectGovernedModelTurnAttemptV2(context.WithoutCancel(ctx), attemptRef)
+			if recoverErr != nil {
+				return modelinvoker.GovernedModelTurnOutcomeV2{}, errors.Join(err, recoverErr)
+			}
+			created = modelinvoker.GovernedModelTurnMutationV2{Outcome: recovered}
+		}
+		attempt = created.Outcome
+		if err := attempt.ValidateAgainstAttemptRefV2(attemptRef); err != nil {
+			return modelinvoker.GovernedModelTurnOutcomeV2{}, err
+		}
+		if attempt.State != modelinvoker.GovernedModelTurnPreparedV2 {
+			return turnResultForStateV2(attempt)
+		}
+		createdNow = created.Applied
 	}
 	s1 := g.now()
 	if s1.IsZero() || s1.Before(baseline) {
@@ -70,7 +94,7 @@ func (g *Gateway) StartOrInspectGovernedModelTurnV2(ctx context.Context, command
 	if err != nil {
 		return attempt, err
 	}
-	if historical0.Ref() != historical1.Ref() || current0.Ref() != current1.Ref() || material0.RefV1() != material1.RefV1() {
+	if createdNow && (historical0.Ref() != historical1.Ref() || current0.Ref() != current1.Ref() || material0.RefV1() != material1.RefV1()) {
 		return attempt, governedGatewayErrorV1(modelinvoker.GovernedModelInvocationErrorConflict, "turn_s1", "durable exact inputs drifted", nil)
 	}
 	ack, err := modelinvoker.CrossPreparedModelInvocationCommitGateV1(ctx, g.governedTurnV2.CommitGate, command.PreparedRef, command.CurrentRef)
@@ -211,6 +235,12 @@ func (g *Gateway) StartOrInspectGovernedModelTurnV2(ctx context.Context, command
 		return boundary, err
 	}
 	return mutation.Outcome, nil
+}
+func (g *Gateway) InspectGovernedModelTurnAttemptV2(ctx context.Context, ref modelinvoker.GovernedModelTurnAttemptRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	if g == nil || g.governedTurnV2 == nil {
+		return modelinvoker.GovernedModelTurnOutcomeV2{}, governedGatewayErrorV1(modelinvoker.GovernedModelInvocationErrorUnavailable, "inspect_turn_attempt_v2", "governed model turn unavailable", nil)
+	}
+	return g.governedTurnV2.Turns.InspectGovernedModelTurnAttemptV2(ctx, ref)
 }
 func (g *Gateway) InspectExactGovernedModelTurnV2(ctx context.Context, ref modelinvoker.GovernedModelTurnRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
 	if g == nil || g.governedTurnV2 == nil {

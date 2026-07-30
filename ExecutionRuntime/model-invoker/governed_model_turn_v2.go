@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	GovernedModelTurnContractVersionV2      = "praxis.model-invoker.governed-model-turn/v2"
-	GovernedModelTurnObservationVersionV2   = "praxis.model-invoker.governed-model-turn-observation/v2"
-	GovernedModelTurnProviderBoundaryKindV2 = "model-provider-tool-turn"
+	GovernedModelTurnContractVersionV2        = "praxis.model-invoker.governed-model-turn/v2"
+	GovernedModelTurnObservationVersionV2     = "praxis.model-invoker.governed-model-turn-observation/v2"
+	GovernedModelTurnAttemptContractVersionV2 = "praxis.model-invoker.governed-model-turn-attempt/v2"
+	GovernedModelTurnProviderBoundaryKindV2   = "model-provider-tool-turn"
 )
 
 type GovernedModelTurnStateV2 string
@@ -98,6 +99,19 @@ type GovernedModelTurnCommandV2 struct {
 	ProviderAttemptOrdinal uint32                              `json:"provider_attempt_ordinal"`
 }
 
+type GovernedModelTurnAttemptRefV2 struct {
+	ContractVersion        string                              `json:"contract_version"`
+	ID                     string                              `json:"id"`
+	Digest                 core.Digest                         `json:"digest"`
+	PreparedRef            PreparedModelInvocationRefV1        `json:"prepared_ref"`
+	CurrentRef             PreparedModelInvocationCurrentRefV1 `json:"current_ref"`
+	MaterialRef            InvocationMaterialRefV1             `json:"material_ref"`
+	AttemptRequestDigest   core.Digest                         `json:"attempt_request_digest"`
+	RouteCallDigest        core.Digest                         `json:"route_call_digest"`
+	DispatchSequence       uint64                              `json:"dispatch_sequence"`
+	ProviderAttemptOrdinal uint32                              `json:"provider_attempt_ordinal"`
+}
+
 type GovernedModelTurnMutationV2 struct {
 	Outcome GovernedModelTurnOutcomeV2 `json:"outcome"`
 	Applied bool                       `json:"applied"`
@@ -111,12 +125,14 @@ type GovernedModelTurnRepositoryV2 interface {
 	CreateGovernedModelTurnV2(context.Context, GovernedModelTurnOutcomeV2) (GovernedModelTurnMutationV2, error)
 	CompareAndSwapGovernedModelTurnV2(context.Context, GovernedModelTurnCASV2) (GovernedModelTurnMutationV2, error)
 	CompareAndSwapObservedGovernedModelTurnV2(context.Context, GovernedModelTurnCASV2) (GovernedModelTurnMutationV2, error)
+	InspectGovernedModelTurnAttemptV2(context.Context, GovernedModelTurnAttemptRefV2) (GovernedModelTurnOutcomeV2, error)
 	InspectExactGovernedModelTurnV2(context.Context, GovernedModelTurnRefV2) (GovernedModelTurnOutcomeV2, error)
 	InspectCurrentGovernedModelTurnV2(context.Context, string) (GovernedModelTurnOutcomeV2, error)
 	InspectExactGovernedModelTurnToolCallProjectionV2(context.Context, ToolCallCandidateObservationRefV1) (ToolCallCandidateObservationProjectionV1, error)
 }
 type GovernedModelTurnPortV2 interface {
 	StartOrInspectGovernedModelTurnV2(context.Context, GovernedModelTurnCommandV2) (GovernedModelTurnOutcomeV2, error)
+	InspectGovernedModelTurnAttemptV2(context.Context, GovernedModelTurnAttemptRefV2) (GovernedModelTurnOutcomeV2, error)
 	InspectExactGovernedModelTurnV2(context.Context, GovernedModelTurnRefV2) (GovernedModelTurnOutcomeV2, error)
 }
 
@@ -144,6 +160,26 @@ func (r GovernedModelTurnRefV2) Validate() error {
 	id, err := governedModelTurnIdentityV2(r.PreparedRef, r.MaterialRef, r.DispatchSequence, r.ProviderAttemptOrdinal)
 	if err != nil || id != r.ID {
 		return governedConflictV1("governed model turn exact Ref identity drifted")
+	}
+	return nil
+}
+func (r GovernedModelTurnAttemptRefV2) Validate() error {
+	if r.ContractVersion != GovernedModelTurnAttemptContractVersionV2 || strings.TrimSpace(r.ID) == "" || r.Digest.Validate() != nil || r.PreparedRef.Validate() != nil || r.CurrentRef.Validate() != nil || r.MaterialRef.Validate() != nil || r.CurrentRef.Prepared != r.PreparedRef || r.MaterialRef.PreparedRef != r.PreparedRef || r.AttemptRequestDigest != r.PreparedRef.UnifiedRequestDigest || r.RouteCallDigest != r.MaterialRef.RouteCallDigest || r.DispatchSequence == 0 || r.ProviderAttemptOrdinal == 0 {
+		return governedInvalidV1("governed model turn AttemptRef is invalid")
+	}
+	id, err := governedModelTurnIdentityV2(r.PreparedRef, r.MaterialRef, r.DispatchSequence, r.ProviderAttemptOrdinal)
+	if err != nil || id != r.ID {
+		return governedConflictV1("governed model turn AttemptRef identity drifted")
+	}
+	digest, err := governedModelTurnAttemptRefDigestV2(r)
+	if err != nil || digest != r.Digest {
+		return governedConflictV1("governed model turn AttemptRef digest drifted")
+	}
+	return nil
+}
+func (o GovernedModelTurnOutcomeV2) ValidateAgainstAttemptRefV2(ref GovernedModelTurnAttemptRefV2) error {
+	if o.Validate() != nil || ref.Validate() != nil || o.ID != ref.ID || o.PreparedRef != ref.PreparedRef || o.CurrentRef != ref.CurrentRef || o.MaterialRef != ref.MaterialRef || o.AttemptRequestDigest != ref.AttemptRequestDigest || o.RouteCallDigest != ref.RouteCallDigest || o.DispatchSequence != ref.DispatchSequence || o.ProviderAttemptOrdinal != ref.ProviderAttemptOrdinal {
+		return governedConflictV1("governed model turn differs from stable AttemptRef")
 	}
 	return nil
 }
@@ -299,6 +335,26 @@ func NewPreparedGovernedModelTurnV2(command GovernedModelTurnCommandV2, now time
 	expires := minGovernedExpiryV1(command.CurrentRef.ExpiresUnixNano, command.CurrentRef.NotAfterUnixNano, command.MaterialRef.ExpiresUnixNano)
 	return SealGovernedModelTurnOutcomeV2(GovernedModelTurnOutcomeV2{Revision: 1, PreparedRef: command.PreparedRef, CurrentRef: command.CurrentRef, MaterialRef: command.MaterialRef, AttemptRequestDigest: command.AttemptRequestDigest, RouteCallDigest: command.RouteCallDigest, DispatchSequence: command.DispatchSequence, ProviderAttemptOrdinal: command.ProviderAttemptOrdinal, State: GovernedModelTurnPreparedV2, CreatedUnixNano: now.UnixNano(), UpdatedUnixNano: now.UnixNano(), ExpiresUnixNano: expires})
 }
+func DeriveGovernedModelTurnAttemptRefV2(command GovernedModelTurnCommandV2) (GovernedModelTurnAttemptRefV2, error) {
+	if command.PreparedRef.Validate() != nil || command.CurrentRef.Validate() != nil || command.MaterialRef.Validate() != nil || command.CurrentRef.Prepared != command.PreparedRef || command.MaterialRef.PreparedRef != command.PreparedRef || command.AttemptRequestDigest != command.PreparedRef.UnifiedRequestDigest || command.RouteCallDigest != command.MaterialRef.RouteCallDigest || command.DispatchSequence == 0 || command.ProviderAttemptOrdinal == 0 {
+		return GovernedModelTurnAttemptRefV2{}, governedInvalidV1("governed model turn command is invalid")
+	}
+	id, err := governedModelTurnIdentityV2(command.PreparedRef, command.MaterialRef, command.DispatchSequence, command.ProviderAttemptOrdinal)
+	if err != nil {
+		return GovernedModelTurnAttemptRefV2{}, err
+	}
+	ref := GovernedModelTurnAttemptRefV2{
+		ContractVersion: GovernedModelTurnAttemptContractVersionV2,
+		ID:              id, PreparedRef: command.PreparedRef, CurrentRef: command.CurrentRef, MaterialRef: command.MaterialRef,
+		AttemptRequestDigest: command.AttemptRequestDigest, RouteCallDigest: command.RouteCallDigest,
+		DispatchSequence: command.DispatchSequence, ProviderAttemptOrdinal: command.ProviderAttemptOrdinal,
+	}
+	ref.Digest, err = governedModelTurnAttemptRefDigestV2(ref)
+	if err != nil {
+		return GovernedModelTurnAttemptRefV2{}, err
+	}
+	return ref, ref.Validate()
+}
 func (c GovernedModelTurnCASV2) Validate() error {
 	if err := c.Expected.Validate(); err != nil {
 		return err
@@ -364,6 +420,10 @@ func governedModelTurnDigestV2(o GovernedModelTurnOutcomeV2) (core.Digest, error
 func governedModelTurnObservationDigestV2(o GovernedModelTurnObservationV2) (core.Digest, error) {
 	o.Digest = ""
 	return core.CanonicalJSONDigest("praxis.model-invoker.governed-model-turn", "v2", "GovernedModelTurnObservationV2", o)
+}
+func governedModelTurnAttemptRefDigestV2(r GovernedModelTurnAttemptRefV2) (core.Digest, error) {
+	r.Digest = ""
+	return core.CanonicalJSONDigest("praxis.model-invoker.governed-model-turn", "v2", "GovernedModelTurnAttemptRefV2", r)
 }
 
 var _ = reflect.DeepEqual

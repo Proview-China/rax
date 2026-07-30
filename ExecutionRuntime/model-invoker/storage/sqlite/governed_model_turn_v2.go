@@ -182,7 +182,12 @@ func (s *Store) InspectExactGovernedModelTurnV2(ctx context.Context, ref modelin
 	if err := ref.Validate(); err != nil {
 		return modelinvoker.GovernedModelTurnOutcomeV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorInvalid, "inspect_turn_v2", "exact Ref invalid", err)
 	}
-	closure, err := loadTurnJournalClosureV2(ctx, s.db, ref.ID)
+	tx, err := s.beginTurnReadV2(ctx, "inspect_turn_v2")
+	if err != nil {
+		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	closure, err := loadTurnJournalClosureV2(ctx, tx, ref.ID)
 	if err != nil {
 		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
 	}
@@ -195,11 +200,38 @@ func (s *Store) InspectExactGovernedModelTurnV2(ctx context.Context, ref modelin
 	}
 	return stored.outcome.CloneV2(), nil
 }
+func (s *Store) InspectGovernedModelTurnAttemptV2(ctx context.Context, ref modelinvoker.GovernedModelTurnAttemptRefV2) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
+	if err := contextErrorV1(ctx, "inspect_turn_attempt_v2"); err != nil {
+		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
+	}
+	if err := ref.Validate(); err != nil {
+		return modelinvoker.GovernedModelTurnOutcomeV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorInvalid, "inspect_turn_attempt_v2", "AttemptRef invalid", err)
+	}
+	tx, err := s.beginTurnReadV2(ctx, "inspect_turn_attempt_v2")
+	if err != nil {
+		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	closure, err := loadTurnJournalClosureV2(ctx, tx, ref.ID)
+	if err != nil {
+		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
+	}
+	stored := closure.history[len(closure.history)-1]
+	if err := stored.outcome.ValidateAgainstAttemptRefV2(ref); err != nil {
+		return modelinvoker.GovernedModelTurnOutcomeV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_attempt_v2", "stable attempt lineage drifted", err)
+	}
+	return stored.outcome.CloneV2(), nil
+}
 func (s *Store) InspectCurrentGovernedModelTurnV2(ctx context.Context, id string) (modelinvoker.GovernedModelTurnOutcomeV2, error) {
 	if err := contextErrorV1(ctx, "inspect_current_turn_v2"); err != nil {
 		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
 	}
-	closure, err := loadTurnJournalClosureV2(ctx, s.db, id)
+	tx, err := s.beginTurnReadV2(ctx, "inspect_current_turn_v2")
+	if err != nil {
+		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	closure, err := loadTurnJournalClosureV2(ctx, tx, id)
 	if err != nil {
 		return modelinvoker.GovernedModelTurnOutcomeV2{}, err
 	}
@@ -213,10 +245,15 @@ func (s *Store) InspectExactGovernedModelTurnToolCallProjectionV2(ctx context.Co
 	if err := ref.Validate(); err != nil {
 		return modelinvoker.ToolCallCandidateObservationProjectionV1{}, errorV1(modelinvoker.GovernedModelInvocationErrorInvalid, "inspect_turn_projection_v2", "projection Ref invalid", err)
 	}
+	tx, err := s.beginTurnReadV2(ctx, "inspect_turn_projection_v2")
+	if err != nil {
+		return modelinvoker.ToolCallCandidateObservationProjectionV1{}, err
+	}
+	defer func() { _ = tx.Rollback() }()
 	var turnID, digest, observation string
 	var turnRevision uint64
 	var payload []byte
-	err := s.db.QueryRowContext(ctx, `SELECT turn_id,turn_revision,projection_digest,observation_digest,canonical_json FROM governed_model_turn_tool_call_projection WHERE projection_id=? AND projection_revision=?`, ref.ID, ref.Revision).Scan(&turnID, &turnRevision, &digest, &observation, &payload)
+	err = tx.QueryRowContext(ctx, `SELECT turn_id,turn_revision,projection_digest,observation_digest,canonical_json FROM governed_model_turn_tool_call_projection WHERE projection_id=? AND projection_revision=?`, ref.ID, ref.Revision).Scan(&turnID, &turnRevision, &digest, &observation, &payload)
 	if errors.Is(err, sql.ErrNoRows) {
 		return modelinvoker.ToolCallCandidateObservationProjectionV1{}, errorV1(modelinvoker.GovernedModelInvocationErrorNotFound, "inspect_turn_projection_v2", "projection absent", nil)
 	}
@@ -227,7 +264,7 @@ func (s *Store) InspectExactGovernedModelTurnToolCallProjectionV2(ctx context.Co
 	if err != nil || projection.Ref != ref || digest != string(ref.Digest) || observation != string(ref.ObservationDigest) || turnID == "" || turnRevision == 0 {
 		return modelinvoker.ToolCallCandidateObservationProjectionV1{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_projection_v2", "projection failed exact revalidation", err)
 	}
-	closure, closureErr := loadTurnJournalClosureV2(ctx, s.db, turnID)
+	closure, closureErr := loadTurnJournalClosureV2(ctx, tx, turnID)
 	if closureErr != nil || turnRevision > uint64(len(closure.history)) {
 		return modelinvoker.ToolCallCandidateObservationProjectionV1{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_projection_v2", "projection is not exactly linked to durable turn journal", closureErr)
 	}
@@ -280,8 +317,10 @@ func loadTurnHistoryV2(ctx context.Context, source interface {
 		return turnStoredV2{}, mapDBErrorV1(ctx, "inspect_turn_v2", err, false)
 	}
 	var outcome modelinvoker.GovernedModelTurnOutcomeV2
-	if err := core.DecodeStrictJSON(payload, &outcome); err != nil || outcome.Validate() != nil || outcome.ID != id || outcome.Revision != revision || digest != string(outcome.Digest) {
-		return turnStoredV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_v2", "stored turn failed exact revalidation", err)
+	decodeErr := core.DecodeStrictJSON(payload, &outcome)
+	canonical, marshalErr := json.Marshal(outcome)
+	if decodeErr != nil || marshalErr != nil || outcome.Validate() != nil || outcome.ID != id || outcome.Revision != revision || digest != string(outcome.Digest) || !bytes.Equal(payload, canonical) {
+		return turnStoredV2{}, errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_v2", "stored turn failed exact canonical revalidation", errors.Join(decodeErr, marshalErr))
 	}
 	computed, err := turnAttemptDigestV2(outcome)
 	if err != nil || attempt != string(computed) {
@@ -363,6 +402,16 @@ func validateTurnProjectionClosureV2(ctx context.Context, source interface {
 		return errorV1(modelinvoker.GovernedModelInvocationErrorConflict, "inspect_turn_v2", "turn history tool-call projection drifted", marshalErr)
 	}
 	return nil
+}
+func (s *Store) beginTurnReadV2(ctx context.Context, operation string) (*sql.Tx, error) {
+	if s == nil || s.db == nil {
+		return nil, errorV1(modelinvoker.GovernedModelInvocationErrorUnavailable, operation, "sqlite repository is unavailable", nil)
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelSerializable, ReadOnly: true})
+	if err != nil {
+		return nil, mapDBErrorV1(ctx, operation, err, false)
+	}
+	return tx, nil
 }
 func encodeTurnV2(outcome modelinvoker.GovernedModelTurnOutcomeV2) (json.RawMessage, core.Digest, error) {
 	if err := outcome.Validate(); err != nil {
