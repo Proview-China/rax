@@ -12,7 +12,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/model-invoker/upstream"
 )
 
-var gatewayNow = time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC)
+var gatewayNow = time.Date(2026, 7, 30, 10, 45, 0, 0, time.UTC)
 
 func TestEveryCallableRouteHasARealBuiltinConstructionPath(t *testing.T) {
 	routeCatalog, err := catalog.NewDefault(gatewayNow)
@@ -82,6 +82,25 @@ func TestEveryHostBlockedSubscriptionCandidateConstructsOnlyWithTrustedResolver(
 	}
 	for _, candidate := range blocked {
 		t.Run(string(candidate.ID), func(t *testing.T) {
+			if candidate.Evidence.Status != catalog.EvidenceFresh {
+				base, err := catalog.NewDefault(gatewayNow)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result, report, err := catalog.ApplyActivationPlan(base, catalog.ActivationPlan{
+					ID: "reject-unavailable-subscription-evidence", Revision: "r1",
+					Routes: []catalog.RouteActivation{{
+						RouteID: candidate.ID, Action: catalog.ActivateHostBlockedRoute,
+						ExpectedEvidenceDigest: candidate.Evidence.Digest,
+						ExpectedAdapterID:      candidate.Implementation.AdapterID,
+					}},
+				}, gatewayNow)
+				if result != nil || err == nil || report.Applied || len(report.Decisions) != 1 ||
+					report.Decisions[0].Code != catalog.ActivationCodeEvidenceUnavailable {
+					t.Fatalf("unavailable evidence activation result/report/error = %#v / %#v / %v", result, report, err)
+				}
+				return
+			}
 			routeCatalog, entry := activatedSubscriptionCatalog(t, candidate.ID)
 			factories, err := routegateway.NewBuiltinFactoryRegistry()
 			if err != nil {

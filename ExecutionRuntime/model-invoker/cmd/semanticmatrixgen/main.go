@@ -17,7 +17,7 @@ func main() {
 	if *output == "" {
 		fail(fmt.Errorf("-output is required"))
 	}
-	routeCatalog, err := catalog.NewDefault(time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC))
+	routeCatalog, err := catalog.NewDefault(time.Date(2026, 7, 30, 10, 45, 0, 0, time.UTC))
 	if err != nil {
 		fail(err)
 	}

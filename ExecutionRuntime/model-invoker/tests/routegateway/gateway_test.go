@@ -372,7 +372,6 @@ func TestEveryRestrictedSubscriptionOfferingRejectsUnknownModelBeforeTrustAndSec
 	for _, routeID := range []upstream.RouteID{
 		"kimi.code-membership.global.chat_completions",
 		"minimax.token-plan.global.chat_completions",
-		"mimo.token-plan.cn.chat_completions",
 		"alibaba.coding-plan.cn.chat_completions",
 		"alibaba.token-plan-team.cn-beijing.chat_completions",
 	} {

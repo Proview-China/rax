@@ -3,7 +3,7 @@
 ## 1. 矩阵状态
 
 - 矩阵版本：`v3`
-- 全量核验时间：2026-07-11 03:55 CST；Qwen/百炼按量路线已刷新
+- 全量核验时间：2026-07-30 18:45 CST；62条 Catalog Evidence 已按当前官方一手资料复核
 - 证据范围：厂商、云平台和协议方的官方 API 文档、SDK 文档、官方仓库与公开条款
 - 本机实现状态来源：`ExecutionRuntime/model-invoker/` 的真实目录、依赖和测试资产
 - 真实 API 状态：所有路线均未完成认证成功的当前模型烟雾测试
@@ -84,7 +84,7 @@ UpstreamRoute = Model Family
 | `zai.glm-coding-plan` | GLM Coding Plan；独立订阅额度 | global文档公开 `https://api.z.ai/api/coding/paas/v4`；中国专属 `https://open.bigmodel.cn/api/coding/paas/v4` 尚未与本轮global来源闭合 | 官方列出的IDE、CLI、Agent与自动化工具可以使用，但Praxis不在产品清单且不得伪装；当前中国Route保持非 callable | `unverified + research_only + official_client_only` |
 | `kimi.code-membership` | Kimi会员内的 Kimi Code权益；与开放平台按量 API分离 | OpenAI：`https://api.kimi.com/coding/v1`；Anthropic：`https://api.kimi.com/coding/`；模型 `kimi-for-coding` | `kimi-code`已离线实现；默认不可调用，可信宿主激活后仍要求真实User-Agent | `fresh + implemented_offline + blocked_by_host_trust` |
 | `minimax.token-plan` | Token Plan；`sk-cp-*` Key与按量 API不可互换 | Global：OpenAI `https://api.minimax.io/v1`、Anthropic `https://api.minimax.io/anthropic` | `minimax-token-plan`已实现；默认不可调用，可信宿主激活后仍限个人交互前台非生产 | `fresh + implemented_offline + blocked_by_host_trust` |
-| `mimo.token-plan` | Token Plan；`tp-*` Key，与按量 Key隔离 | 中国、新加坡、欧洲独立域名；分别提供 OpenAI兼容 `/v1` 与 Anthropic兼容 `/anthropic` | 六条Route已实现；默认不可调用，可信宿主激活后仍禁止脚本/backend/非Coding | `fresh + implemented_offline + blocked_by_host_trust` |
+| `mimo.token-plan` | Token Plan；`tp-*` Key，与按量 Key隔离 | 中国、新加坡、欧洲独立域名；分别提供 OpenAI兼容 `/v1` 与 Anthropic兼容 `/anthropic` | 六条Route已实现但当前官方页面不能继续证明旧版精确用途限制；证据降为stale，宿主激活也Fail Closed | `stale + implemented_offline + blocked_by_host_trust + NO-GO` |
 | `alibaba.coding-plan` | Alibaba Model Studio Coding Plan；`sk-sp-*` Key | 中国 OpenAI `https://coding.dashscope.aliyuncs.com/v1`、Anthropic `.../apps/anthropic`；国际使用 `coding-intl` 域名 | 四条Route已实现并使用官方exact-string模型集；默认不可调用，可信宿主激活后仍禁止测试器/工作流/backend | `fresh + implemented_offline + blocked_by_host_trust` |
 | `alibaba.token-plan-team` | Alibaba Token Plan Team Edition；独立订阅与 Endpoint | `https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1` 或 `/apps/anthropic` | 两条Route已实现并使用独立官方文本模型集；默认不可调用，可信宿主激活后要求成员授权快照 | `fresh + implemented_offline + blocked_by_host_trust` |
 | `alibaba.savings-plan` | General-purpose AI Savings Plan | 继续使用按量 API Key与区域 Endpoint | 只是按量费用抵扣，不是新协议或新 Provider；`BillingPlanReference`已固定该边界，具体引用随未来按量 Route落地 | `fresh + designed` |
@@ -94,7 +94,7 @@ UpstreamRoute = Model Family
 
 订阅计划的“支持”分为两层：Catalog能识别该 Offering；Invoker只有在官方允许 Praxis使用场景、完成专项设计并获授权后才执行。每条路线必须声明 `general_api`、`interactive_coding_only` 或 `official_client_only`；`terms_blocked` 路线不得为了覆盖率写入可调用注册表。
 
-2026-07-11信任闭合修正：Kimi、MiniMax、MiMo与Alibaba共16条精确Route保留离线实现，但默认全部`callable=false + blocked_by_host_trust`；普通调用方不能用自造身份或Entitlement激活。只有宿主注入可信Resolver并采用经审核激活的Catalog后，才可进入严格个人交互门禁。GLM继续`official_client_only + callable=false`。任何路线都不得伪装工具、运行backend或隐式切换PAYG。
+2026-07-30证据复核：Kimi、MiniMax、MiMo与Alibaba共16条精确Route仍保留离线实现并默认全部`callable=false + blocked_by_host_trust`。其中Kimi、MiniMax与Alibaba共10条保持fresh；MiMo Token Plan六条因新版官方页面不能继续证明旧版“仅编程工具、禁止backend”的精确约束，降为stale并禁止激活。普通调用方不能用自造身份或Entitlement绕过；GLM继续`official_client_only + callable=false`。任何路线都不得伪装工具、运行backend或隐式切换PAYG。
 
 ## 5. 云托管 Provider 路线
 

@@ -171,7 +171,7 @@ func (resolver liveSmokeSecretResolver) ResolveSecret(_ context.Context, request
 }
 
 func TestLiveSmokeSecretResolverRejectsCrossRouteAndReferenceDrift(t *testing.T) {
-	now := time.Date(2026, 7, 11, 10, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 7, 30, 10, 45, 0, 0, time.UTC)
 	base, err := catalog.NewDefault(now)
 	if err != nil {
 		t.Fatal(err)

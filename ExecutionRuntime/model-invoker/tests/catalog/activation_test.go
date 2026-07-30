@@ -186,16 +186,18 @@ func TestApplyActivationPlanRejectsUnavailableOrExpiredEvidence(t *testing.T) {
 	baseEntry, _ := base.Get("kimi.code-membership.global.chat_completions")
 
 	for _, test := range []struct {
-		name string
-		base *catalog.Catalog
-		now  time.Time
-		code catalog.ActivationDecisionCode
+		name    string
+		base    *catalog.Catalog
+		routeID upstream.RouteID
+		now     time.Time
+		code    catalog.ActivationDecisionCode
 	}{
-		{name: "unverified", base: unverified, now: testNow, code: catalog.ActivationCodeEvidenceUnavailable},
-		{name: "expired", base: base, now: baseEntry.Evidence.ValidUntil, code: catalog.ActivationCodeEvidenceExpired},
+		{name: "unverified", base: unverified, routeID: "kimi.code-membership.global.chat_completions", now: testNow, code: catalog.ActivationCodeEvidenceUnavailable},
+		{name: "stale", base: base, routeID: "mimo.token-plan.cn.chat_completions", now: testNow, code: catalog.ActivationCodeEvidenceUnavailable},
+		{name: "expired", base: base, routeID: "kimi.code-membership.global.chat_completions", now: baseEntry.Evidence.ValidUntil, code: catalog.ActivationCodeEvidenceExpired},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			change := pinnedActivation(t, test.base, "kimi.code-membership.global.chat_completions", catalog.ActivateHostBlockedRoute)
+			change := pinnedActivation(t, test.base, test.routeID, catalog.ActivateHostBlockedRoute)
 			result, report, err := catalog.ApplyActivationPlan(test.base, catalog.ActivationPlan{ID: "catalog.activation.evidence", Revision: "r1", Routes: []catalog.RouteActivation{change}}, test.now)
 			if result != nil || err == nil || report.Applied || len(report.Decisions) != 1 || report.Decisions[0].Code != test.code {
 				t.Fatalf("result/report/error = %#v / %#v / %v", result, report, err)

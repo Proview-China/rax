@@ -8,7 +8,7 @@ import (
 )
 
 var (
-	subscriptionCheckedAt  = time.Date(2026, 7, 11, 8, 8, 0, 0, time.UTC)
+	subscriptionCheckedAt  = time.Date(2026, 7, 30, 10, 45, 0, 0, time.UTC)
 	subscriptionValidUntil = subscriptionCheckedAt.Add(7 * 24 * time.Hour)
 )
 
@@ -62,10 +62,10 @@ func subscriptionEntries() []Entry {
 		allowedClients: []string{"claude-code", "claude-for-ide", "cline", "opencode", "roo-code", "kilo-code", "cursor", "crush", "goose", "trae", "qoder", "droid", "eigent", "openclaw", "hermes-agent", "sillytavern"},
 		restrictions:   []string{"only the officially listed supported tools and products may use this plan", "Praxis is not listed as a supported product"},
 		allowedUsage:   upstream.AllowedUsageOfficialClientOnly,
-		source:         OfficialSource{ID: "zai.glm-coding-plan.usage-policy.2026-07-11", Publisher: "Z.AI", Kind: SourceTerms, URL: "https://docs.z.ai/devpack/usage-policy.md"},
+		source:         OfficialSource{ID: "zai.glm-coding-plan.usage-policy.2026-07-30", Publisher: "Z.AI", Kind: SourceTerms, URL: "https://docs.z.ai/devpack/usage-policy.md"},
 		additionalSources: []OfficialSource{
-			{ID: "zai.glm-coding-plan.supported-tools.2026-07-11", Publisher: "Z.AI", Kind: SourceTerms, URL: "https://docs.z.ai/devpack/tool/others.md"},
-			{ID: "zai.glm-coding-plan.quick-start.2026-07-11", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/devpack/quick-start.md"},
+			{ID: "zai.glm-coding-plan.supported-tools.2026-07-30", Publisher: "Z.AI", Kind: SourceTerms, URL: "https://docs.z.ai/devpack/tool/others.md"},
+			{ID: "zai.glm-coding-plan.quick-start.2026-07-30", Publisher: "Z.AI", Kind: SourceProductDocs, URL: "https://docs.z.ai/devpack/quick-start.md"},
 		},
 		evidence: EvidenceUnverified, implementation: ImplementationResearchOnly,
 		endpointHost: "open.bigmodel.cn", endpointIDs: []upstream.EndpointID{"zai.glm-coding-plan.cn.openai"},
@@ -78,9 +78,9 @@ func subscriptionEntries() []Entry {
 		deployment: "kimi.code-membership.global", region: "global",
 		credential: "kimi.code-membership.global", credentialEnv: "KIMI_CODE_API_KEY",
 		restrictions: []string{"personal interactive coding or agent use only", "preserve the real client User-Agent", "product backends must use the pay-as-you-go Kimi platform"},
-		source:       OfficialSource{ID: "kimi.code-membership.third-party-agents.2026-07-11", Publisher: "Kimi", Kind: SourceProductDocs, URL: "https://www.kimi.com/code/docs/third-party-tools/other-coding-agents.html"},
+		source:       OfficialSource{ID: "kimi.code-membership.models.2026-07-30", Publisher: "Kimi", Kind: SourceModelCatalog, URL: "https://www.kimi.com/code/docs/en/kimi-code/models.html"},
 		additionalSources: []OfficialSource{
-			{ID: "kimi.code-membership.community-guidelines.2026-07-11", Publisher: "Kimi", Kind: SourceTerms, URL: "https://www.kimi.com/code/docs/kimi-code/community-guidelines.html"},
+			{ID: "kimi.code-membership.community-guidelines.2026-07-30", Publisher: "Kimi", Kind: SourceTerms, URL: "https://www.kimi.com/code/docs/kimi-code/community-guidelines.html"},
 		},
 		evidence: EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "kimi-code",
 		hostActivation: HostActivationTrustedSubscriptionAuthorizationResolver,
@@ -97,10 +97,10 @@ func subscriptionEntries() []Entry {
 		deployment: "minimax.token-plan.global", region: "global",
 		credential: "minimax.token-plan.global", credentialEnv: "MINIMAX_TOKEN_PLAN_API_KEY", keyPrefixes: []string{"sk-cp-"},
 		restrictions: []string{"interactive AI agent and coding tool use only", "Token Plan key is not interchangeable with pay-as-you-go keys"},
-		source:       OfficialSource{ID: "minimax.token-plan.overview.2026-07-11", Publisher: "MiniMax", Kind: SourceProductDocs, URL: "https://platform.minimax.io/docs/token-plan/intro"},
-		modelSource:  OfficialSource{ID: "minimax.token-plan.models.2026-07-11", Publisher: "MiniMax", Kind: SourceModelCatalog, URL: "https://platform.minimax.io/docs/guides/text-generation"},
+		source:       OfficialSource{ID: "minimax.token-plan.overview.2026-07-30", Publisher: "MiniMax", Kind: SourceProductDocs, URL: "https://platform.minimax.io/docs/token-plan/intro"},
+		modelSource:  OfficialSource{ID: "minimax.token-plan.models.2026-07-30", Publisher: "MiniMax", Kind: SourceModelCatalog, URL: "https://platform.minimax.io/docs/guides/text-generation"},
 		additionalSources: []OfficialSource{
-			{ID: "minimax.token-plan.other-tools.2026-07-11", Publisher: "MiniMax", Kind: SourceProductDocs, URL: "https://platform.minimax.io/docs/token-plan/other-tools"},
+			{ID: "minimax.token-plan.other-tools.2026-07-30", Publisher: "MiniMax", Kind: SourceProductDocs, URL: "https://platform.minimax.io/docs/token-plan/other-tools"},
 		},
 		evidence: EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "minimax-token-plan",
 		hostActivation: HostActivationTrustedSubscriptionAuthorizationResolver,
@@ -120,8 +120,8 @@ func subscriptionEntries() []Entry {
 			deployment: upstream.DeploymentID("mimo.token-plan." + region.id), region: region.id,
 			credential: upstream.CredentialProfileID("mimo.token-plan." + region.id), credentialEnv: "MIMO_TOKEN_PLAN_API_KEY", keyPrefixes: []string{"tp-"},
 			restrictions: []string{"programming tool use only", "automated scripts, custom application backends, and non-coding API use are prohibited"},
-			source:       OfficialSource{ID: "mimo.token-plan.subscription.2026-07-11", Publisher: "Xiaomi MiMo", Kind: SourceTerms, URL: "https://platform.xiaomimimo.com/static/docs/price/tokenplan/subscription.md"},
-			evidence:     EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "mimo-token-plan",
+			source:       OfficialSource{ID: "mimo.token-plan.subscription.2026-07-30", Publisher: "Xiaomi MiMo", Kind: SourceTerms, URL: "https://mimo.mi.com/docs/tokenplan/subscription"},
+			evidence:     EvidenceStale, implementation: ImplementationImplementedOffline, adapterID: "mimo-token-plan",
 			hostActivation:    HostActivationTrustedSubscriptionAuthorizationResolver,
 			endpointHost:      region.host,
 			endpointIDs:       []upstream.EndpointID{upstream.EndpointID("mimo.token-plan." + region.id + ".openai"), upstream.EndpointID("mimo.token-plan." + region.id + ".anthropic")},
@@ -142,7 +142,7 @@ func subscriptionEntries() []Entry {
 			deployment: upstream.DeploymentID("alibaba.coding-plan." + region.id), region: region.id,
 			credential: upstream.CredentialProfileID("alibaba.coding-plan." + region.id), credentialEnv: "ALIBABA_CODING_PLAN_API_KEY", keyPrefixes: []string{"sk-sp-"},
 			restrictions: []string{"interactive AI programming tools and OpenClaw-type agents only", "automated scripts, workflow platforms, API test tools, and application backends are prohibited"},
-			source:       OfficialSource{ID: "alibaba.coding-plan." + region.id + ".exact-models.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceModelCatalog, URL: region.sourceURL},
+			source:       OfficialSource{ID: "alibaba.coding-plan." + region.id + ".exact-models.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceModelCatalog, URL: region.sourceURL},
 			evidence:     EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "alibaba-plan",
 			hostActivation:    HostActivationTrustedSubscriptionAuthorizationResolver,
 			endpointHost:      region.host,
@@ -157,8 +157,8 @@ func subscriptionEntries() []Entry {
 		deployment: "alibaba.token-plan-team.cn-beijing", region: "cn-beijing",
 		credential: "alibaba.token-plan-team.cn-beijing", credentialEnv: "ALIBABA_TOKEN_PLAN_API_KEY", keyPrefixes: []string{"sk-sp-"},
 		restrictions: []string{"programming tools and OpenClaw-type agents only", "workflow automation, API test tools, custom applications, and non-interactive backends are prohibited"},
-		source:       OfficialSource{ID: "alibaba.token-plan-team.quick-start.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://help.aliyun.com/en/model-studio/token-plan-quickstart"},
-		modelSource:  OfficialSource{ID: "alibaba.token-plan-team.exact-models.2026-07-11", Publisher: "Alibaba Cloud Model Studio", Kind: SourceModelCatalog, URL: "https://help.aliyun.com/en/model-studio/token-plan-overview"},
+		source:       OfficialSource{ID: "alibaba.token-plan-team.quick-start.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceProductDocs, URL: "https://help.aliyun.com/en/model-studio/token-plan-quickstart"},
+		modelSource:  OfficialSource{ID: "alibaba.token-plan-team.exact-models.2026-07-30", Publisher: "Alibaba Cloud Model Studio", Kind: SourceModelCatalog, URL: "https://help.aliyun.com/en/model-studio/token-plan-overview"},
 		evidence:     EvidenceFresh, implementation: ImplementationImplementedOffline, adapterID: "alibaba-plan",
 		hostActivation:    HostActivationTrustedSubscriptionAuthorizationResolver,
 		endpointHost:      "token-plan.cn-beijing.maas.aliyuncs.com",
@@ -253,7 +253,7 @@ func subscriptionSources(spec subscriptionSpec) []OfficialSource {
 }
 
 func alibabaCodingPlanModels(region string) []string {
-	// Keep the region branches separate even while the official 2026-07-11
+	// Keep the region branches separate even while the official 2026-07-30
 	// exact-string lists are equal. A later regional drift must update one
 	// Route family without silently changing the other.
 	switch region {
@@ -369,7 +369,7 @@ func xAIConsumerEntry() Entry {
 		},
 		Maturity:       MaturityUnknown,
 		ModelDiscovery: ModelDiscovery{Method: ModelDiscoveryStaticCatalog, AliasPolicy: ModelAliasStable, Aliases: []ModelAlias{{Alias: "grok-build", ProviderModelRef: "grok-build", Stable: true}}},
-		Sources:        []OfficialSource{{ID: "xai.grok-build.product.2026-07-11", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://grok.com"}},
+		Sources:        []OfficialSource{{ID: "xai.grok-build.product.2026-07-30", Publisher: "xAI", Kind: SourceProductDocs, URL: "https://grok.com"}},
 		Evidence:       Evidence{Status: EvidenceUnverified, TTLClass: EvidenceTTL7Days, CheckedAt: subscriptionCheckedAt, ValidUntil: subscriptionValidUntil},
 		SDKs:           []SDKMetadata{{Language: "external", Package: "grok-build", Owner: "xAI", Ownership: SDKOwnershipProviderNative, Transport: TransportSidecar, Version: "unverified", License: "proprietary", Official: true}},
 		Capabilities: completeCapabilities(map[string]CapabilityMetadata{

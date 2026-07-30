@@ -7,7 +7,7 @@ import (
 )
 
 var (
-	cloudCheckedAt  = time.Date(2026, 7, 18, 2, 30, 0, 0, time.UTC)
+	cloudCheckedAt  = time.Date(2026, 7, 30, 10, 45, 0, 0, time.UTC)
 	cloudValidUntil = cloudCheckedAt.Add(7 * 24 * time.Hour)
 )
 
@@ -61,7 +61,7 @@ func awsMantleEntries() []Entry {
 		cloudAPIKeyCredential("aws.bedrock-mantle.api-key", "AWS_BEARER_TOKEN_BEDROCK", providerID, offering.ID, deployment, "bedrock-mantle.{region}.api.aws", endpointIDs, "x-api-key"),
 		mantleSigV4,
 	}
-	sources := []OfficialSource{{ID: "aws.bedrock.mantle.2026-07-11", Publisher: "Amazon Web Services", Kind: SourceProductDocs, URL: "https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-openai.html"}, {ID: "anthropic.go.bedrock-mantle.1.56.0", Publisher: "Anthropic", Kind: SourceSDK, URL: "https://github.com/anthropics/anthropic-sdk-go/tree/main/bedrock"}}
+	sources := []OfficialSource{{ID: "aws.bedrock.mantle.2026-07-30", Publisher: "Amazon Web Services", Kind: SourceProductDocs, URL: "https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters-openai.html"}, {ID: "anthropic.go.bedrock-mantle.1.56.0", Publisher: "Anthropic", Kind: SourceSDK, URL: "https://github.com/anthropics/anthropic-sdk-go/tree/main/bedrock"}}
 	var entries []Entry
 	for _, protocolID := range []upstream.ProtocolID{upstream.ProtocolResponses, upstream.ProtocolChatCompletions, upstream.ProtocolMessages} {
 		for _, credential := range credentials {
@@ -87,7 +87,7 @@ func awsRuntimeEntries() []Entry {
 	endpoint := upstream.Endpoint{ID: "aws.bedrock-runtime.native", Scheme: "https", HostTemplate: "bedrock-runtime.{region}.amazonaws.com", CredentialAudience: "bedrock-runtime.{region}.amazonaws.com"}
 	endpointIDs := []upstream.EndpointID{endpoint.ID}
 	credentials := []upstream.CredentialProfile{cloudBearerCredential("aws.bedrock-runtime.bearer", "AWS_BEARER_TOKEN_BEDROCK", providerID, offering.ID, deployment, endpoint.CredentialAudience, endpointIDs), cloudSigV4Credential("aws.bedrock-runtime.sigv4", providerID, offering.ID, deployment, endpoint.CredentialAudience, endpointIDs)}
-	sources := []OfficialSource{{ID: "aws.bedrock.runtime.converse.2026-07-11", Publisher: "Amazon Web Services", Kind: SourceAPIReference, URL: "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html"}, {ID: "aws.bedrock.runtime.invoke.2026-07-11", Publisher: "Amazon Web Services", Kind: SourceAPIReference, URL: "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html"}}
+	sources := []OfficialSource{{ID: "aws.bedrock.runtime.converse.2026-07-30", Publisher: "Amazon Web Services", Kind: SourceAPIReference, URL: "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_Converse.html"}, {ID: "aws.bedrock.runtime.invoke.2026-07-30", Publisher: "Amazon Web Services", Kind: SourceAPIReference, URL: "https://docs.aws.amazon.com/bedrock/latest/APIReference/API_runtime_InvokeModel.html"}}
 	var entries []Entry
 	for _, protocolID := range []upstream.ProtocolID{upstream.ProtocolBedrockConverse, upstream.ProtocolBedrockInvoke} {
 		for _, credential := range credentials {
@@ -116,7 +116,7 @@ func vertexEntries() []Entry {
 	apiEndpoints := []upstream.EndpointID{"google.vertex-ai.generate", "google.vertex-ai.openai-chat"}
 	adc := cloudADCCredential("google.vertex-ai.adc", providerID, offering.ID, deployment, "{region}-aiplatform.googleapis.com", allEndpoints)
 	apiKey := cloudAPIKeyCredential("google.vertex-ai.api-key", "GOOGLE_API_KEY", providerID, offering.ID, deployment, "{region}-aiplatform.googleapis.com", apiEndpoints, "x-goog-api-key")
-	sources := []OfficialSource{{ID: "google.vertex-ai.claude.2026-07-11", Publisher: "Google Cloud", Kind: SourceProductDocs, URL: "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude"}, {ID: "google.genai.go.1.63.0", Publisher: "Google", Kind: SourceSDK, URL: "https://pkg.go.dev/google.golang.org/genai"}}
+	sources := []OfficialSource{{ID: "google.vertex-ai.claude.2026-07-30", Publisher: "Google Cloud", Kind: SourceProductDocs, URL: "https://cloud.google.com/vertex-ai/generative-ai/docs/partner-models/use-claude"}, {ID: "google.genai.go.1.63.0", Publisher: "Google", Kind: SourceSDK, URL: "https://pkg.go.dev/google.golang.org/genai"}}
 	definitions := []struct {
 		protocol    upstream.ProtocolID
 		credentials []upstream.CredentialProfile
@@ -149,7 +149,7 @@ func azureEntries() []Entry {
 	endpointIDs := []upstream.EndpointID{"azure.openai.v1", "azure.openai.legacy"}
 	apiKey := cloudAPIKeyCredential("azure.openai.api-key", "AZURE_OPENAI_API_KEY", providerID, offering.ID, deployment, "{resource}.openai.azure.com", endpointIDs, "api-key")
 	entra := cloudEntraCredential("azure.openai.entra", providerID, offering.ID, deployment, "{resource}.openai.azure.com", endpointIDs)
-	sources := []OfficialSource{{ID: "azure.openai.v1.lifecycle.2026-07-11", Publisher: "Microsoft", Kind: SourceAPIReference, URL: "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/api-version-lifecycle"}, {ID: "azure.openai.switching-endpoints.2026-07-11", Publisher: "Microsoft", Kind: SourceProductDocs, URL: "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/switching-endpoints"}}
+	sources := []OfficialSource{{ID: "azure.openai.v1.lifecycle.2026-07-30", Publisher: "Microsoft", Kind: SourceAPIReference, URL: "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/api-version-lifecycle"}, {ID: "azure.openai.switching-endpoints.2026-07-30", Publisher: "Microsoft", Kind: SourceProductDocs, URL: "https://learn.microsoft.com/en-us/azure/ai-foundry/openai/how-to/switching-endpoints"}}
 	definitions := []struct {
 		name     string
 		protocol upstream.ProtocolID
@@ -183,8 +183,8 @@ func cloudControlEntries() []Entry {
 		entry := makeCloudEntry(spec)
 		if entry.ID == "anthropic.consumer-plans.product-login.messages" {
 			entry.Sources = append(entry.Sources,
-				OfficialSource{ID: "anthropic.consumer.pro-no-api.2026-07-11", Publisher: "Anthropic", Kind: SourceTerms, URL: "https://support.claude.com/en/articles/8325606-what-is-the-pro-plan"},
-				OfficialSource{ID: "anthropic.consumer.agent-sdk-plan.2026-07-11", Publisher: "Anthropic", Kind: SourceTerms, URL: "https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan"},
+				OfficialSource{ID: "anthropic.consumer.pro-no-api.2026-07-30", Publisher: "Anthropic", Kind: SourceTerms, URL: "https://support.claude.com/en/articles/8325606-what-is-the-pro-plan"},
+				OfficialSource{ID: "anthropic.consumer.agent-sdk-plan.2026-07-30", Publisher: "Anthropic", Kind: SourceTerms, URL: "https://support.claude.com/en/articles/15036540-use-the-claude-agent-sdk-with-your-claude-plan"},
 			)
 			entry = finalizeDefaultEntry(entry)
 		}
@@ -340,7 +340,7 @@ func controlURL(provider upstream.ProviderID) string {
 	case "azure.ai-foundry":
 		return "https://learn.microsoft.com/en-us/azure/ai-foundry/model-inference/overview"
 	case "anthropic.platform-on-aws":
-		return "https://www.anthropic.com/partners/amazon-web-services"
+		return "https://platform.claude.com/docs/en/build-with-claude/claude-platform-on-aws"
 	case "anthropic.consumer":
 		return "https://support.claude.com/en/articles/9797557-usage-limit-best-practices"
 	default:
