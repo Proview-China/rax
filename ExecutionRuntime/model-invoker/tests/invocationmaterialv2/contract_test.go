@@ -2021,6 +2021,7 @@ func snapshotLegacySQLiteObjectsV2(t *testing.T, db *sql.DB) []string {
 		FROM sqlite_master
 		WHERE name NOT LIKE 'sqlite_%'
 		  AND name NOT LIKE 'invocation_material_v2_%'
+		  AND name NOT LIKE 'governed_model_turn_v3_%'
 		ORDER BY type,name
 	`)
 	if err != nil {
