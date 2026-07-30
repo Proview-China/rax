@@ -40,8 +40,8 @@ type ContextTurnRefreshCoordinationRequestV1 struct {
 }
 
 func NewContextTurnRefreshCoordinatorV1(config ContextTurnRefreshCoordinatorConfigV1) (*ContextTurnRefreshCoordinatorV1, error) {
-	if nilInterfaceV1(config.Context) || (nilInterfaceV1(config.Memory) && nilInterfaceV1(config.Knowledge)) {
-		return nil, core.NewError(core.ErrorInvalidArgument, core.ReasonComponentMissing, "context refresh coordinator requires Context and at least one Owner reader")
+	if nilInterfaceV1(config.Context) {
+		return nil, core.NewError(core.ErrorInvalidArgument, core.ReasonComponentMissing, "context refresh coordinator requires Context")
 	}
 	if config.Clock == nil {
 		config.Clock = time.Now
@@ -56,7 +56,7 @@ func (c *ContextTurnRefreshCoordinatorV1) CoordinateContextTurnRefreshV1(ctx con
 	release := c.gates.acquire(request.ID + "\x00" + string(request.ExecutionScopeDigest))
 	defer release()
 	now := c.config.Clock()
-	if now.IsZero() || request.SourceTurn.Ordinal == ^uint32(0) || request.RequestedNotAfterNano <= 0 || !now.Before(time.Unix(0, request.RequestedNotAfterNano)) || (request.Memory == nil && request.Knowledge == nil) {
+	if now.IsZero() || request.SourceTurn.Ordinal == ^uint32(0) || request.RequestedNotAfterNano <= 0 || !now.Before(time.Unix(0, request.RequestedNotAfterNano)) {
 		return contract.ContextTurnRefreshResultV1{}, core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "context refresh coordination request is incomplete or expired")
 	}
 	memoryS1, err := c.inspectOwner(ctx, c.config.Memory, request.Memory, contract.ContextOwnerMemoryV1, now)

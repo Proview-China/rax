@@ -198,6 +198,71 @@ func TestContextRefreshCrossOwnerExactFrameAndLostReply(t *testing.T) {
 	}
 }
 
+func TestContextRefreshToolOnlyPublishesExactGenerationManifestFrameAndCurrent(t *testing.T) {
+	fixture, err := testfixture.NewRefreshFixtureV1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	adapter, err := NewContextTurnRefreshAdapterV1(fixture.Service, fixture.Store, fixture.Store, fixture.Parent.Content, nil, nil, fixture.Clock.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	coordinator, err := application.NewContextTurnRefreshCoordinatorV1(application.ContextTurnRefreshCoordinatorConfigV1{Context: adapter, Clock: fixture.Clock.Now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := coordinationRequestV1(t, fixture, nil, nil)
+	result, err := coordinator.CoordinateContextTurnRefreshV1(context.Background(), request)
+	if err != nil || result.Validate() != nil || result.State != applicationcontract.ContextTurnRefreshAppliedStateV1 {
+		t.Fatalf("tool-only result=%+v err=%v", result, err)
+	}
+	scope := fixture.Request.ExpectedCurrent.ExecutionScopeDigest
+	frameRef := contract.FactRef{ID: result.FrameRef.ID, Revision: uint64(result.FrameRef.Revision), Digest: contract.Digest(result.FrameRef.Digest)}
+	manifestRef := contract.FactRef{ID: result.ManifestRef.ID, Revision: uint64(result.ManifestRef.Revision), Digest: contract.Digest(result.ManifestRef.Digest)}
+	generationRef := contract.FactRef{ID: result.GenerationRef.ID, Revision: uint64(result.GenerationRef.Revision), Digest: contract.Digest(result.GenerationRef.Digest)}
+	frame, err := fixture.Store.FrameByExactRef(context.Background(), frameRef, scope)
+	if err != nil || frame.ManifestRef != manifestRef || frame.GenerationID != generationRef.ID {
+		t.Fatalf("tool-only frame binding drifted: frame=%+v err=%v", frame, err)
+	}
+	manifest, err := fixture.Store.ManifestByExactRef(context.Background(), manifestRef, scope)
+	if err != nil || manifest.GenerationID != generationRef.ID || manifest.SourceSetDigest != frame.SourceSetDigest {
+		t.Fatalf("tool-only manifest binding drifted: manifest=%+v err=%v", manifest, err)
+	}
+	if len(manifest.Fragments) == 0 {
+		t.Fatal("tool-only manifest has no fragments")
+	}
+	for _, fragment := range manifest.Fragments {
+		if fragment.Kind == contract.FragmentMemoryRecall || fragment.Kind == contract.FragmentKnowledgeReference {
+			t.Fatalf("tool-only manifest contains an Owner source fragment: %+v", fragment)
+		}
+	}
+	foundTool := false
+	for _, fragment := range manifest.Fragments {
+		foundTool = foundTool || fragment.Kind == contract.FragmentToolResult
+	}
+	if !foundTool {
+		t.Fatalf("tool-only manifest lacks exact ToolResult: %+v", manifest.Fragments)
+	}
+	generation, err := fixture.Store.GenerationByExactRef(context.Background(), generationRef, scope)
+	if err != nil || generation.RootFrame != frameRef || generation.ID != frame.GenerationID || generation.Ordinal != frame.Generation {
+		t.Fatalf("tool-only generation binding drifted: generation=%+v err=%v", generation, err)
+	}
+	current, err := fixture.Store.InspectCurrentGenerationPointer(context.Background(), contract.ContextGenerationCurrentPointerRequestV1{
+		ExecutionScopeDigest: scope,
+		RunID:                fixture.Request.ExpectedCurrent.RunID,
+		SessionRef:           fixture.Request.ExpectedCurrent.SessionRef,
+		Turn:                 frame.Execution.Turn,
+	})
+	if err != nil || current.GenerationRef != generationRef || current.GenerationOrdinal != generation.Ordinal || result.CurrentPointerRef == nil || current.ID != result.CurrentPointerRef.ID || current.Revision != uint64(result.CurrentPointerRef.Revision) || current.Digest != contract.Digest(result.CurrentPointerRef.Digest) {
+		t.Fatalf("tool-only current binding drifted: current=%+v result=%+v err=%v", current, result, err)
+	}
+
+	inspected, err := adapter.InspectContextTurnRefreshV1(context.Background(), mustInspectRequestV1(t, result.AttemptRef))
+	if err != nil || inspected.Digest != result.Digest || inspected.GenerationRef != result.GenerationRef || inspected.FrameRef != result.FrameRef || inspected.ManifestRef != result.ManifestRef {
+		t.Fatalf("tool-only inspect lost exact result: inspect=%+v err=%v", inspected, err)
+	}
+}
+
 func TestContextRefreshS2StableDriftPublishesNothing(t *testing.T) {
 	fixture, err := testfixture.NewRefreshFixtureWithOwnerSourcesV1()
 	if err != nil {

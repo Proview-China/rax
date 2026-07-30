@@ -41,7 +41,7 @@ func (r ContextTurnRefreshPrepareRequestV1) DigestV1() (core.Digest, error) {
 }
 
 func (r ContextTurnRefreshPrepareRequestV1) ValidateCurrent(now time.Time) error {
-	if r.ContractVersion != ContextTurnRefreshContractVersionV1 || !validSingleCallIDV1(r.ID) || r.Revision != 1 || r.ExecutionScopeDigest.Validate() != nil || !validSingleCallIDV1(string(r.RunID)) || r.SourceSession.Validate() != nil || r.SessionApplicability.Validate() != nil || r.SourceTurn.Validate() != nil || r.TurnApplicability.Validate() != nil || r.SourceTurn.Ordinal == ^uint32(0) || r.ExpectedTargetTurn != r.SourceTurn.Ordinal+1 || len(r.OpaqueContextRequest) == 0 || len(r.OpaqueContextRequest) > MaxContextOwnerRequestBytesV1 || core.DigestBytes(r.OpaqueContextRequest) != r.ContextRequestDigest || (r.Memory == nil && r.Knowledge == nil) || r.RequestedNotAfterNano <= 0 || !now.Before(time.Unix(0, r.RequestedNotAfterNano)) || r.Digest.Validate() != nil {
+	if r.ContractVersion != ContextTurnRefreshContractVersionV1 || !validSingleCallIDV1(r.ID) || r.Revision != 1 || r.ExecutionScopeDigest.Validate() != nil || !validSingleCallIDV1(string(r.RunID)) || r.SourceSession.Validate() != nil || r.SessionApplicability.Validate() != nil || r.SourceTurn.Validate() != nil || r.TurnApplicability.Validate() != nil || r.SourceTurn.Ordinal == ^uint32(0) || r.ExpectedTargetTurn != r.SourceTurn.Ordinal+1 || len(r.OpaqueContextRequest) == 0 || len(r.OpaqueContextRequest) > MaxContextOwnerRequestBytesV1 || core.DigestBytes(r.OpaqueContextRequest) != r.ContextRequestDigest || r.RequestedNotAfterNano <= 0 || !now.Before(time.Unix(0, r.RequestedNotAfterNano)) || r.Digest.Validate() != nil {
 		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "context refresh prepare request is incomplete or expired")
 	}
 	for owner, envelope := range map[ContextOwnerKindV1]*ContextOwnerSourceEnvelopeV1{ContextOwnerMemoryV1: r.Memory, ContextOwnerKnowledgeV1: r.Knowledge} {
@@ -179,7 +179,7 @@ func (r ContextTurnRefreshApplyRequestV1) DigestV1() (core.Digest, error) {
 }
 
 func (r ContextTurnRefreshApplyRequestV1) ValidateCurrent(now time.Time) error {
-	if r.ContractVersion != ContextTurnRefreshContractVersionV1 || r.Prepared.ValidateCurrent(now) != nil || (r.Memory == nil && r.Knowledge == nil) || r.S2AssociationSetDigest.Validate() != nil || r.RequestedNotAfterNano <= 0 || !now.Before(time.Unix(0, r.RequestedNotAfterNano)) || r.Digest.Validate() != nil {
+	if r.ContractVersion != ContextTurnRefreshContractVersionV1 || r.Prepared.ValidateCurrent(now) != nil || r.S2AssociationSetDigest.Validate() != nil || r.RequestedNotAfterNano <= 0 || !now.Before(time.Unix(0, r.RequestedNotAfterNano)) || r.Digest.Validate() != nil {
 		return core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "context refresh apply request is incomplete or expired")
 	}
 	for owner, envelope := range map[ContextOwnerKindV1]*ContextOwnerSourceEnvelopeV1{ContextOwnerMemoryV1: r.Memory, ContextOwnerKnowledgeV1: r.Knowledge} {
