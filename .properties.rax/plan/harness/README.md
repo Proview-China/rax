@@ -22,6 +22,7 @@
 - [单Call Action Gateway V1设计](../../design/harness/assembly/action-gateway-v1.md)
 - [单Call Action Gateway V1测试矩阵](../../design/harness/assembly/action-gateway-v1-test-matrix.md)
 - [G6B Context Turn Refresh公共合同漂移Port Delta（candidate-p0）](../../design/harness/port-deltas/context-turn-refresh-g6b-v1.md)
+- [TurnContinuation V1公共合同实施计划](./turn-continuation-v1.md)
 - [G6A Model Tool Call → PendingAction Identity V1（第二独立设计短审YES；Current Reader Port Delta开放）](./model-tool-call-pending-action-identity-v1.md)
 - [Action Gateway前置：OperationScope Evidence V3计划](../runtime/operation-scope-evidence-v3.md)
 - [Harness Route绑定与公共引擎接线v1（历史草案，已被Assembly V1取代）](./harness-route-engine-v1.md)

@@ -52,6 +52,7 @@ Pause和Checkpoint是可选Capability；未支持时必须从API和Profile中明
 - [Model PreDispatch Assembly Owner-current A2+B1+C2裁决](./port-deltas/model-predispatch-assembly-owner-current-v1.md)
 - [Model PreDispatch actual-point inventory Port Delta](./port-deltas/model-predispatch-actual-point-inventory-v1.md)
 - [G6B Context Turn Refresh公共合同漂移Port Delta](./port-deltas/context-turn-refresh-g6b-v1.md)
+- [TurnContinuation V1公共合同Port Delta](./port-deltas/turn-continuation-v1.md)
 - [单Call Action Gateway冻结边界](./assembly/README.md#61-单call-action-gateway冻结边界)
 - [Action Gateway 4.1验收门](./assembly/acceptance.md#41-action-gateway分阶段实现门)
 - [Action Gateway前置：OperationScope Evidence V3](../runtime/operation-scope-evidence-v3/README.md#8-与action-gateway的严格顺序)
