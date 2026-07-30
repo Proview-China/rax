@@ -13,7 +13,9 @@ AgentDefinitionV1 -> ResolvedAgentPlanV1 -> AssemblyInputV1
 
 Package ID 使用完整规范化 lock SHA-256 hex，不截断。代码式 `AddComponent`、`AddSecretRef`、`AddExtension` 在接收时即深拷贝输入，调用方后续修改 slice、map 或 payload 不会改变 Builder 内部状态。
 
-当前只提供解析、代码式 Source Builder、上游 ResolveResult 适配和纯 Harness 编译/封装。它不提供 Definition Owner、Catalog/Plan Store、Host、Runtime、Loop、Provider 调用、Sandbox 激活、Secret 读取、发布或运行资格。
+本模块还提供 create-once SQLite WAL Package Repository 与 exact Loader。Repository 只拥有 Package：完全相同写入幂等，同坐标不同 body/digest 冲突；写回复丢失只能 Inspect 原 Package ref。Loader 会重新读取 Package 以及锁定的 sealed Generation、Manifest、Graph、Handoff，逐一重算 digest 并验证交叉绑定，不能只凭 lock 判定闭包存在。Loader 返回的 verified closure 仍不是 executable 或 authorized runtime object。
+
+当前仍不提供 Harness artifact 自有 Store、Definition Owner、Catalog/Plan Store、Host、Runtime、Loop、Factory 实例化、Provider 调用、Sandbox 激活、Secret 读取、Console/TS DTO、发布或运行资格。
 
 验证：
 
@@ -22,4 +24,5 @@ cd ExecutionRuntime/agent-builder
 go test -count=1 ./...
 go test -count=1 -race ./...
 go vet ./...
+(cd tests/blackbox && go test -count=1 ./... && go test -count=1 -race ./... && go vet ./...)
 ```
