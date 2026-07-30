@@ -8,10 +8,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/application/contract"
 	applicationports "github.com/Proview-China/rax/ExecutionRuntime/application/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
-	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 )
-
-const contextRefreshAttemptKindV1 = runtimeports.NamespacedNameV2("application/context-attempt")
 
 type ContextTurnRefreshCoordinatorConfigV1 struct {
 	Context   applicationports.ContextTurnRefreshPortV1
@@ -164,7 +161,11 @@ func (c *ContextTurnRefreshCoordinatorV1) inspectS2(ctx context.Context, reader 
 }
 
 func (c *ContextTurnRefreshCoordinatorV1) inspectOriginal(ctx context.Context, prepare contract.ContextTurnRefreshPrepareRequestV1) (contract.ContextTurnRefreshResultV1, error) {
-	inspect, err := contract.SealContextTurnRefreshInspectRequestV1(contract.ContextTurnRefreshInspectRequestV1{AttemptRef: contract.ContextRefreshExactRefV1{Kind: contextRefreshAttemptKindV1, ID: prepare.ID, Revision: 1, Digest: prepare.Digest}})
+	attempt, err := prepare.AttemptRefV1()
+	if err != nil {
+		return contract.ContextTurnRefreshResultV1{}, err
+	}
+	inspect, err := contract.SealContextTurnRefreshInspectRequestV1(contract.ContextTurnRefreshInspectRequestV1{AttemptRef: attempt})
 	if err != nil {
 		return contract.ContextTurnRefreshResultV1{}, err
 	}

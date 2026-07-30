@@ -84,6 +84,21 @@ func SealContextTurnRefreshPrepareRequestV1(r ContextTurnRefreshPrepareRequestV1
 	return r, nil
 }
 
+// AttemptRefV1 returns the exact Application attempt frozen by a sealed
+// prepare request. Callers must still validate the prepare request's
+// currentness before publishing this ref to another Owner.
+func (r ContextTurnRefreshPrepareRequestV1) AttemptRefV1() (ContextRefreshExactRefV1, error) {
+	if r.ContractVersion != ContextTurnRefreshContractVersionV1 || !validSingleCallIDV1(r.ID) || r.Revision != 1 || r.Digest.Validate() != nil {
+		return ContextRefreshExactRefV1{}, core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "context refresh prepare Attempt ref is incomplete")
+	}
+	digest, err := r.DigestV1()
+	if err != nil || digest != r.Digest {
+		return ContextRefreshExactRefV1{}, core.NewError(core.ErrorConflict, core.ReasonInvalidDigest, "context refresh prepare Attempt digest drifted")
+	}
+	ref := ContextRefreshExactRefV1{Kind: ContextTurnRefreshApplicationAttemptKindV1, ID: r.ID, Revision: r.Revision, Digest: r.Digest}
+	return ref, ref.Validate()
+}
+
 type ContextTurnRefreshPreparedV1 struct {
 	ContractVersion        string                   `json:"contract_version"`
 	AttemptRef             ContextRefreshExactRefV1 `json:"attempt_ref"`

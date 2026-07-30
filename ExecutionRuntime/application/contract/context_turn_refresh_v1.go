@@ -11,6 +11,8 @@ import (
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 )
 
+const ContextTurnRefreshApplicationAttemptKindV1 = runtimeports.NamespacedNameV2("application/context-attempt")
+
 const (
 	ContextTurnRefreshContractVersionV1 = "praxis.application/context-turn-refresh/v1"
 	ContextOwnerMemoryV1                = ContextOwnerKindV1("memory")
