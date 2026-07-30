@@ -508,13 +508,22 @@ func (s *Store) inspectWorkspaceReadTx(ctx context.Context, tx *sql.Tx, stable s
 	}
 	p.AdmissionReceipt = p.Attempt.AdmissionReceipt
 	if p.Attempt.Observation != nil {
+		var observationID string
+		var observationStable string
 		var ob []byte
-		if err := tx.QueryRowContext(ctx, `SELECT body FROM workspace_read_observation WHERE stable_digest=?`, stable).Scan(&ob); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT observation_id,stable_digest,body FROM workspace_read_observation WHERE stable_digest=?`, stable).Scan(&observationID, &observationStable, &ob); err != nil {
 			return p, err
 		}
 		var o contract.WorkspaceReadObservationV1
 		if err := decode(ob, &o); err != nil {
 			return p, err
+		}
+		if observationStable != stable ||
+			o.Meta.ID != observationID ||
+			*p.Attempt.Observation != o.Meta.Ref() ||
+			o.AdmissionReceipt.StableKeyDigest != stable ||
+			o.ProviderReceipt.StableKeyDigest != stable {
+			return p, ports.ErrConflict
 		}
 		p.Observation = &o
 		provider := o.ProviderReceipt
