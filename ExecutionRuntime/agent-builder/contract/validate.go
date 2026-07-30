@@ -57,8 +57,12 @@ func (m AgentPackageLockManifestV1) Validate() error {
 			return err
 		}
 	}
-	if m.ManifestRef.ID != m.GenerationRef.ID+"/manifest" || m.GraphRef.ID != m.GenerationRef.ID+"/graph" || m.HandoffRef.ID != m.GenerationRef.ID+"/handoff" || m.ManifestRef.Revision != m.GenerationRef.Revision || m.GraphRef.Revision != m.GenerationRef.Revision || m.HandoffRef.Revision != m.GenerationRef.Revision {
-		return core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, "agent package artifact refs do not share the exact Harness generation coordinate")
+	publicationID, err := assemblycontract.DeriveAssemblyPublicationIDV2(m.AssemblyInputDigest, m.GenerationRef.ID)
+	if err != nil {
+		return err
+	}
+	if m.ManifestRef.ID != publicationID+"/manifest" || m.GraphRef.ID != publicationID+"/graph" || m.HandoffRef.ID != publicationID+"/handoff" || m.ManifestRef.Revision != 1 || m.GraphRef.Revision != 1 || m.HandoffRef.Revision != 1 {
+		return core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, "agent package artifact refs do not use the exact Harness publication coordinates")
 	}
 	want, err := LockDigestV1(m)
 	if err != nil {

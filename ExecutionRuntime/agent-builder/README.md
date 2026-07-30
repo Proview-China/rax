@@ -11,6 +11,8 @@ AgentDefinitionV1 -> ResolvedAgentPlanV1 -> AssemblyInputV1
 
 `AgentPackageRefV1` 是下游最小不可变引用：package ID、revision、digest、contract version 和 schema version。`AgentPackageLockManifestV1` 锁定 Definition、Resolution Facts、Catalog、Component Releases、Resolved Plan、Binding Plan、Assembly Input 以及 Harness Generation/Manifest/Graph/Handoff 的 exact refs 或 digest。相同输入产生相同 package；任一上游 ref、digest 或 compiler version 漂移都 Fail Closed。
 
+Manifest、Graph、Handoff 的 exact ref 直接使用 Harness `AssemblyPublicationV2` 的规范 PublicationID 坐标；AgentPackage 不根据 GenerationID 发明第二套对象 ID。这样 Package Loader 能直接消费 Harness Owner 已提交的历史发布资产。
+
 Package ID 使用完整规范化 lock SHA-256 hex，不截断。代码式 `AddComponent`、`AddSecretRef`、`AddExtension` 在接收时即深拷贝输入，调用方后续修改 slice、map 或 payload 不会改变 Builder 内部状态。
 
 本模块还提供 create-once SQLite WAL Package Repository 与 exact Loader。Repository 只拥有 Package：完全相同写入幂等，同坐标不同 body/digest 冲突；写回复丢失只能 Inspect 原 Package ref。Loader 会重新读取 Package 以及锁定的 sealed Generation、Manifest、Graph、Handoff，逐一重算 digest 并验证交叉绑定，不能只凭 lock 判定闭包存在。Loader 返回的 verified closure 仍不是 executable 或 authorized runtime object。

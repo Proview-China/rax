@@ -20,17 +20,22 @@ func objectRef(id string) assemblycontract.ObjectRefV1 {
 func validLock(t *testing.T) AgentPackageLockManifestV1 {
 	t.Helper()
 	generation := objectRef("assembly-generation-test")
+	inputDigest := digest("input")
+	publicationID, err := assemblycontract.DeriveAssemblyPublicationIDV2(inputDigest, generation.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	value, err := SealLockManifestV1(AgentPackageLockManifestV1{
 		DefinitionRef:        definitioncontract.AgentDefinitionRefV1{DefinitionID: "agent/test", Revision: 1, Digest: digest("definition")},
 		ResolvedPlanRef:      assemblercontract.ResolvedAgentPlanRefV1{PlanID: "plan/test", Revision: 1, Digest: digest("plan")},
 		ResolutionFactsRef:   assemblercontract.ResolutionFactsRefV1{FactsID: "facts/test", Revision: 1, Digest: digest("facts")},
 		CatalogRef:           assemblercontract.ComponentReleaseCatalogRefV1{CatalogID: "catalog/test", Revision: 1, Digest: digest("catalog")},
 		ComponentReleaseRefs: []assemblercontract.ComponentReleaseRefV1{{ReleaseID: "release/test", Revision: 1, Digest: digest("release"), ComponentID: runtimeports.ComponentIDV2("component/test")}},
-		BindingPlanDigest:    digest("binding"), AssemblyInputDigest: digest("input"), FrozenUnixNano: 100,
+		BindingPlanDigest:    digest("binding"), AssemblyInputDigest: inputDigest, FrozenUnixNano: 100,
 		HarnessCompilerVersion: assemblycontract.CompilerVersionV1, GenerationRef: generation,
-		ManifestRef: assemblycontract.ObjectRefV1{ID: generation.ID + "/manifest", Revision: 1, Digest: digest("manifest")},
-		GraphRef:    assemblycontract.ObjectRefV1{ID: generation.ID + "/graph", Revision: 1, Digest: digest("graph")},
-		HandoffRef:  assemblycontract.ObjectRefV1{ID: generation.ID + "/handoff", Revision: 1, Digest: digest("handoff")},
+		ManifestRef: assemblycontract.ObjectRefV1{ID: publicationID + "/manifest", Revision: 1, Digest: digest("manifest")},
+		GraphRef:    assemblycontract.ObjectRefV1{ID: publicationID + "/graph", Revision: 1, Digest: digest("graph")},
+		HandoffRef:  assemblycontract.ObjectRefV1{ID: publicationID + "/handoff", Revision: 1, Digest: digest("handoff")},
 	})
 	if err != nil {
 		t.Fatal(err)

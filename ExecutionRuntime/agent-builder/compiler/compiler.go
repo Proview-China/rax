@@ -48,13 +48,17 @@ func (c CompilerV1) Compile(result assemblercontract.ResolveResultV1) (packageco
 	if compiled.Handoff.GenerationRef != generationRef || compiled.Handoff.ManifestDigest != compiled.Manifest.Digest || compiled.Handoff.GraphDigest != compiled.Graph.Digest {
 		return packagecontract.AgentPackageV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonBindingDrift, "Harness compile artifacts are not an exact closure")
 	}
+	publicationID, err := assemblycontract.DeriveAssemblyPublicationIDV2(result.AssemblyInput.Digest, generationRef.ID)
+	if err != nil {
+		return packagecontract.AgentPackageV1{}, err
+	}
 	lock, err := packagecontract.SealLockManifestV1(packagecontract.AgentPackageLockManifestV1{
 		DefinitionRef: result.Plan.DefinitionRef, ResolvedPlanRef: planRef, ResolutionFactsRef: result.Plan.ResolutionFactsRef, CatalogRef: result.Plan.CatalogRef,
 		ComponentReleaseRefs: refs, BindingPlanDigest: result.BindingPlan.PlanDigest, AssemblyInputDigest: result.AssemblyInput.Digest, FrozenUnixNano: result.AssemblyInput.CreatedUnixNano,
 		HarnessCompilerVersion: assemblycontract.CompilerVersionV1, GenerationRef: generationRef,
-		ManifestRef: assemblycontract.ObjectRefV1{ID: generationRef.ID + "/manifest", Revision: generationRef.Revision, Digest: compiled.Manifest.Digest},
-		GraphRef:    assemblycontract.ObjectRefV1{ID: generationRef.ID + "/graph", Revision: generationRef.Revision, Digest: compiled.Graph.Digest},
-		HandoffRef:  assemblycontract.ObjectRefV1{ID: generationRef.ID + "/handoff", Revision: generationRef.Revision, Digest: compiled.Handoff.Digest},
+		ManifestRef: assemblycontract.ObjectRefV1{ID: publicationID + "/manifest", Revision: 1, Digest: compiled.Manifest.Digest},
+		GraphRef:    assemblycontract.ObjectRefV1{ID: publicationID + "/graph", Revision: 1, Digest: compiled.Graph.Digest},
+		HandoffRef:  assemblycontract.ObjectRefV1{ID: publicationID + "/handoff", Revision: 1, Digest: compiled.Handoff.Digest},
 	})
 	if err != nil {
 		return packagecontract.AgentPackageV1{}, err
