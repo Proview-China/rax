@@ -12,6 +12,8 @@
 - `composition`：稳定拓扑构造、Factory canonical start-or-inspect、unknown outcome 持久化、reverse-DAG cleanup；
 - `lifecycle`：Validate/Assemble/Start/Inspect/Stop 共用入口，按 `HostID + StartID` 分片串行化；只有 Ready phase、fresh validation、exact ReadyRef 与全 6+1 production readiness proof 同时成立才返回 Ready。
 
+新增 additive `lifecycle.HostV3` 可执行参考纵切：先读取 exact Deployment Current，再通过同一SQLite State Plane原子持久化Claim/InputV3 sidecar与HostJournalV2，并经窄 `HostV3OwnerPipeline` 聚合Owner签发的Ready、Availability、CleanupClosure和CleanupResult exact refs。该纵切覆盖并发、lost reply、重启、splice、expiry和unknown，但pipeline仍是待production composition实现的接口；它不是CLI/daemon、Model Loop或production root。
+
 Binding 或 Construction 的 planned/unknown attempt 都是未完成的外部 Effect 证明。重试只能复用原 AttemptID 和 request digest；Stop/Reconcile 即使清理完全部已知 handle，也不得把仍有未决 attempt 的生命周期写成 Closed。
 
 Journal successor 只允许 BindingAttempt 首次以 planned 写入、ConstructionAttempt 每次在尾部追加一个 planned；禁止直写 bound/constructed/unknown 或批量 attempt。Factory 已返回的有效 handle/ref 会先进入确定 cleanup 集，再持久化 constructed progress。Create/CAS panic 视为 unknown reply并立即 Inspect exact desired；Port panic 不得越过 Host API。

@@ -22,6 +22,8 @@
 
 ## 当前边界
 
+Additive [HostV3可执行参考生命周期](host-v3-concrete-lifecycle-v1.md) 已将Deployment exact read、atomic Claim/InputV3、HostJournalV2及Start/Inspect/Stop接成真实SQLite黑盒。其Owner pipeline只消费exact refs，当前测试实现不构成production Owner composition、Model Loop或CLI/daemon。
+
 H3第一纵切及H4 Assembly Publication子切面已完成；H4其余Runtime/Application接线、全6+1 production factories、CLI/API transport仍未落地。live HostV1又缺少control-adapter构造之后的显式Activation与Generation Association阶段，因此不能产生生产 `SystemReady`。
 
 H4 Assembly Publication已经具备两层真实产物：Harness Owner提供SQLite WAL durable `OwnerStoreV2`，以单事务提交publication marker与scope current；Host新增additive `CompiledAssemblyArtifactsV2`和`AssemblyPublicationAdapterV2`，保留同一次H3 compile的四个sealed对象，并把Generation/Manifest/Graph/Handoff/commit分别写入HostJournalV2 fixed attempt。lost reply或重启只能Inspect原staged/historical/current，不从refs重建对象。该子切面通过ordinary100/race20/full ordinary/race/vet，但尚未接入HostV2 production root。

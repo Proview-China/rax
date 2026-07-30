@@ -20,9 +20,20 @@ func NewCoordinatorV2(facts ports.JournalFactPortV2, now func() time.Time) (*Coo
 }
 
 func (c *CoordinatorV2) EnsureAcceptedV2(ctx context.Context, claim contract.HostStartClaimV1) (contract.HostJournalV2, error) {
+	return c.ensureAcceptedForClaimV2(ctx, claim, contract.ContractVersionV2)
+}
+
+// EnsureAcceptedV3 reuses the same HostJournalV2 Fact Owner after the atomic
+// V3 Claim/Input linear point. It is additive and does not make HostV2 accept
+// or recreate a V3 Claim.
+func (c *CoordinatorV2) EnsureAcceptedV3(ctx context.Context, claim contract.HostStartClaimV1) (contract.HostJournalV2, error) {
+	return c.ensureAcceptedForClaimV2(ctx, claim, contract.HostLifecycleContractVersionV3)
+}
+
+func (c *CoordinatorV2) ensureAcceptedForClaimV2(ctx context.Context, claim contract.HostStartClaimV1, requiredVersion string) (contract.HostJournalV2, error) {
 	if c == nil || contract.IsTypedNilV1(c.facts) { return contract.HostJournalV2{}, contract.NewError(contract.ErrorUnavailable, "journal_coordinator_missing", "HostV2 Journal coordinator is unavailable") }
 	if ctx == nil { return contract.HostJournalV2{}, contract.NewError(contract.ErrorInvalidArgument, "context_missing", "context is required") }
-	if claim.HostContractVersion != contract.ContractVersionV2 { return contract.HostJournalV2{}, contract.NewError(contract.ErrorConflict, "host_start_claim_version_drift", "HostV2 Journal requires a V2 shared start claim") }
+	if claim.HostContractVersion != requiredVersion { return contract.HostJournalV2{}, contract.NewError(contract.ErrorConflict, "host_start_claim_version_drift", "Host Journal claim contract version drifted") }
 	now, err := safeNowV1(c.now); if err != nil { return contract.HostJournalV2{}, err }; if err := claim.ValidateCurrentV1(now); err != nil { return contract.HostJournalV2{}, err }
 	claimRef, err := claim.RefV1(); if err != nil { return contract.HostJournalV2{}, err }
 	desired, err := contract.SealHostJournalV2(contract.HostJournalV2{ContractVersion: contract.HostJournalContractVersionV2, HostID: claim.HostID, StartID: claim.StartID, Revision: 1, Phase: contract.HostAcceptedV2, StartClaimRef: claimRef, ConfigDigest: claim.ConfigDigest, CreatedUnixNano: now.UnixNano(), UpdatedUnixNano: now.UnixNano()}); if err != nil { return contract.HostJournalV2{}, err }
