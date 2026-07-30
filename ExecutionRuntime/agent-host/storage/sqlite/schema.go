@@ -143,3 +143,40 @@ CREATE INDEX IF NOT EXISTS agent_host_cleanup_closure_plan_v2
 `
 
 const schemaV6 = schemaV5 + schemaDeltaV6
+
+const schemaDeltaV7 = `
+CREATE TABLE IF NOT EXISTS agent_host_deployment_current_history_v2 (
+  host_id TEXT NOT NULL,
+  deployment_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision > 0),
+  digest TEXT NOT NULL,
+  bootstrap_digest TEXT NOT NULL,
+  selection_id TEXT NOT NULL,
+  selection_revision INTEGER NOT NULL CHECK(selection_revision > 0),
+  selection_digest TEXT NOT NULL,
+  selection_expires_unix_nano INTEGER NOT NULL CHECK(selection_expires_unix_nano > 0),
+  checked_unix_nano INTEGER NOT NULL CHECK(checked_unix_nano > 0),
+  expires_unix_nano INTEGER NOT NULL CHECK(expires_unix_nano > checked_unix_nano),
+  row_digest TEXT NOT NULL,
+  canonical_json BLOB NOT NULL,
+  PRIMARY KEY(host_id, deployment_id, revision),
+  UNIQUE(host_id, deployment_id, revision, digest),
+  UNIQUE(host_id, deployment_id, revision, digest, selection_id, selection_revision, selection_digest, selection_expires_unix_nano)
+) STRICT;
+CREATE TABLE IF NOT EXISTS agent_host_deployment_current_v2 (
+  host_id TEXT NOT NULL,
+  deployment_id TEXT NOT NULL,
+  revision INTEGER NOT NULL CHECK(revision > 0),
+  digest TEXT NOT NULL,
+  selection_id TEXT NOT NULL,
+  selection_revision INTEGER NOT NULL CHECK(selection_revision > 0),
+  selection_digest TEXT NOT NULL,
+  selection_expires_unix_nano INTEGER NOT NULL CHECK(selection_expires_unix_nano > 0),
+  row_digest TEXT NOT NULL,
+  PRIMARY KEY(host_id, deployment_id),
+  FOREIGN KEY(host_id, deployment_id, revision, digest, selection_id, selection_revision, selection_digest, selection_expires_unix_nano)
+    REFERENCES agent_host_deployment_current_history_v2(host_id, deployment_id, revision, digest, selection_id, selection_revision, selection_digest, selection_expires_unix_nano)
+) STRICT;
+`
+
+const schemaV7 = schemaV6 + schemaDeltaV7

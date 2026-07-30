@@ -71,9 +71,12 @@ func TestOpenUpgradesVersionOneMetadataWithoutRewritingIt(t *testing.T) {
 	if err = store.db.QueryRow(`SELECT digest FROM agent_host_schema WHERE version=6`).Scan(&current); err != nil || current != string(core.DigestBytes([]byte(schemaV6))) {
 		t.Fatalf("schema v6 proof missing: %q %v", current, err)
 	}
+	if err = store.db.QueryRow(`SELECT digest FROM agent_host_schema WHERE version=7`).Scan(&current); err != nil || current != string(core.DigestBytes([]byte(schemaV7))) {
+		t.Fatalf("schema v7 proof missing: %q %v", current, err)
+	}
 }
 
-func TestOpenRejectsHistoricalSchemaProofDriftBeforePublishingV6(t *testing.T) {
+func TestOpenRejectsHistoricalSchemaProofDriftBeforePublishingV7(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "schema-drift.db")
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -95,8 +98,8 @@ func TestOpenRejectsHistoricalSchemaProofDriftBeforePublishingV6(t *testing.T) {
 	}
 	defer db.Close()
 	var count int
-	if err = db.QueryRow(`SELECT COUNT(*) FROM agent_host_schema WHERE version=6`).Scan(&count); err != nil || count != 0 {
-		t.Fatalf("drifted migration published v6 count=%d err=%v", count, err)
+	if err = db.QueryRow(`SELECT COUNT(*) FROM agent_host_schema WHERE version=7`).Scan(&count); err != nil || count != 0 {
+		t.Fatalf("drifted migration published v7 count=%d err=%v", count, err)
 	}
 }
 
