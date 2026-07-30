@@ -15,5 +15,5 @@
 - Runtime 不调用 Provider；
 - Runtime 不把 Context cancel 升级为 Run cancel；
 - Runtime 不签发 Permit、Review Authorization 或 Enforcement；
-- Runtime cancel/current 生产实现与跨 Owner Adapter 尚缺，因此 production NO-GO。
+- Runtime cancel/current owner-local只读Adapter已落地；生产Run/Command Store与跨Owner composition仍缺，因此production NO-GO。
 - Boundary projection 的 Prepared/current/ACK 证明仅依赖 Model Owner reader/ref digest；真实 Model Adapter 与 no-bypass 尚未接入。
