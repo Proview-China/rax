@@ -2,7 +2,7 @@
 
 ## 1. 当前裁决
 
-- 状态：设计已确认；H1-H3与HostV2 Start/Inspect参考纵切已实现并通过门禁。真实Activation、Stop Closure、全6+1 production root与H5仍为NO-GO。
+- 状态：设计已确认；H1-H3、HostV2 Start/Inspect与[HostV3可执行参考生命周期](host-v3-concrete-lifecycle-v1.md)已实现并通过各自门禁。HostV3仍缺production Owner pipeline；全6+1 production root与H5仍为NO-GO。
 - 目标：把 Definition、Assembler、Harness、Runtime/Application 和 6+1 的生产 adapters 组装成一个可启动、可检查、可停止的 Agent。
 - 技术：首版核心与 Composition Root 使用 Go；CLI 只是同一 Host API 的薄入口。
 - 当前事实：仓库还没有 production root，本设计不能被写成“已经可以一条命令启动”。

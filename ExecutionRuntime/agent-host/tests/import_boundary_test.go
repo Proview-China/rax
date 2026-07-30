@@ -86,6 +86,9 @@ func TestProductionImportBoundary(t *testing.T) {
 				filepath.Join("contract", "host_v3.go"): {
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports": true,
 				},
+				filepath.Join("contract", "host_v3_pipeline.go"): {
+					"github.com/Proview-China/rax/ExecutionRuntime/runtime/ports": true,
+				},
 				filepath.Join("contract", "review_model_invocation_association_v1.go"): {
 					"github.com/Proview-China/rax/ExecutionRuntime/model-invoker": true,
 					"github.com/Proview-China/rax/ExecutionRuntime/runtime/core":  true,

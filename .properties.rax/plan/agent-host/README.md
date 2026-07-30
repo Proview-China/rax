@@ -2,7 +2,7 @@
 
 ## 1. 状态和预期产物
 
-- 状态：计划已审核通过；H1-H3、P4组件声明候选与HostV2 Start/Inspect参考纵切已完成。live 11个目标域均已有Release/ReleaseCandidate包，但没有任何production readiness真实发布。真实Activation、Cleanup Closure、H5及production Runtime/Application/6+1接线仍为NO-GO。
+- 状态：计划已审核通过；H1-H3、P4组件声明候选、HostV2 Start/Inspect与[HostV3可执行参考生命周期](host-v3-concrete-lifecycle-v1.md)已完成。HostV3当前只有reference Owner pipeline seam；production Runtime/Application/6+1接线与H5仍为NO-GO。
 - 代码候选根：`ExecutionRuntime/agent-host/`。
 - 完成后产物：唯一 production Composition Root、Host API、`praxis-agent` CLI、生命周期 journal、factory registry、readiness/no-bypass 检查和全 6+1 系统验收。
 

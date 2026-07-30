@@ -36,3 +36,15 @@ type HostStartClaimPortV3 interface {
 	HostStartClaimInputCurrentReaderV3
 	ClaimOrInspectHostStartV3(context.Context, contract.HostStartClaimV1, contract.HostStartClaimInputV3) (contract.HostStartClaimInputBindingV3, error)
 }
+
+// HostV3OwnerPipeline is the narrow post-Claim seam. A production adapter may
+// compose the V2 Owner stages only after an additive after-Claim refactor; it
+// must never manufacture CleanupClosure, Ready or Availability coordinates.
+// StartOrInspect may dispatch only while it owns the durable operation intent;
+// Inspect methods are permanently read-only recovery surfaces.
+type HostV3OwnerPipeline interface {
+	StartOrInspectHostV3(context.Context, contract.StartRequestV3, contract.HostStartClaimInputBindingV3, contract.HostJournalV2) (contract.HostV3OwnerStartProjectionV1, error)
+	InspectHostV3(context.Context, contract.HostStartClaimInputBindingV3, contract.HostJournalV2) (contract.HostV3OwnerStartProjectionV1, error)
+	StopOrInspectHostV3(context.Context, contract.StopRequestV3, contract.HostStartClaimInputBindingV3, contract.HostJournalV2) (contract.HostV3OwnerStopProjectionV1, error)
+	InspectStopHostV3(context.Context, contract.StopRequestV3, contract.HostStartClaimInputBindingV3, contract.HostJournalV2) (contract.HostV3OwnerStopProjectionV1, error)
+}
