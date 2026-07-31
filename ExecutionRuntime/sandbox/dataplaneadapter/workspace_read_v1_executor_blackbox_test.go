@@ -8,9 +8,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -45,6 +49,8 @@ type workspaceReadExecutorCaseV1 struct {
 	runtimeLeaseS2Drift bool
 	driftReservation    bool
 	driftAttempt        bool
+	useFakeActual       bool
+	verifyBindingV2     bool
 }
 
 type lockedBuffer struct {
@@ -66,6 +72,14 @@ func (b *lockedBuffer) String() string {
 
 func TestWorkspaceReadPublicExecutorCallsConcreteAdapterAndRustOnce(t *testing.T) {
 	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{startByte: 6, expectedState: contract.WorkspaceReadObservedV1, expectedContent: "Praxis", expectedAdapter: 1, expectedPhysical: 1})
+}
+
+func TestWorkspaceReadPublicExecutorCreatesRuntimeAttemptAdmissionBindingV2(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		startByte: 6, expectedState: contract.WorkspaceReadObservedV1,
+		expectedContent: "Praxis", expectedAdapter: 1, expectedPhysical: 1,
+		useFakeActual: true, verifyBindingV2: true,
+	})
 }
 
 func TestWorkspaceReadPublicExecutorClassifiesPhysicalBoundariesThroughRustIPC(t *testing.T) {
@@ -144,8 +158,16 @@ func TestWorkspaceReadPublicExecutorClassifiesPhysicalBoundariesThroughRustIPC(t
 
 func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCaseV1) {
 	binary := os.Getenv("PRAXIS_SANDBOX_DATAPLANE_BIN")
-	if binary == "" {
+	if binary == "" && !spec.useFakeActual {
 		t.Skip("set PRAXIS_SANDBOX_DATAPLANE_BIN to run the public executor black box")
+	}
+	clock := time.Now
+	var controlledClock atomic.Int64
+	if spec.verifyBindingV2 {
+		controlledClock.Store(time.Now().UTC().UnixNano())
+		clock = func() time.Time {
+			return time.Unix(0, controlledClock.Load()).UTC()
+		}
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -163,7 +185,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		t.Fatal(err)
 	}
 
-	now := time.Now().UTC()
+	now := clock().UTC()
 	expires := now.Add(30 * time.Second)
 	workspaceExpires := time.Unix(0, 4_000_000_008_000_000_000)
 	workspaceDigest := "sha256:021c67f065e27e7e93918819bfbd85d62dc7c9a50a7599779b68bdc4a293f2ba"
@@ -225,6 +247,16 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		OperationDigest: string(current.Sandbox.OperationDigest), EffectID: string(current.Sandbox.EffectID), IntentRevision: uint64(current.Sandbox.IntentRevision), IntentDigest: string(current.Sandbox.IntentDigest), AttemptID: current.Sandbox.AttemptID,
 		PreparedDigest: string(prepared.Digest), ProviderComponent: string(current.Sandbox.ProviderBinding.ComponentID), ProviderManifest: string(current.Sandbox.ProviderBinding.ManifestDigest),
 	}
+	if spec.verifyBindingV2 {
+		fileID, fileErr := contract.WorkspaceReadFileIDV1(workspace.Meta.ID, commandDraft.RelativePath)
+		if fileErr != nil {
+			t.Fatal(fileErr)
+		}
+		commandDraft.ExpectedFileRef = &contract.Ref{
+			ID: fileID, Revision: workspace.Meta.Revision,
+			Digest: digestWorkspaceReadExecutorTest("fake-whole-file"),
+		}
+	}
 	dispatchDigest, err := runtimecore.CanonicalJSONDigest("praxis.sandbox.workspace-read", "1.0.0", "OperationDispatchAttemptRefV3", attempt)
 	if err != nil {
 		t.Fatal(err)
@@ -266,7 +298,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	}
 
 	databasePath := filepath.Join(root, "sandbox.sqlite")
-	store, err := sqlitestore.OpenWithClock(ctx, databasePath, time.Now)
+	store, err := sqlitestore.OpenWithClock(ctx, databasePath, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -285,53 +317,58 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		fixedWorkspaceReadAssociationReaderV1{association},
 		store,
 		store,
-		time.Now,
+		clock,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	exactCurrent, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(baseCurrent, store, store, time.Now)
+	exactCurrent, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(baseCurrent, store, store, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
 	countedCurrent := &countingWorkspaceReadCurrentReaderV2{inner: exactCurrent}
-	currentServer := dataplaneadapter.CurrentServer{
-		SocketPath: currentSocket, SocketMode: 0o660, AllowedUID: uint32(os.Getuid()),
-		Governance: fixedWorkspaceReadEnforcementReaderV1{value: current},
-		Sandbox:    testkit.NewMemoryStore(), WorkspaceReadCurrentV2: countedCurrent, Now: time.Now,
-	}
-	listener, err := currentServer.Listen()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer listener.Close()
-	go func() { _ = currentServer.Serve(ctx, listener) }()
-	config := map[string]any{"contract_version": "praxis.sandbox/data-plane-root/v1", "dispatch_socket": dispatchSocket, "current_reader_socket": currentSocket, "journal_path": filepath.Join(root, "journal.jsonl"), "checkpoint_store_path": filepath.Join(root, "checkpoints.sqlite"), "allowed_dispatch_uid": os.Getuid(), "allowed_current_reader_uid": os.Getuid(), "socket_mode": 0o660, "wasmtime_component_bindings": map[string]string{}, "workspace_read": map[string]any{"bindings": map[string]any{"workspace-view": map[string]any{"path": root, "digest": workspaceDigest}}}}
-	configBytes, _ := json.Marshal(config)
-	configPath := filepath.Join(root, "config.json")
-	if err = os.WriteFile(configPath, configBytes, 0o600); err != nil {
-		t.Fatal(err)
-	}
-	process := exec.CommandContext(ctx, binary, configPath)
 	var output lockedBuffer
-	process.Stdout, process.Stderr = &output, &output
-	if err = process.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { cancel(); _ = process.Wait() }()
-	waitForWorkspaceReadExecutorSocket(t, dispatchSocket, &output)
-	concrete, err := dataplaneadapter.NewWorkspaceReadActualPointAdapterV1(dataplaneadapter.Client{SocketPath: dispatchSocket, AllowedUID: uint32(os.Getuid())})
-	if err != nil {
-		t.Fatal(err)
-	}
-	var actualPoint kernel.WorkspaceReadActualPointV1 = concrete
-	if spec.driftReservation || spec.driftAttempt {
-		actualPoint = &driftingWorkspaceReadActualPointV1{
-			inner:            concrete,
-			store:            store,
-			databasePath:     databasePath,
-			driftReservation: spec.driftReservation,
-			driftAttempt:     spec.driftAttempt,
+	var actualPoint kernel.WorkspaceReadActualPointV1
+	if spec.useFakeActual {
+		actualPoint = &successfulWorkspaceReadActualPointV2{}
+	} else {
+		currentServer := dataplaneadapter.CurrentServer{
+			SocketPath: currentSocket, SocketMode: 0o660, AllowedUID: uint32(os.Getuid()),
+			Governance: fixedWorkspaceReadEnforcementReaderV1{value: current},
+			Sandbox:    testkit.NewMemoryStore(), WorkspaceReadCurrentV2: countedCurrent, Now: clock,
+		}
+		listener, listenErr := currentServer.Listen()
+		if listenErr != nil {
+			t.Fatal(listenErr)
+		}
+		defer listener.Close()
+		go func() { _ = currentServer.Serve(ctx, listener) }()
+		config := map[string]any{"contract_version": "praxis.sandbox/data-plane-root/v1", "dispatch_socket": dispatchSocket, "current_reader_socket": currentSocket, "journal_path": filepath.Join(root, "journal.jsonl"), "checkpoint_store_path": filepath.Join(root, "checkpoints.sqlite"), "allowed_dispatch_uid": os.Getuid(), "allowed_current_reader_uid": os.Getuid(), "socket_mode": 0o660, "wasmtime_component_bindings": map[string]string{}, "workspace_read": map[string]any{"bindings": map[string]any{"workspace-view": map[string]any{"path": root, "digest": workspaceDigest}}}}
+		configBytes, _ := json.Marshal(config)
+		configPath := filepath.Join(root, "config.json")
+		if err = os.WriteFile(configPath, configBytes, 0o600); err != nil {
+			t.Fatal(err)
+		}
+		process := exec.CommandContext(ctx, binary, configPath)
+		process.Stdout, process.Stderr = &output, &output
+		if err = process.Start(); err != nil {
+			t.Fatal(err)
+		}
+		defer func() { cancel(); _ = process.Wait() }()
+		waitForWorkspaceReadExecutorSocket(t, dispatchSocket, &output)
+		concrete, concreteErr := dataplaneadapter.NewWorkspaceReadActualPointAdapterV1(dataplaneadapter.Client{SocketPath: dispatchSocket, AllowedUID: uint32(os.Getuid())})
+		if concreteErr != nil {
+			t.Fatal(concreteErr)
+		}
+		actualPoint = concrete
+		if spec.driftReservation || spec.driftAttempt {
+			actualPoint = &driftingWorkspaceReadActualPointV1{
+				inner:            concrete,
+				store:            store,
+				databasePath:     databasePath,
+				driftReservation: spec.driftReservation,
+				driftAttempt:     spec.driftAttempt,
+			}
 		}
 	}
 	counted := &countingWorkspaceReadActualPointV1{inner: actualPoint}
@@ -347,7 +384,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			t.Fatal(err)
 		}
 	}
-	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(store, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, time.Now)
+	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(store, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -484,9 +521,385 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if projection.Attempt.State != contract.WorkspaceReadObservedV1 || projection.Observation == nil || projection.Observation.Content != "Praxis" {
 		t.Fatalf("unexpected exact Inspect: %#v", projection)
 	}
-	if countedCurrent.calls.Load() == 0 {
+	if !spec.useFakeActual && countedCurrent.calls.Load() == 0 {
 		t.Fatal("public CurrentServer never inspected workspace read current v2")
 	}
+	if spec.verifyBindingV2 {
+		bindingV2, inspectErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
+		if inspectErr != nil {
+			t.Fatal(inspectErr)
+		}
+		if !reflect.DeepEqual(bindingV2.RuntimeAttempt, authorization.Attempt) ||
+			bindingV2.WorkspaceReadCommand.Meta.Ref() != command.Meta.Ref() ||
+			bindingV2.WorkspaceReadAttempt.OwnerRef() != origin.Meta.Ref() {
+			t.Fatalf("V2 historical closure drifted: %#v", bindingV2)
+		}
+		delegationSplices := []struct {
+			name   string
+			mutate func(*runtimeports.OperationDispatchAttemptRefV3)
+		}{
+			{name: "presence", mutate: func(value *runtimeports.OperationDispatchAttemptRefV3) { value.Delegation = nil }},
+			{name: "id", mutate: func(value *runtimeports.OperationDispatchAttemptRefV3) { value.Delegation.ID = "delegation-unbound" }},
+			{name: "revision", mutate: func(value *runtimeports.OperationDispatchAttemptRefV3) { value.Delegation.Revision++ }},
+			{name: "digest", mutate: func(value *runtimeports.OperationDispatchAttemptRefV3) {
+				value.Delegation.Digest = runtimecore.DigestBytes([]byte("delegation-unbound"))
+			}},
+		}
+		for _, splice := range delegationSplices {
+			spliced := authorization.Attempt
+			delegationCopy := *authorization.Attempt.Delegation
+			spliced.Delegation = &delegationCopy
+			splice.mutate(&spliced)
+			if _, inspectErr = executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, spliced); inspectErr == nil {
+				t.Fatalf("Delegation %s splice was accepted", splice.name)
+			}
+		}
+		restarted, openErr := sqlitestore.OpenWithClock(ctx, databasePath, clock)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		recovered, inspectErr := restarted.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
+		_ = restarted.Close()
+		if inspectErr != nil || !reflect.DeepEqual(recovered, bindingV2) {
+			t.Fatalf("restart/lost-reply exact Inspect: %#v err=%v", recovered, inspectErr)
+		}
+		const restartHandles = 8
+		handles := make([]*sqlitestore.Store, 0, restartHandles)
+		for range restartHandles {
+			handle, openHandleErr := sqlitestore.OpenWithClock(ctx, databasePath, clock)
+			if openHandleErr != nil {
+				t.Fatal(openHandleErr)
+			}
+			handles = append(handles, handle)
+		}
+		var restartGroup sync.WaitGroup
+		restartErrors := make(chan error, restartHandles)
+		for _, handle := range handles {
+			handle := handle
+			restartGroup.Add(1)
+			go func() {
+				defer restartGroup.Done()
+				value, readErr := handle.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
+				if readErr == nil && !reflect.DeepEqual(value, bindingV2) {
+					readErr = errors.New("reopened handle returned a different V2 binding")
+				}
+				restartErrors <- readErr
+			}()
+		}
+		restartGroup.Wait()
+		close(restartErrors)
+		for _, handle := range handles {
+			_ = handle.Close()
+		}
+		for readErr := range restartErrors {
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+		}
+		expectedBefore := *bindingV2.WorkspaceReadCommand.ExpectedFileRef
+		bindingV2.WorkspaceReadCommand.ExpectedFileRef.ID = "consumer-mutated"
+		unalias, inspectErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
+		if inspectErr != nil || unalias.WorkspaceReadCommand.ExpectedFileRef == nil ||
+			*unalias.WorkspaceReadCommand.ExpectedFileRef != expectedBefore {
+			t.Fatalf("V2 reader output alias leaked: %#v err=%v", unalias.WorkspaceReadCommand.ExpectedFileRef, inspectErr)
+		}
+		storedSplices := []struct {
+			name    string
+			splice  string
+			restore string
+			query   string
+		}{
+			{
+				name: "RuntimeAttempt", splice: digestWorkspaceReadExecutorTest("spliced-operation"),
+				restore: string(bindingV2.RuntimeAttempt.OperationDigest),
+				query:   `UPDATE workspace_read_runtime_attempt_admission_binding_v2 SET operation_digest=?`,
+			},
+			{
+				name: "Authorization", splice: digestWorkspaceReadExecutorTest("spliced-authorization"),
+				restore: string(bindingV2.AuthorizationDigest),
+				query:   `UPDATE workspace_read_runtime_attempt_admission_binding_v2 SET authorization_digest=?`,
+			},
+			{
+				name: "Association", splice: digestWorkspaceReadExecutorTest("spliced-association"),
+				restore: string(bindingV2.Association.Digest),
+				query:   `UPDATE workspace_read_runtime_attempt_admission_binding_v2 SET association_digest=?`,
+			},
+			{
+				name: "Command", splice: digestWorkspaceReadExecutorTest("spliced-command"),
+				restore: bindingV2.WorkspaceReadCommand.Meta.Digest,
+				query:   `UPDATE workspace_read_runtime_attempt_admission_binding_v2 SET command_digest=?`,
+			},
+			{
+				name: "Admission", splice: digestWorkspaceReadExecutorTest("spliced-admission"),
+				restore: string(bindingV2.AdmissionReceipt.Digest),
+				query:   `UPDATE workspace_read_runtime_attempt_admission_binding_v2 SET admission_digest=?`,
+			},
+			{
+				name: "Attempt", splice: digestWorkspaceReadExecutorTest("spliced-attempt"),
+				restore: bindingV2.WorkspaceReadAttempt.Digest,
+				query:   `UPDATE workspace_read_runtime_attempt_admission_binding_v2 SET workspace_attempt_digest=?`,
+			},
+		}
+		for _, splice := range storedSplices {
+			if _, err = db.ExecContext(ctx, splice.query, splice.splice); err != nil {
+				t.Fatal(err)
+			}
+			if _, inspectErr = executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt); inspectErr == nil {
+				t.Fatalf("%s row splice was accepted", splice.name)
+			}
+			if _, err = db.ExecContext(ctx, splice.query, splice.restore); err != nil {
+				t.Fatal(err)
+			}
+		}
+		var (
+			v2Body, v1Body, commandBody, reservationBody, originStoredBody []byte
+			v2BindingDigest, v1AdmissionDigest                             string
+		)
+		if err = db.QueryRowContext(ctx, `SELECT body,binding_digest
+			FROM workspace_read_runtime_attempt_admission_binding_v2`).Scan(&v2Body, &v2BindingDigest); err != nil {
+			t.Fatal(err)
+		}
+		if err = db.QueryRowContext(ctx, `SELECT body,admission_digest
+			FROM workspace_read_admission_attempt_binding`).Scan(&v1Body, &v1AdmissionDigest); err != nil {
+			t.Fatal(err)
+		}
+		if err = db.QueryRowContext(ctx, `SELECT body FROM workspace_read_command_current`).Scan(&commandBody); err != nil {
+			t.Fatal(err)
+		}
+		if err = db.QueryRowContext(ctx, `SELECT body FROM workspace_read_reservation`).Scan(&reservationBody); err != nil {
+			t.Fatal(err)
+		}
+		if err = db.QueryRowContext(ctx, `SELECT body FROM workspace_read_attempt_origin`).Scan(&originStoredBody); err != nil {
+			t.Fatal(err)
+		}
+		canonicalSplices := []struct {
+			name    string
+			query   string
+			splice  any
+			restore any
+		}{
+			{name: "V2 canonical body", query: `UPDATE workspace_read_runtime_attempt_admission_binding_v2 SET body=?`, splice: append(append([]byte(nil), v2Body...), ' '), restore: v2Body},
+			{name: "V2 binding digest", query: `UPDATE workspace_read_runtime_attempt_admission_binding_v2 SET binding_digest=?`, splice: digestWorkspaceReadExecutorTest("spliced-binding"), restore: v2BindingDigest},
+			{name: "V1 canonical body", query: `UPDATE workspace_read_admission_attempt_binding SET body=?`, splice: append(append([]byte(nil), v1Body...), ' '), restore: v1Body},
+			{name: "V1 denormalized admission", query: `UPDATE workspace_read_admission_attempt_binding SET admission_digest=?`, splice: digestWorkspaceReadExecutorTest("spliced-v1-admission"), restore: v1AdmissionDigest},
+			{name: "Command canonical row", query: `UPDATE workspace_read_command_current SET body=?`, splice: append(append([]byte(nil), commandBody...), ' '), restore: commandBody},
+			{name: "Reservation canonical row", query: `UPDATE workspace_read_reservation SET body=?`, splice: append(append([]byte(nil), reservationBody...), ' '), restore: reservationBody},
+			{name: "Attempt canonical row", query: `UPDATE workspace_read_attempt_origin SET body=?`, splice: append(append([]byte(nil), originStoredBody...), ' '), restore: originStoredBody},
+		}
+		for _, splice := range canonicalSplices {
+			if _, err = db.ExecContext(ctx, splice.query, splice.splice); err != nil {
+				t.Fatal(err)
+			}
+			if _, inspectErr = executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt); inspectErr == nil {
+				t.Fatalf("%s splice was accepted", splice.name)
+			}
+			if _, err = db.ExecContext(ctx, splice.query, splice.restore); err != nil {
+				t.Fatal(err)
+			}
+		}
+		splicedStable := digestWorkspaceReadExecutorTest("coordinated-stable-splice")
+		if _, err = db.ExecContext(ctx, `UPDATE workspace_read_attempt_origin SET stable_digest=?`, splicedStable); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.ExecContext(ctx, `UPDATE workspace_read_reservation SET stable_digest=?`, splicedStable); err != nil {
+			t.Fatal(err)
+		}
+		corruptBefore := workspaceReadV2DatabaseSnapshot(t, ctx, db)
+		if _, inspectErr = executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt); !errors.Is(inspectErr, sandboxports.ErrConflict) {
+			t.Fatalf("coordinated stable denormalization splice error=%v", inspectErr)
+		}
+		if corruptAfter := workspaceReadV2DatabaseSnapshot(t, ctx, db); !reflect.DeepEqual(corruptAfter, corruptBefore) {
+			t.Fatal("corrupt exact Inspect attempted repair")
+		}
+		if _, err = db.ExecContext(ctx, `UPDATE workspace_read_attempt_origin SET stable_digest=?`, origin.StableKeyDigest); err != nil {
+			t.Fatal(err)
+		}
+		if _, err = db.ExecContext(ctx, `UPDATE workspace_read_reservation SET stable_digest=?`, projection.Reservation.StableKeyDigest); err != nil {
+			t.Fatal(err)
+		}
+
+		referencedRows := []struct {
+			name       string
+			deleteSQL  string
+			restoreSQL string
+			args       []any
+		}{
+			{
+				name:      "origin",
+				deleteSQL: `DELETE FROM workspace_read_attempt_origin`,
+				restoreSQL: `INSERT INTO workspace_read_attempt_origin(attempt_id,stable_digest,revision,digest,body)
+					VALUES(?,?,?,?,?)`,
+				args: []any{origin.Meta.ID, origin.StableKeyDigest, origin.Meta.Revision, origin.Meta.Digest, originStoredBody},
+			},
+			{
+				name:      "reservation",
+				deleteSQL: `DELETE FROM workspace_read_reservation`,
+				restoreSQL: `INSERT INTO workspace_read_reservation(stable_digest,reservation_id,body)
+					VALUES(?,?,?)`,
+				args: []any{projection.Reservation.StableKeyDigest, projection.Reservation.Meta.ID, reservationBody},
+			},
+			{
+				name:      "V1 binding",
+				deleteSQL: `DELETE FROM workspace_read_admission_attempt_binding`,
+				restoreSQL: `INSERT INTO workspace_read_admission_attempt_binding(
+					admission_id,admission_revision,admission_digest,
+					attempt_id,attempt_revision,attempt_digest,body
+				) VALUES(?,?,?,?,?,?,?)`,
+				args: []any{
+					bindingV2.AdmissionBinding.AdmissionReceipt.ID,
+					bindingV2.AdmissionBinding.AdmissionReceipt.Revision,
+					bindingV2.AdmissionBinding.AdmissionReceipt.Digest,
+					bindingV2.AdmissionBinding.Attempt.ID,
+					bindingV2.AdmissionBinding.Attempt.Revision,
+					bindingV2.AdmissionBinding.Attempt.Digest,
+					v1Body,
+				},
+			},
+		}
+		for _, reference := range referencedRows {
+			if _, err = db.ExecContext(ctx, reference.deleteSQL); err != nil {
+				t.Fatal(err)
+			}
+			corruptBefore = workspaceReadV2DatabaseSnapshot(t, ctx, db)
+			if _, inspectErr = executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt); !errors.Is(inspectErr, sandboxports.ErrConflict) {
+				t.Fatalf("missing referenced %s error=%v", reference.name, inspectErr)
+			}
+			if corruptAfter := workspaceReadV2DatabaseSnapshot(t, ctx, db); !reflect.DeepEqual(corruptAfter, corruptBefore) {
+				t.Fatalf("missing %s Inspect attempted repair", reference.name)
+			}
+			if _, err = db.ExecContext(ctx, reference.restoreSQL, reference.args...); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if counted.calls.Load() != 1 {
+			t.Fatalf("read-only V2 inspections re-entered physical read: %d", counted.calls.Load())
+		}
+		watcher, watcherErr := db.Conn(ctx)
+		if watcherErr != nil {
+			t.Fatal(watcherErr)
+		}
+		defer watcher.Close()
+		var dataVersionBefore, dataVersionAfter int64
+		if watcherErr = watcher.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&dataVersionBefore); watcherErr != nil {
+			t.Fatal(watcherErr)
+		}
+		snapshotBefore := workspaceReadV2DatabaseSnapshot(t, ctx, db)
+		const inspectors = 64
+		var inspectGroup sync.WaitGroup
+		inspectErrors := make(chan error, inspectors)
+		for range inspectors {
+			inspectGroup.Add(1)
+			go func() {
+				defer inspectGroup.Done()
+				_, inspectCallErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
+				inspectErrors <- inspectCallErr
+			}()
+		}
+		inspectGroup.Wait()
+		close(inspectErrors)
+		for inspectCallErr := range inspectErrors {
+			if inspectCallErr != nil {
+				t.Fatal(inspectCallErr)
+			}
+		}
+		if watcherErr = watcher.QueryRowContext(ctx, `PRAGMA data_version`).Scan(&dataVersionAfter); watcherErr != nil {
+			t.Fatal(watcherErr)
+		}
+		if dataVersionAfter != dataVersionBefore {
+			t.Fatalf("public V2 Inspect wrote database state: before=%d after=%d", dataVersionBefore, dataVersionAfter)
+		}
+		snapshotAfter := workspaceReadV2DatabaseSnapshot(t, ctx, db)
+		if !reflect.DeepEqual(snapshotAfter, snapshotBefore) {
+			t.Fatalf("public V2 Inspect changed owner rows: before=%v after=%v", snapshotBefore, snapshotAfter)
+		}
+		if counted.calls.Load() != 1 {
+			t.Fatalf("64 public V2 inspections re-entered physical read: %d", counted.calls.Load())
+		}
+		controlledClock.Store(expires.UnixNano())
+		expiredSnapshotBefore := workspaceReadV2DatabaseSnapshot(t, ctx, db)
+		expiredBinding, expiredInspectErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
+		if expiredInspectErr != nil ||
+			!reflect.DeepEqual(expiredBinding.RuntimeAttempt, authorization.Attempt) ||
+			expiredBinding.WorkspaceReadAttempt.OwnerRef() != origin.Meta.Ref() {
+			t.Fatalf("expired V2 historical exact Inspect failed: %#v err=%v", expiredBinding, expiredInspectErr)
+		}
+		if _, executeErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); executeErr == nil {
+			t.Fatal("expired V2 historical binding restored execution eligibility")
+		}
+		if counted.calls.Load() != 1 {
+			t.Fatalf("expired historical Inspect or execute re-entered physical read: %d", counted.calls.Load())
+		}
+		var recoveryRows int
+		if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_read_recovery_evidence`).Scan(&recoveryRows); err != nil {
+			t.Fatal(err)
+		}
+		if recoveryRows != 0 {
+			t.Fatalf("expired historical Inspect restored owner current state: recovery rows=%d", recoveryRows)
+		}
+		if expiredSnapshotAfter := workspaceReadV2DatabaseSnapshot(t, ctx, db); !reflect.DeepEqual(expiredSnapshotAfter, expiredSnapshotBefore) {
+			t.Fatalf("expired historical Inspect or rejected execute changed owner rows: before=%v after=%v", expiredSnapshotBefore, expiredSnapshotAfter)
+		}
+		var rows int
+		if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_read_runtime_attempt_admission_binding_v2`).Scan(&rows); err != nil || rows != 1 {
+			t.Fatalf("V2 create-once rows=%d err=%v", rows, err)
+		}
+
+		// A same-Runtime-Attempt payload splice is rejected by exact Command
+		// history before it can create another owner fact or physical read.
+		splicedCommand := command
+		splicedCommand.SourceToolPayloadDigest = digestWorkspaceReadExecutorTest("spliced-payload")
+		splicedCommand, err = contract.SealWorkspaceReadCommandV1(splicedCommand, command.Meta.ID, now, expires)
+		if err != nil {
+			t.Fatal(err)
+		}
+		splicedBody, marshalErr := json.Marshal(splicedCommand)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		if _, err = db.ExecContext(ctx, `UPDATE workspace_read_command_current SET body=? WHERE command_id=?`, splicedBody, command.Meta.ID); err != nil {
+			t.Fatal(err)
+		}
+		if _, callErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); callErr == nil {
+			t.Fatal("same Runtime Attempt with spliced payload was accepted")
+		}
+		if counted.calls.Load() != 1 {
+			t.Fatalf("payload splice re-entered physical read: %d", counted.calls.Load())
+		}
+	}
+}
+
+type successfulWorkspaceReadActualPointV2 struct{}
+
+func (*successfulWorkspaceReadActualPointV2) ReadWorkspaceFileV1(
+	_ context.Context,
+	request kernel.WorkspaceReadActualPointRequestV1,
+) (kernel.WorkspaceReadActualPointResultV1, error) {
+	content := "Praxis"
+	fileID, err := contract.WorkspaceReadFileIDV1(request.Workspace.Meta.ID, request.Command.RelativePath)
+	if err != nil {
+		return kernel.WorkspaceReadActualPointResultV1{}, err
+	}
+	file := contract.Ref{
+		ID: fileID, Revision: request.Workspace.Meta.Revision,
+		Digest: digestWorkspaceReadExecutorTest("fake-whole-file"),
+	}
+	if request.Command.ExpectedFileRef != nil {
+		file = *request.Command.ExpectedFileRef
+	}
+	return kernel.WorkspaceReadActualPointResultV1{
+		File: file, Content: content,
+		ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), request.Command.StartByte, request.Command.StartByte+uint64(len(content)), true),
+		StartByte:     request.Command.StartByte, ReturnedBytes: uint64(len(content)),
+		TotalBytes: request.Command.StartByte + uint64(len(content)), Complete: true,
+		ProviderS1Checked: true, ProviderS2Checked: true, PhysicalReadCount: 1,
+		ProviderReceipt: contract.WorkspaceReadReceiptBindingV1{
+			ID: "fake-provider-receipt", Revision: 1,
+			Digest:            digestWorkspaceReadExecutorTest("fake-provider-receipt"),
+			ObservationDigest: digestWorkspaceReadExecutorTest("fake-provider-observation"),
+			StableKeyDigest:   request.Reservation.StableKeyDigest,
+			CheckedUnixNano:   request.S1CheckedUnixNano, ExpiresUnixNano: request.ExpiresUnixNano,
+		},
+	}, nil
 }
 
 type countingWorkspaceReadCurrentReaderV2 struct {
@@ -639,6 +1052,69 @@ func (a *countingWorkspaceReadActualPointV1) lastError() error {
 
 func digestWorkspaceReadExecutorTest(value string) string {
 	return string(runtimecore.DigestBytes([]byte(value)))
+}
+
+func workspaceReadV2DatabaseSnapshot(t *testing.T, ctx context.Context, db *sql.DB) map[string]string {
+	t.Helper()
+	tables := []string{
+		"workspace_read_command_current",
+		"workspace_read_command_body_seal",
+		"workspace_read_reservation",
+		"workspace_read_attempt_origin",
+		"workspace_read_attempt_current",
+		"workspace_read_attempt_owner_incarnation",
+		"workspace_read_admission_attempt_binding",
+		"workspace_read_runtime_attempt_admission_binding_v2",
+		"workspace_read_observation",
+		"workspace_read_recovery_evidence",
+	}
+	snapshot := make(map[string]string, len(tables)+1)
+	for _, table := range tables {
+		rows, err := db.QueryContext(ctx, "SELECT * FROM "+table+" ORDER BY rowid")
+		if err != nil {
+			t.Fatal(err)
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		hash := sha256.New()
+		_, _ = hash.Write([]byte(strings.Join(columns, "\x00")))
+		count := 0
+		for rows.Next() {
+			values := make([]any, len(columns))
+			pointers := make([]any, len(columns))
+			for index := range values {
+				pointers[index] = &values[index]
+			}
+			if err = rows.Scan(pointers...); err != nil {
+				_ = rows.Close()
+				t.Fatal(err)
+			}
+			body, marshalErr := json.Marshal(values)
+			if marshalErr != nil {
+				_ = rows.Close()
+				t.Fatal(marshalErr)
+			}
+			_, _ = hash.Write(body)
+			count++
+		}
+		if err = rows.Err(); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		if err = rows.Close(); err != nil {
+			t.Fatal(err)
+		}
+		snapshot[table] = fmt.Sprintf("%d:%x", count, hash.Sum(nil))
+	}
+	var version int
+	if err := db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	snapshot["PRAGMA user_version"] = strconv.Itoa(version)
+	return snapshot
 }
 
 func digestWorkspaceReadExecutorIPC(kind string, value any) (string, error) {

@@ -5,8 +5,10 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"reflect"
 	"time"
 
+	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
@@ -108,6 +110,10 @@ func (s *Store) InspectWorkspaceReadCommandExactV1(ctx context.Context, exact co
 	if s == nil || s.db == nil {
 		return contract.WorkspaceReadCommandV1{}, errors.New("workspace read exact Command reader is unavailable")
 	}
+	return inspectWorkspaceReadCommandExactTxV1(ctx, s.db, exact)
+}
+
+func inspectWorkspaceReadCommandExactTxV1(ctx context.Context, source queryer, exact contract.Ref) (contract.WorkspaceReadCommandV1, error) {
 	if err := exact.ValidateShape("workspace read command"); err != nil {
 		return contract.WorkspaceReadCommandV1{}, err
 	}
@@ -117,7 +123,7 @@ func (s *Store) InspectWorkspaceReadCommandExactV1(ctx context.Context, exact co
 	var sealRevision sql.NullInt64
 	var sealDigest sql.NullString
 	var canonicalBodyDigest sql.NullString
-	if err := s.db.QueryRowContext(
+	if err := source.QueryRowContext(
 		ctx,
 		`SELECT command.revision,command.digest,command.body,
 		        seal.revision,seal.digest,seal.canonical_body_digest
@@ -193,6 +199,10 @@ func workspaceReadCommandCanonicalBodySealV1(
 }
 
 func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1, binding ports.WorkspaceReadAdmissionAttemptBindingV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
+	return s.reserveWorkspaceReadV1(ctx, res, attempt, binding, nil)
+}
+
+func (s *Store) reserveWorkspaceReadV1(ctx context.Context, res contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1, binding ports.WorkspaceReadAdmissionAttemptBindingV1, authorization *runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
 	now := s.clock()
 	if err := res.ValidateCurrent(now); err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
@@ -202,6 +212,17 @@ func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.Workspa
 	}
 	if err := binding.Validate(); err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
+	}
+	if authorization != nil {
+		authorizationDigest, err := authorization.DigestV3()
+		if err != nil ||
+			authorization.ValidateCurrent(now) != nil ||
+			authorizationDigest != authorization.AuthorizationDigest ||
+			authorization.AuthorizationDigest != binding.AuthorizationDigest ||
+			authorization.Association != binding.Association ||
+			authorization.DomainCommand != binding.DomainCommand {
+			return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
+		}
 	}
 	expectedAttemptExpiry := minWorkspaceReadStoreExpiryV1(res.Meta.ExpiresUnixNano, attempt.AdmissionReceipt.ExpiresUnixNano)
 	if attempt.State != contract.WorkspaceReadStartedV1 ||
@@ -227,14 +248,44 @@ func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.Workspa
 		binding.ExpiresUnixNano != attempt.Meta.ExpiresUnixNano {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
 	}
-	rb, _ := encode(res)
-	ab, _ := encode(attempt)
-	bb, _ := encode(binding)
+	rb, err := encode(res)
+	if err != nil {
+		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
+	}
+	ab, err := encode(attempt)
+	if err != nil {
+		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
+	}
+	bb, err := encode(binding)
+	if err != nil {
+		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
+	}
+	var bindingV2 ports.WorkspaceReadAdmissionAttemptBindingV2
+	var bindingV2Body []byte
+	var runtimeAttemptDigest runtimecore.Digest
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, err
 	}
 	defer tx.Rollback()
+	if authorization != nil {
+		command, inspectErr := inspectWorkspaceReadCommandExactTxV1(ctx, tx, res.Command)
+		if inspectErr != nil || command.ValidateCurrent(now) != nil {
+			return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
+		}
+		bindingV2, err = sealWorkspaceReadAdmissionAttemptBindingV2(*authorization, binding, command)
+		if err != nil || validateWorkspaceReadRuntimeAttemptAdmissionClosureV2(res, attempt, command, bindingV2) != nil {
+			return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
+		}
+		bindingV2Body, err = encode(bindingV2)
+		if err != nil {
+			return contract.WorkspaceReadExecutionProjectionV1{}, false, err
+		}
+		runtimeAttemptDigest, err = ports.WorkspaceReadRuntimeAttemptDigestV2(bindingV2.RuntimeAttempt)
+		if err != nil {
+			return contract.WorkspaceReadExecutionProjectionV1{}, false, err
+		}
+	}
 	if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO workspace_read_reservation(stable_digest,reservation_id,body) VALUES(?,?,?)`, res.StableKeyDigest, res.Meta.ID, rb); err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, classifyWrite(err)
 	}
@@ -250,6 +301,66 @@ func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.Workspa
 		binding.Attempt.ID, binding.Attempt.Revision, binding.Attempt.Digest, bb)
 	if err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, classifyWrite(err)
+	}
+	var bindingV2Result sql.Result
+	if authorization != nil {
+		delegationPresent := 0
+		delegationID := ""
+		var delegationRevision runtimecore.Revision
+		var delegationDigest runtimecore.Digest
+		if bindingV2.RuntimeAttempt.Delegation != nil {
+			delegationPresent = 1
+			delegationID = bindingV2.RuntimeAttempt.Delegation.ID
+			delegationRevision = bindingV2.RuntimeAttempt.Delegation.Revision
+			delegationDigest = bindingV2.RuntimeAttempt.Delegation.Digest
+		}
+		bindingV2Result, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO workspace_read_runtime_attempt_admission_binding_v2(
+			runtime_attempt_digest,operation_digest,effect_id,intent_revision,intent_digest,
+			permit_id,permit_revision,permit_digest,runtime_attempt_id,
+			delegation_present,delegation_id,delegation_revision,delegation_digest,
+			authorization_digest,
+			association_id,association_revision,association_digest,
+			domain_command_id,domain_command_revision,domain_command_digest,
+			command_id,command_revision,command_digest,
+			admission_id,admission_revision,admission_digest,
+			workspace_attempt_id,workspace_attempt_revision,workspace_attempt_digest,
+			binding_digest,body
+		) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			runtimeAttemptDigest,
+			bindingV2.RuntimeAttempt.OperationDigest,
+			bindingV2.RuntimeAttempt.EffectID,
+			bindingV2.RuntimeAttempt.IntentRevision,
+			bindingV2.RuntimeAttempt.IntentDigest,
+			bindingV2.RuntimeAttempt.PermitID,
+			bindingV2.RuntimeAttempt.PermitRevision,
+			bindingV2.RuntimeAttempt.PermitDigest,
+			bindingV2.RuntimeAttempt.AttemptID,
+			delegationPresent,
+			delegationID,
+			delegationRevision,
+			delegationDigest,
+			bindingV2.AuthorizationDigest,
+			bindingV2.Association.ID,
+			bindingV2.Association.Revision,
+			bindingV2.Association.Digest,
+			bindingV2.DomainCommand.ID,
+			bindingV2.DomainCommand.Revision,
+			bindingV2.DomainCommand.Digest,
+			bindingV2.WorkspaceReadCommand.Meta.ID,
+			bindingV2.WorkspaceReadCommand.Meta.Revision,
+			bindingV2.WorkspaceReadCommand.Meta.Digest,
+			bindingV2.AdmissionReceipt.ID,
+			bindingV2.AdmissionReceipt.Revision,
+			bindingV2.AdmissionReceipt.Digest,
+			bindingV2.WorkspaceReadAttempt.ID,
+			bindingV2.WorkspaceReadAttempt.Revision,
+			bindingV2.WorkspaceReadAttempt.Digest,
+			bindingV2.Digest,
+			bindingV2Body,
+		)
+		if err != nil {
+			return contract.WorkspaceReadExecutionProjectionV1{}, false, classifyWrite(err)
+		}
 	}
 	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO workspace_read_attempt_current(stable_digest,attempt_id,revision,digest,body) VALUES(?,?,?,?,?)`, res.StableKeyDigest, attempt.Meta.ID, attempt.Meta.Revision, attempt.Meta.Digest, ab)
 	if err != nil {
@@ -283,9 +394,24 @@ func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.Workspa
 	if err = decode(storedBindingBody, &storedBinding); err != nil || storedBinding.Validate() != nil || storedBinding != binding {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
 	}
+	var bindingV2Rows int64
+	if authorization != nil {
+		storedBindingV2, inspectErr := inspectWorkspaceReadAdmissionForRuntimeAttemptTxV2(ctx, tx, bindingV2.RuntimeAttempt)
+		if inspectErr != nil || !reflect.DeepEqual(storedBindingV2, bindingV2) {
+			return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
+		}
+		if validateWorkspaceReadRuntimeAttemptAdmissionClosureV2(res, origin, bindingV2.WorkspaceReadCommand, bindingV2) != nil {
+			return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
+		}
+		bindingV2Rows, err = bindingV2Result.RowsAffected()
+		if err != nil {
+			return contract.WorkspaceReadExecutionProjectionV1{}, false, err
+		}
+	}
 	currentRows, currentRowsErr := result.RowsAffected()
 	bindingRows, bindingRowsErr := bindingResult.RowsAffected()
-	if currentRowsErr != nil || bindingRowsErr != nil || currentRows != rows || bindingRows != rows {
+	if currentRowsErr != nil || bindingRowsErr != nil || currentRows != rows || bindingRows != rows ||
+		authorization != nil && bindingV2Rows != rows {
 		return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
 	}
 	if rows == 1 {
