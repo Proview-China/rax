@@ -1,0 +1,21 @@
+# 2026-07-31 Tool Owner Durable SQLite V2
+
+- Tool-owned claim、execution marker、五类 Action fact 与 action head 已形成 SQLite durable candidate。
+- claim/marker 时间已确定性绑定 immutable request；完整 canonical replay、64 并发单赢家、CAS/ABA、lost commit reply 与 restart 已闭合。
+- marker 的 `ExecutionAttemptID` 已传入 downstream create-once seam；`inspect_only` 只 Inspect。
+- 新增 Tool-owned durable entry lease：64 个独立 flow 经多个 SQLite store 共享同库时，正常窗口只有一个 StartOrInspect/Inspect；holder 到期后用新 revision 接管原 exact attempt。
+- 新增 owner-safe durable handoff：`handoff_inspect` 优先且强制 exact Inspect；`handoff_start_or_inspect` 只允许 Start caller 在同一 `start_committed` attempt 上恢复，纯 Inspect 不会启动 effect。
+- actual-entry 已增加紧贴外部 seam 的 fresh exact 门，复读 input、lease、execution current、TTL 与 phase；取消、漂移、clock regression 与 `now == expires` 均保持外部调用零次。
+- 外部入口后的 clock/marker/state 失败会先持久化 exact Inspect handoff，避免 holder 退出后 lease stranded 或再次 Start。
+- handoff/execution commit-unknown 已改为只复读预封 next immutable history；同 phase 后续 revision 的 ABA replay 明确 Conflict。
+- live caller 继承自身 context，并以 owner clock 判断 exact TTL；transport 已取消时只在短且有界的 `WithoutCancel` 窗口 Inspect 原 exact attempt。
+- Tool Apply 前对 Runtime current settlement 与 exact association 做 S1/S2 复读；InMemory 在 S2 后只用无等待 TryLock，漂移或 Tool lock 竞争时 Apply/Result 零写，且外部 Reader 不在 Tool lock 内调用。
+- malformed Runtime inspection 在 InMemory 与 SQLite FactStore 间已统一为 fail closed 与零写。
+- Reservation/Apply 使用不可回退 Tool Owner clock，并在 S1、取得 IMMEDIATE 写锁后 S2、commit 前 S3 fresh 验证 TTL/current；锁等待落在 expiry 边界时事实零写。
+- ApplySettlement、ToolResult、settled head 同事务；candidate/reservation/domain/apply/result 每阶段 restart 与 fault injection 已覆盖。
+- action head 读取会复核五类 immutable predecessor closure；post-commit caller cancellation 统一返回 Indeterminate，已提交事实仍可 exact Inspect。
+- schema 以 STRICT column/index/FK/trigger/DDL/行为 proof fail closed，拒绝 comment/OR CHECK、额外 index/trigger、generated hidden column 与错误 ledger/schema。
+- migration 已改为无 ledger 且零 Owner 对象才创建；正确 ledger 下缺表/缺 unique index 与无 ledger 的 partial schema 都只会 Conflict，不会被静默补齐。
+- base V1 migration 也已收紧为 ledger-first no-repair，并覆盖缺表、额外列/index/trigger、collation 与伪造 ledger。
+- durable constructors 经 8 次 restart 仍不创建或实现 `single_call_application_result_v2`；该 Application close seam 明确不属于 Tool durable closure。
+- 结论仅为 Tool Owner-local 单机软件闭合候选；production root/backend、跨 Owner readiness、HA/SLA 与 CoordinationStore durability 继续 NO-GO。

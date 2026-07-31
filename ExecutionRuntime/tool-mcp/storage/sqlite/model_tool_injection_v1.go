@@ -42,6 +42,12 @@ const modelToolInjectionMaterialTableSQLV1 = `CREATE TABLE model_tool_injection_
  UNIQUE(material_id, revision, digest)
 ) STRICT`
 
+var schemaOwnedObjectsV1 = []string{
+	"tool_owner_schema_v1",
+	"model_tool_injection_material_v1",
+	"tool_surface_invocation_binding_v1",
+}
+
 const schemaV1 = `
 CREATE TABLE IF NOT EXISTS tool_owner_schema_v1 (
     version INTEGER PRIMARY KEY,
@@ -90,9 +96,10 @@ type ConfigV1 struct {
 }
 
 type StoreV1 struct {
-	db    *sql.DB
-	clock func() time.Time
-	owner core.OwnerRef
+	db           *sql.DB
+	clock        func() time.Time
+	owner        core.OwnerRef
+	databasePath string
 
 	gatesMu sync.Mutex
 	gates   map[string]*bindingInvocationGateV1
@@ -140,7 +147,7 @@ func OpenV1(ctx context.Context, config ConfigV1) (*StoreV1, error) {
 	}
 	db.SetMaxOpenConns(config.MaxOpenConns)
 	db.SetMaxIdleConns(config.MaxOpenConns)
-	store := &StoreV1{db: db, clock: config.Clock, owner: config.Owner, gates: make(map[string]*bindingInvocationGateV1)}
+	store := &StoreV1{db: db, clock: config.Clock, owner: config.Owner, databasePath: absolute, gates: make(map[string]*bindingInvocationGateV1)}
 	if err := store.migrateV1(ctx); err != nil {
 		_ = db.Close()
 		return nil, err
@@ -475,35 +482,63 @@ func (s *StoreV1) migrateV1(ctx context.Context) error {
 		return mapDBErrorV1(ctx, err, true)
 	}
 	defer func() { _ = tx.Rollback() }()
-	if _, err := tx.ExecContext(ctx, schemaV1); err != nil {
-		return mapDBErrorV1(ctx, err, true)
-	}
-	now := s.clock()
-	if now.IsZero() || now.UnixNano() <= 0 {
-		return core.NewError(core.ErrorPreconditionFailed, core.ReasonClockRegression, "Tool SQLite migration clock is invalid")
-	}
 	digest := core.DigestBytes([]byte(schemaV1))
-	result, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO tool_owner_schema_v1(version,digest,applied_unix_nano) VALUES(?,?,?)`, schemaVersionV1, string(digest), now.UnixNano())
+	disposition, err := classifyOwnedSchemaV2(ctx, tx, "tool_owner_schema_v1", schemaOwnedObjectsV1)
 	if err != nil {
-		return mapDBErrorV1(ctx, err, true)
+		return err
 	}
-	affected, err := result.RowsAffected()
-	if err != nil {
-		return mapDBErrorV1(ctx, err, true)
+	if disposition == ownedSchemaCreateV2 {
+		if _, err = tx.ExecContext(ctx, schemaV1); err != nil {
+			return mapDBErrorV1(ctx, err, true)
+		}
+		now := s.clock()
+		if now.IsZero() || now.UnixNano() <= 0 {
+			return core.NewError(core.ErrorPreconditionFailed, core.ReasonClockRegression, "Tool SQLite migration clock is invalid")
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO tool_owner_schema_v1(version,digest,applied_unix_nano) VALUES(?,?,?)`, schemaVersionV1, string(digest), now.UnixNano()); err != nil {
+			return mapDBErrorV1(ctx, err, true)
+		}
 	}
-	if affected == 0 {
-		var stored string
-		if err := tx.QueryRowContext(ctx, `SELECT digest FROM tool_owner_schema_v1 WHERE version=?`, schemaVersionV1).Scan(&stored); err != nil {
-			return mapDBErrorV1(ctx, err, false)
-		}
-		if stored != string(digest) {
-			return conflictV1("Tool SQLite schema digest drifted")
-		}
+	if err = verifyBaseOwnerSchemaV1(ctx, tx); err != nil {
+		return err
+	}
+	if err = verifyOwnedSchemaLedgerV2(ctx, tx, "tool_owner_schema_v1", schemaVersionV1, digest); err != nil {
+		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return indeterminateV1("Tool SQLite migration commit outcome is unknown")
 	}
 	return nil
+}
+
+func verifyBaseOwnerSchemaV1(ctx context.Context, query schemaQueryerV2) error {
+	if err := verifyStrictTableV2(ctx, query, "tool_owner_schema_v1",
+		colsV2("version:INTEGER:1:nullable", "digest:TEXT", "applied_unix_nano:INTEGER"),
+		[][]string{{"version"}}, schemaV1); err != nil {
+		return err
+	}
+	if err := verifyStrictTableV2(ctx, query, "model_tool_injection_material_v1",
+		colsV2(
+			"material_id:TEXT:1", "revision:INTEGER", "digest:TEXT",
+			"surface_id:TEXT", "surface_revision:INTEGER", "surface_digest:TEXT",
+			"compiled_tools_digest:TEXT", "expires_unix_nano:INTEGER",
+			"compiled_tools_json:BLOB", "body_json:BLOB", "row_digest:TEXT",
+		),
+		[][]string{{"material_id"}, {"material_id", "revision", "digest"}}, schemaV1); err != nil {
+		return err
+	}
+	return verifyStrictTableV2(ctx, query, "tool_surface_invocation_binding_v1",
+		colsV2(
+			"binding_id:TEXT:1", "revision:INTEGER", "digest:TEXT",
+			"invocation_id:TEXT", "invocation_digest:TEXT", "expires_unix_nano:INTEGER",
+			"request_digest:TEXT", "request_json:BLOB", "binding_json:BLOB",
+			"ack_json:BLOB", "row_digest:TEXT",
+		),
+		[][]string{
+			{"binding_id"},
+			{"invocation_id", "invocation_digest"},
+			{"binding_id", "revision", "digest"},
+		}, schemaV1)
 }
 
 func (s *StoreV1) verifyV1(ctx context.Context) error {
