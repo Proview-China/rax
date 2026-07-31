@@ -27,11 +27,17 @@ type EvidenceConsumptionExactReaderV1 interface {
 	InspectEvidenceConsumptionExactV1(context.Context, runtimeports.OperationScopeEvidenceConsumptionRefV3) (runtimeports.OperationScopeEvidenceConsumptionRefV3, error)
 }
 
+type RuntimeSettlementCurrentReaderV2 interface {
+	InspectCurrentOperationSettlementV4(context.Context, runtimeports.InspectCurrentOperationSettlementRequestV4) (runtimeports.OperationInspectionSettlementRefV4, error)
+	InspectOperationSettlementEvidenceAssociationV4(context.Context, runtimeports.OperationSubjectV3, runtimeports.OperationSettlementEvidenceAssociationRefV4) (runtimeports.OperationSettlementEvidenceAssociationV4, error)
+}
+
 type CausalReadersV1 struct {
 	OwnerCurrent OwnerCurrentReaderV1
 	Observation  ProviderObservationExactReaderV1
 	Enforcement  EnforcementPhaseExactReaderV1
 	Consumption  EvidenceConsumptionExactReaderV1
+	Settlement   RuntimeSettlementCurrentReaderV2
 }
 
 type RecordV2 struct {
@@ -238,10 +244,22 @@ func (s *StoreV2) InspectDomainResultCurrentV1(ctx context.Context, actionID str
 	if err != nil {
 		return contract.ToolDomainResultCurrentProjectionV1{}, err
 	}
+	if now.UnixNano() < fact.CreatedUnixNano {
+		return contract.ToolDomainResultCurrentProjectionV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonClockRegression, "Tool DomainResult current caller clock predates the immutable fact")
+	}
 	if err = s.rereadDomainCausality(ctx, fact); err != nil {
 		return contract.ToolDomainResultCurrentProjectionV1{}, err
 	}
-	p := contract.ToolDomainResultCurrentProjectionV1{ContractVersion: contract.ResultContractVersionV2, Fact: exact, CausalityDigest: fact.Causality.Digest, Observation: fact.Observation, PrepareEnforcement: fact.PrepareEnforcement, ExecuteEnforcement: fact.ExecuteEnforcement, PrepareConsumption: fact.PrepareConsumption, ExecuteConsumption: fact.ExecuteConsumption, Owner: fact.Owner, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: now.Add(ttl).UnixNano()}
+	expires := now.Add(ttl).UnixNano()
+	for _, natural := range []int64{fact.PreparedAttempt.ExpiresUnixNano, fact.PrepareEnforcement.ExpiresUnixNano, fact.ExecuteEnforcement.ExpiresUnixNano} {
+		if natural > 0 && natural < expires {
+			expires = natural
+		}
+	}
+	if now.UnixNano() >= expires {
+		return contract.ToolDomainResultCurrentProjectionV1{}, core.NewError(core.ErrorPreconditionFailed, core.ReasonCapabilityExpired, "Tool DomainResult current natural evidence bound expired")
+	}
+	p := contract.ToolDomainResultCurrentProjectionV1{ContractVersion: contract.ResultContractVersionV2, Fact: exact, CausalityDigest: fact.Causality.Digest, Observation: fact.Observation, PrepareEnforcement: fact.PrepareEnforcement, ExecuteEnforcement: fact.ExecuteEnforcement, PrepareConsumption: fact.PrepareConsumption, ExecuteConsumption: fact.ExecuteConsumption, Owner: fact.Owner, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires}
 	p.Digest, err = p.ComputeDigest()
 	if err != nil {
 		return contract.ToolDomainResultCurrentProjectionV1{}, err
@@ -285,8 +303,87 @@ func (s *StoreV2) ApplySettlementV2(actionID string, domainResult contract.Objec
 	if now.IsZero() || inspection.Validate(now) != nil || contract.ValidateToolOutcomeDispositionV2(outcome, disposition) != nil {
 		return contract.ToolResultV2{}, invalidV2("fresh Runtime V4 inspection and legal Tool outcome are required")
 	}
+	return s.applyVerifiedSettlementV2(actionID, domainResult, inspection, outcome, disposition, now)
+}
+
+// ApplySettlementWithContextV2 is the context-aware in-memory reference
+// implementation used by FactStoreV2. It deliberately performs the same fresh
+// Runtime settlement and Association reads as the durable SQLite store before
+// it mutates any Tool-owned fact.
+func (s *StoreV2) ApplySettlementWithContextV2(ctx context.Context, actionID string, domainResult contract.ObjectRef, inspection runtimeports.OperationInspectionSettlementRefV4, outcome contract.ToolOutcomeV2, disposition contract.ToolDispositionV2, now time.Time) (contract.ToolResultV2, error) {
+	if ctx == nil {
+		return contract.ToolResultV2{}, invalidV2("Tool settlement context is required")
+	}
+	if err := ctx.Err(); err != nil {
+		return contract.ToolResultV2{}, err
+	}
+	if now.IsZero() || inspection.Validate(now) != nil || contract.ValidateToolOutcomeDispositionV2(outcome, disposition) != nil {
+		return contract.ToolResultV2{}, invalidV2("fresh Runtime V4 inspection and legal Tool outcome are required")
+	}
+	domainBefore, err := s.InspectDomainResultV2(actionID, domainResult)
+	if err != nil {
+		return contract.ToolResultV2{}, err
+	}
+	if s.readers.Settlement == nil {
+		return contract.ToolResultV2{}, unavailableV2("fresh Runtime settlement reader is unavailable")
+	}
+	actual, association, err := s.inspectSettlementClosureV2(ctx, domainBefore, now)
+	if err != nil {
+		return contract.ToolResultV2{}, err
+	}
+	if !reflect.DeepEqual(actual, inspection) {
+		return contract.ToolResultV2{}, conflictV2("Runtime current settlement inspection drifted before Tool Apply")
+	}
+	actualAtMutation, associationAtMutation, err := s.inspectSettlementClosureV2(ctx, domainBefore, now)
+	if err != nil {
+		return contract.ToolResultV2{}, err
+	}
+	if !reflect.DeepEqual(actualAtMutation, actual) || !reflect.DeepEqual(associationAtMutation, association) {
+		return contract.ToolResultV2{}, conflictV2("Runtime settlement current or association drifted before Tool mutation")
+	}
+	// Never wait for the Tool mutation lock after S2: a wait would let the
+	// Runtime-owned current/TTL drift without a safe way to call the external
+	// readers while holding s.mu. TryLock makes lock contention fail closed,
+	// while all external callbacks remain outside the Tool lock.
+	if !s.mu.TryLock() {
+		return contract.ToolResultV2{}, conflictV2("Tool fact current changed or remained busy after Runtime settlement S2")
+	}
+	defer s.mu.Unlock()
+	if err = ctx.Err(); err != nil {
+		return contract.ToolResultV2{}, err
+	}
+	return s.applyVerifiedSettlementLockedV2(actionID, domainResult, actualAtMutation, outcome, disposition, now)
+}
+
+// inspectSettlementClosureV2 reads the Runtime-owned settlement and its exact
+// evidence association as one immutable snapshot. Callers perform this read
+// twice before mutation; no Runtime callback is ever made while StoreV2.mu is
+// held, avoiding lock inversion with readers that inspect Tool state.
+func (s *StoreV2) inspectSettlementClosureV2(ctx context.Context, domain contract.ToolDomainResultFactV2, now time.Time) (runtimeports.OperationInspectionSettlementRefV4, runtimeports.OperationSettlementEvidenceAssociationV4, error) {
+	actual, err := s.readers.Settlement.InspectCurrentOperationSettlementV4(ctx, runtimeports.InspectCurrentOperationSettlementRequestV4{Operation: domain.Causality.Operation, EffectID: domain.Causality.EffectID})
+	if err != nil {
+		return runtimeports.OperationInspectionSettlementRefV4{}, runtimeports.OperationSettlementEvidenceAssociationV4{}, err
+	}
+	if actual.Validate(now) != nil {
+		return runtimeports.OperationInspectionSettlementRefV4{}, runtimeports.OperationSettlementEvidenceAssociationV4{}, conflictV2("Runtime current settlement inspection is invalid or expired")
+	}
+	association, err := s.readers.Settlement.InspectOperationSettlementEvidenceAssociationV4(ctx, domain.Causality.Operation, actual.Association)
+	if err != nil {
+		return runtimeports.OperationInspectionSettlementRefV4{}, runtimeports.OperationSettlementEvidenceAssociationV4{}, err
+	}
+	if association.Validate() != nil || !runtimeports.SameOperationSettlementEvidenceAssociationRefV4(association.RefV4(), actual.Association) {
+		return runtimeports.OperationInspectionSettlementRefV4{}, runtimeports.OperationSettlementEvidenceAssociationV4{}, conflictV2("Runtime settlement association drifted before Tool Apply")
+	}
+	return actual, association, nil
+}
+
+func (s *StoreV2) applyVerifiedSettlementV2(actionID string, domainResult contract.ObjectRef, inspection runtimeports.OperationInspectionSettlementRefV4, outcome contract.ToolOutcomeV2, disposition contract.ToolDispositionV2, now time.Time) (contract.ToolResultV2, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	return s.applyVerifiedSettlementLockedV2(actionID, domainResult, inspection, outcome, disposition, now)
+}
+
+func (s *StoreV2) applyVerifiedSettlementLockedV2(actionID string, domainResult contract.ObjectRef, inspection runtimeports.OperationInspectionSettlementRefV4, outcome contract.ToolOutcomeV2, disposition contract.ToolDispositionV2, now time.Time) (contract.ToolResultV2, error) {
 	record, ok := s.records[actionID]
 	if !ok || record.Reservation == nil || record.DomainResult == nil {
 		return contract.ToolResultV2{}, notFoundV2("Tool DomainResult not found")

@@ -3,11 +3,13 @@ package applicationadapter
 import (
 	"context"
 	"encoding/json"
+	"reflect"
 	"sync"
 
 	applicationcontract "github.com/Proview-China/rax/ExecutionRuntime/application/contract"
 	"github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	toolcontract "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/contract"
+	toolsqlite "github.com/Proview-China/rax/ExecutionRuntime/tool-mcp/storage/sqlite"
 )
 
 const toolOwnerSingleCallClaimVersionV2 = "praxis.tool-mcp.single-call-owner-claim/v2"
@@ -49,11 +51,12 @@ func (c ToolOwnerSingleCallClaimV2) DigestV2() (core.Digest, error) {
 }
 
 func newToolOwnerSingleCallClaimV2(input ToolOwnerSingleCallExecutionV2, createdUnixNano int64) (ToolOwnerSingleCallClaimV2, error) {
+	_ = createdUnixNano
 	id, err := deriveToolOwnerSingleCallClaimIDV2(input)
 	if err != nil {
 		return ToolOwnerSingleCallClaimV2{}, err
 	}
-	claim := ToolOwnerSingleCallClaimV2{ContractVersion: toolOwnerSingleCallClaimVersionV2, ID: id, Revision: 1, RequestID: input.Request.ID, RequestDigest: input.Request.Digest, ActionDigest: input.Request.Action.Digest, ExecutionScopeDigest: input.Request.Action.ExecutionScopeDigest, BindingRef: input.Binding.Ref, CreatedUnixNano: createdUnixNano}
+	claim := ToolOwnerSingleCallClaimV2{ContractVersion: toolOwnerSingleCallClaimVersionV2, ID: id, Revision: 1, RequestID: input.Request.ID, RequestDigest: input.Request.Digest, ActionDigest: input.Request.Action.Digest, ExecutionScopeDigest: input.Request.Action.ExecutionScopeDigest, BindingRef: input.Binding.Ref, CreatedUnixNano: input.Request.CreatedUnixNano}
 	claim.Digest, err = claim.DigestV2()
 	if err != nil {
 		return ToolOwnerSingleCallClaimV2{}, err
@@ -84,18 +87,7 @@ func sameToolOwnerSingleCallClaimPayloadV2(left, right ToolOwnerSingleCallClaimR
 	if err := right.Validate(); err != nil {
 		return false, err
 	}
-	if left.Claim.ID != right.Claim.ID || left.Claim.RequestID != right.Claim.RequestID || left.Claim.RequestDigest != right.Claim.RequestDigest || left.Claim.ActionDigest != right.Claim.ActionDigest || left.Claim.ExecutionScopeDigest != right.Claim.ExecutionScopeDigest || left.Claim.BindingRef != right.Claim.BindingRef {
-		return false, nil
-	}
-	leftInput, err := core.CanonicalJSONDigest("praxis.tool-mcp.single-call-owner-claim-input", "2.0.0", "ToolOwnerSingleCallExecutionV2", left.Input)
-	if err != nil {
-		return false, err
-	}
-	rightInput, err := core.CanonicalJSONDigest("praxis.tool-mcp.single-call-owner-claim-input", "2.0.0", "ToolOwnerSingleCallExecutionV2", right.Input)
-	if err != nil {
-		return false, err
-	}
-	return leftInput == rightInput, nil
+	return reflect.DeepEqual(left, right), nil
 }
 
 type ToolOwnerSingleCallClaimStoreV2 interface {
@@ -194,3 +186,122 @@ func cloneToolOwnerSingleCallClaimRecordV2(value ToolOwnerSingleCallClaimRecordV
 }
 
 var _ ToolOwnerSingleCallClaimStoreV2 = (*InMemoryToolOwnerSingleCallClaimStoreV2)(nil)
+
+// SQLiteToolOwnerSingleCallClaimStoreV2 is the typed Tool Owner adapter over
+// the SQLite package's cycle-free exact row store.
+type SQLiteToolOwnerSingleCallClaimStoreV2 struct {
+	raw *toolsqlite.OwnerClaimExecutionStoreV2
+}
+
+func NewSQLiteToolOwnerSingleCallClaimStoreV2(raw *toolsqlite.OwnerClaimExecutionStoreV2) (*SQLiteToolOwnerSingleCallClaimStoreV2, error) {
+	if raw == nil {
+		return nil, core.NewError(core.ErrorInvalidArgument, core.ReasonComponentMissing, "Tool Owner SQLite claim row store is required")
+	}
+	return &SQLiteToolOwnerSingleCallClaimStoreV2{raw: raw}, nil
+}
+
+func (s *SQLiteToolOwnerSingleCallClaimStoreV2) CreateToolOwnerSingleCallClaimV2(ctx context.Context, record ToolOwnerSingleCallClaimRecordV2) (ToolOwnerSingleCallClaimRecordV2, bool, error) {
+	key, row, err := encodeSQLiteClaimRowV2(record)
+	if err != nil {
+		return ToolOwnerSingleCallClaimRecordV2{}, false, err
+	}
+	winner, created, err := s.raw.CreateClaimRowV2(ctx, row)
+	if err != nil {
+		if core.HasCategory(err, core.ErrorIndeterminate) {
+			recoveryCtx, cancel := boundedOwnerLocalRecoveryContextV2(ctx, defaultToolOwnerRecoveryTimeoutV2)
+			_, _ = s.InspectToolOwnerSingleCallClaimV2(recoveryCtx, key)
+			cancel()
+		}
+		return ToolOwnerSingleCallClaimRecordV2{}, false, err
+	}
+	decoded, err := decodeSQLiteClaimRowV2(winner)
+	if err != nil {
+		return ToolOwnerSingleCallClaimRecordV2{}, false, err
+	}
+	same, err := sameToolOwnerSingleCallClaimPayloadV2(decoded, record)
+	if err != nil || !same {
+		if err != nil {
+			return ToolOwnerSingleCallClaimRecordV2{}, false, err
+		}
+		return ToolOwnerSingleCallClaimRecordV2{}, false, core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "Tool Owner SQLite claim winner binds different content")
+	}
+	return decoded, created, nil
+}
+
+func (s *SQLiteToolOwnerSingleCallClaimStoreV2) InspectToolOwnerSingleCallClaimV2(ctx context.Context, key applicationcontract.SingleCallToolActionInspectKeyV2) (ToolOwnerSingleCallClaimRecordV2, error) {
+	if s == nil || s.raw == nil || key.Validate() != nil {
+		return ToolOwnerSingleCallClaimRecordV2{}, core.NewError(core.ErrorInvalidArgument, core.ReasonInvalidReference, "Tool Owner SQLite claim Inspect is invalid")
+	}
+	row, err := s.raw.InspectClaimRowV2(ctx, sqliteRequestKeyRowV2(key))
+	if err != nil {
+		return ToolOwnerSingleCallClaimRecordV2{}, err
+	}
+	record, err := decodeSQLiteClaimRowV2(row)
+	if err != nil {
+		return ToolOwnerSingleCallClaimRecordV2{}, err
+	}
+	expected, err := applicationcontract.SealSingleCallToolActionInspectKeyV2(record.Input.Request)
+	if err != nil || expected != key {
+		return ToolOwnerSingleCallClaimRecordV2{}, core.NewError(core.ErrorConflict, core.ReasonIdempotencyPayloadMismatch, "Tool Owner SQLite claim request key drifted")
+	}
+	return record, nil
+}
+
+func encodeSQLiteClaimRowV2(record ToolOwnerSingleCallClaimRecordV2) (applicationcontract.SingleCallToolActionInspectKeyV2, toolsqlite.OwnerClaimRowV2, error) {
+	if err := record.Validate(); err != nil {
+		return applicationcontract.SingleCallToolActionInspectKeyV2{}, toolsqlite.OwnerClaimRowV2{}, err
+	}
+	key, err := applicationcontract.SealSingleCallToolActionInspectKeyV2(record.Input.Request)
+	if err != nil {
+		return applicationcontract.SingleCallToolActionInspectKeyV2{}, toolsqlite.OwnerClaimRowV2{}, err
+	}
+	inputDigest, err := ComputeToolOwnerSingleCallExecutionInputDigestV2(record.Input)
+	if err != nil {
+		return applicationcontract.SingleCallToolActionInspectKeyV2{}, toolsqlite.OwnerClaimRowV2{}, err
+	}
+	claimJSON, err := json.Marshal(record.Claim)
+	if err != nil {
+		return applicationcontract.SingleCallToolActionInspectKeyV2{}, toolsqlite.OwnerClaimRowV2{}, err
+	}
+	inputJSON, err := json.Marshal(record.Input)
+	if err != nil {
+		return applicationcontract.SingleCallToolActionInspectKeyV2{}, toolsqlite.OwnerClaimRowV2{}, err
+	}
+	rowDigest, err := core.CanonicalJSONDigest("praxis.tool-mcp.sqlite-row", "v1", "ToolOwnerSingleCallClaimRecordV2", struct {
+		Claim       ToolOwnerSingleCallClaimV2     `json:"claim"`
+		Input       ToolOwnerSingleCallExecutionV2 `json:"input"`
+		InputDigest core.Digest                    `json:"input_digest"`
+	}{record.Claim, record.Input, inputDigest})
+	if err != nil {
+		return applicationcontract.SingleCallToolActionInspectKeyV2{}, toolsqlite.OwnerClaimRowV2{}, err
+	}
+	return key, toolsqlite.OwnerClaimRowV2{ClaimID: record.Claim.ID, ClaimRevision: int64(record.Claim.Revision), ClaimDigest: string(record.Claim.Digest), Request: sqliteRequestKeyRowV2(key), BindingID: record.Claim.BindingRef.ID, BindingRevision: int64(record.Claim.BindingRef.Revision), BindingDigest: string(record.Claim.BindingRef.Digest), InputDigest: string(inputDigest), ClaimJSON: claimJSON, InputJSON: inputJSON, RowDigest: string(rowDigest)}, nil
+}
+
+func decodeSQLiteClaimRowV2(row toolsqlite.OwnerClaimRowV2) (ToolOwnerSingleCallClaimRecordV2, error) {
+	var record ToolOwnerSingleCallClaimRecordV2
+	if core.DecodeStrictJSON(row.ClaimJSON, &record.Claim) != nil || core.DecodeStrictJSON(row.InputJSON, &record.Input) != nil {
+		return ToolOwnerSingleCallClaimRecordV2{}, core.NewError(core.ErrorConflict, core.ReasonInvalidCanonicalForm, "Tool Owner SQLite claim JSON is invalid")
+	}
+	_, expected, err := encodeSQLiteClaimRowV2(record)
+	if err != nil || !reflectSQLiteClaimRowV2(row, expected) {
+		return ToolOwnerSingleCallClaimRecordV2{}, core.NewError(core.ErrorConflict, core.ReasonInvalidDigest, "Tool Owner SQLite claim exact columns or row digest drifted")
+	}
+	return cloneToolOwnerSingleCallClaimRecordV2(record)
+}
+
+func reflectSQLiteClaimRowV2(left, right toolsqlite.OwnerClaimRowV2) bool {
+	return left.ClaimID == right.ClaimID && left.ClaimRevision == right.ClaimRevision && left.ClaimDigest == right.ClaimDigest &&
+		left.Request.RequestID == right.Request.RequestID && left.Request.RequestRevision == right.Request.RequestRevision &&
+		left.Request.RequestDigest == right.Request.RequestDigest && left.Request.ActionCoordinateDigest == right.Request.ActionCoordinateDigest &&
+		left.Request.ExecutionScopeDigest == right.Request.ExecutionScopeDigest &&
+		left.BindingID == right.BindingID && left.BindingRevision == right.BindingRevision && left.BindingDigest == right.BindingDigest &&
+		left.InputDigest == right.InputDigest && string(left.ClaimJSON) == string(right.ClaimJSON) &&
+		string(left.InputJSON) == string(right.InputJSON) && left.RowDigest == right.RowDigest
+}
+
+func sqliteRequestKeyRowV2(key applicationcontract.SingleCallToolActionInspectKeyV2) toolsqlite.OwnerRequestKeyRowV2 {
+	return toolsqlite.OwnerRequestKeyRowV2{RequestKeyDigest: string(key.Digest), RequestID: key.RequestID, RequestRevision: int64(key.RequestRevision), RequestDigest: string(key.RequestDigest), ActionCoordinateDigest: string(key.ActionCoordinateDigest), ExecutionScopeDigest: string(key.ScopeDigest)}
+}
+
+var _ ToolOwnerSingleCallClaimStoreV2 = (*SQLiteToolOwnerSingleCallClaimStoreV2)(nil)
