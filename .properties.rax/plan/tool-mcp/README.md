@@ -40,6 +40,10 @@
 - MCP Server Descriptor Register/Inspect状态：`implementation_software_test_yes`。Tool唯一内存Repository完成revision 1 create、successor expected-current CAS、history/current exact读、lost-reply Inspect、deep clone、64并发、ABA/回退拒绝；它不创建Connection或外部Transport。
 - Tool Owner V2字段已冻结：三种合法Outcome/Disposition组合；Reservation只绑定中立`ApplicationAttemptRefV1`；DomainResult使用Runtime公开Observation、两phase Enforcement/Consumption；历史Fact的Owner current短租约最大30秒且不作为SLA。
 - Tool boundary只读边界：内部SourceRef无损映射Runtime `OperationProviderBoundaryRefV1{ID,Revision,Digest}`；Tool实现`InspectCurrentOperationProviderBoundaryV1(ctx, exactRef)`，Projection只证明CAS/current。
+- `workspace.read` Sandbox Adapter已使用V2 exact inspection envelope，并在恢复链消费
+  Sandbox public历史Command exact Reader闭合`SourceCommand`及payload/workspace/range；
+  Tool无重复接口或Unsupported包装。Runtime Attempt→Admission真实Reader、CorePack
+  `Executable=false`及production composition继续NO-GO。
 - Application `SingleCallToolActionPortV1.Execute`在Tool侧冻结为same-canonical-command start-or-inspect：Model exact Reader门通过后，Adapter才create/Inspect Tool Owner Watermark；Provider边界前只在current exact+权威NotFound后继续，Provider边界后只Inspect原Attempt/Observation，不承诺transport exactly-once。
 - Model Projection消费门：Tool已接入Model公开exact Reader；只有完整`ToolCallCandidateObservationProjectionV1`的Ref全字段、Observation digest与`Calls == 1`通过后才写Watermark，失败时零Tool写/零Gateway，Tool无Model publish/write口。
 - N=1 payload关联：`CanonicalArgumentsDigest == PendingAction.PayloadDigest == Candidate.Payload.ContentDigest`已冻结并实现；不等时零Watermark/Candidate/Gateway。V1不支持隐式schema transformation，未来转换需另立typed Fact/Port Delta。
@@ -76,6 +80,9 @@ G6A公共技术门已联合YES并完成Tool侧隔离实现；G6B仍按其启用�
 8. 实现完成后的module/memory说明资产。
 
 ## 分阶段Gate
+
+`workspace.read`首个Sandbox实际读取接线的独立实施与门禁见
+[Workspace Read Sandbox Adapter V1](workspace-read-sandbox-adapter-v1.md)。
 
 ### G6A：Tool Adapter隔离实现/测试Gate
 
