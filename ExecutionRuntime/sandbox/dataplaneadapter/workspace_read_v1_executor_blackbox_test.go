@@ -38,6 +38,11 @@ type workspaceReadExecutorCaseV1 struct {
 	setup               func(*testing.T, string)
 	mutateWorkspace     func(*contract.WorkspaceView)
 	startByte           uint64
+	commandMetaAfter    time.Duration
+	commandRequestAfter time.Duration
+	runtimeUnifiedAfter time.Duration
+	expectedTTLAfter    time.Duration
+	singleExecution     bool
 	hiddenScopes        []string
 	expectedState       contract.WorkspaceReadStateV1
 	expectedContent     string
@@ -79,6 +84,33 @@ func TestWorkspaceReadPublicExecutorCreatesRuntimeAttemptAdmissionBindingV2(t *t
 		startByte: 6, expectedState: contract.WorkspaceReadObservedV1,
 		expectedContent: "Praxis", expectedAdapter: 1, expectedPhysical: 1,
 		useFakeActual: true, verifyBindingV2: true,
+	})
+}
+
+func TestWorkspaceReadPublicExecutorUsesShorterCommandMetaTTLWithinCallerAuthority(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		commandMetaAfter:    5 * time.Second,
+		commandRequestAfter: 40 * time.Second,
+		runtimeUnifiedAfter: 40 * time.Second,
+		expectedTTLAfter:    5 * time.Second,
+		expectedState:       contract.WorkspaceReadObservedV1,
+		expectedContent:     "Praxis",
+		expectedAdapter:     1,
+		expectedPhysical:    1,
+		useFakeActual:       true,
+		singleExecution:     true,
+	})
+}
+
+func TestWorkspaceReadPublicExecutorRejectsCallerBoundBeyondRuntimeAuthority(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		commandMetaAfter:    40 * time.Second,
+		commandRequestAfter: 40 * time.Second,
+		runtimeUnifiedAfter: 30 * time.Second,
+		expectedAdapter:     0,
+		expectedPhysical:    0,
+		expectBeforeActual:  true,
+		useFakeActual:       true,
 	})
 }
 
@@ -163,7 +195,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	}
 	clock := time.Now
 	var controlledClock atomic.Int64
-	if spec.verifyBindingV2 {
+	if spec.verifyBindingV2 || spec.expectedTTLAfter != 0 {
 		controlledClock.Store(time.Now().UTC().UnixNano())
 		clock = func() time.Time {
 			return time.Unix(0, controlledClock.Load()).UTC()
@@ -186,7 +218,21 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	}
 
 	now := clock().UTC()
-	expires := now.Add(30 * time.Second)
+	commandMetaAfter := spec.commandMetaAfter
+	if commandMetaAfter == 0 {
+		commandMetaAfter = 30 * time.Second
+	}
+	commandRequestAfter := spec.commandRequestAfter
+	if commandRequestAfter == 0 {
+		commandRequestAfter = 30 * time.Second
+	}
+	runtimeUnifiedAfter := spec.runtimeUnifiedAfter
+	if runtimeUnifiedAfter == 0 {
+		runtimeUnifiedAfter = 30 * time.Second
+	}
+	commandMetaExpires := now.Add(commandMetaAfter)
+	commandRequestedNotAfter := now.Add(commandRequestAfter)
+	runtimeUnifiedNotAfter := now.Add(runtimeUnifiedAfter)
 	workspaceExpires := time.Unix(0, 4_000_000_008_000_000_000)
 	workspaceDigest := "sha256:021c67f065e27e7e93918819bfbd85d62dc7c9a50a7599779b68bdc4a293f2ba"
 	fileScopeDigest := "sha256:a9e25d859be79d6716a9397eed2e1400d936a6b3233247f5664d1a06e42478a7"
@@ -230,7 +276,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		IntentID: current.Sandbox.EffectID, IntentRevision: current.Sandbox.IntentRevision, IntentDigest: current.Sandbox.IntentDigest,
 		PermitID: legacy.ID, PermitRevision: legacy.Revision, PermitDigest: legacyDigest, AttemptID: current.Sandbox.AttemptID,
 		Provider: current.Sandbox.ProviderBinding, PayloadSchema: legacy.PayloadSchema, PayloadDigest: legacy.PayloadDigest, PayloadRevision: legacy.PayloadRevision,
-		PreparedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano(),
+		PreparedUnixNano: now.UnixNano(), ExpiresUnixNano: runtimeUnifiedNotAfter.UnixNano(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -243,7 +289,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	commandDraft := contract.WorkspaceReadCommandV1{
 		TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), SourceToolCommand: contract.Ref{ID: "tool-command", Revision: 1, Digest: digestWorkspaceReadExecutorTest("tool-command")},
 		SourceToolPayloadSchema: legacy.PayloadSchema.Key(), SourceToolPayloadDigest: string(legacy.PayloadDigest), SourceToolPayloadRevision: uint64(legacy.PayloadRevision),
-		WorkspaceView: workspace.Meta.Ref(), FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6, RequestedNotAfterUnixNano: expires.UnixNano(),
+		WorkspaceView: workspace.Meta.Ref(), FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6, RequestedNotAfterUnixNano: commandRequestedNotAfter.UnixNano(),
 		OperationDigest: string(current.Sandbox.OperationDigest), EffectID: string(current.Sandbox.EffectID), IntentRevision: uint64(current.Sandbox.IntentRevision), IntentDigest: string(current.Sandbox.IntentDigest), AttemptID: current.Sandbox.AttemptID,
 		PreparedDigest: string(prepared.Digest), ProviderComponent: string(current.Sandbox.ProviderBinding.ComponentID), ProviderManifest: string(current.Sandbox.ProviderBinding.ManifestDigest),
 	}
@@ -262,7 +308,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		t.Fatal(err)
 	}
 	commandDraft.DispatchDigest = string(dispatchDigest)
-	command, err := contract.SealWorkspaceReadCommandV1(commandDraft, "workspace-read-command", now, expires)
+	command, err := contract.SealWorkspaceReadCommandV1(commandDraft, "workspace-read-command", now, commandMetaExpires)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,15 +325,15 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	association, err := runtimeports.SealPreparedDomainCommandAssociationCurrentProjectionV1(runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1{
 		Operation: current.Sandbox.Operation, OperationDigest: current.Sandbox.OperationDigest, EffectID: current.Sandbox.EffectID, EffectRevision: current.Sandbox.IntentRevision, IntentDigest: current.Sandbox.IntentDigest,
 		Prepared: prepared, Attempt: attempt, Provider: current.Sandbox.ProviderBinding, PayloadSchema: legacy.PayloadSchema, PayloadDigest: legacy.PayloadDigest, PayloadRevision: legacy.PayloadRevision,
-		DomainCommand: domainCommand, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: expires.UnixNano(),
+		DomainCommand: domainCommand, CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: runtimeUnifiedNotAfter.UnixNano(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	transport := runtimeports.ProviderBindingRefV2{BindingSetID: "transport", BindingSetRevision: 1, ComponentID: "praxis.runtime/transport", ManifestDigest: runtimecore.DigestBytes([]byte("transport-manifest")), ArtifactDigest: runtimecore.DigestBytes([]byte("transport-artifact")), Capability: runtimeports.ControlledOperationProviderTransportCapabilityV2}
-	handoff := runtimeports.OperationScopeEvidenceProviderHandoffRefV3{ID: "handoff-workspace-read", Revision: 1, Digest: runtimecore.DigestBytes([]byte("handoff-workspace-read")), ExpiresUnixNano: expires.UnixNano()}
+	handoff := runtimeports.OperationScopeEvidenceProviderHandoffRefV3{ID: "handoff-workspace-read", Revision: 1, Digest: runtimecore.DigestBytes([]byte("handoff-workspace-read")), ExpiresUnixNano: runtimeUnifiedNotAfter.UnixNano()}
 	authorization, err := runtimeports.SealControlledOperationPhysicalExecutionAuthorizationV3(runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3{
-		UnifiedNotAfterUnixNano: expires.UnixNano(), ProviderTransport: transport, Provider: current.Sandbox.ProviderBinding,
+		UnifiedNotAfterUnixNano: runtimeUnifiedNotAfter.UnixNano(), ProviderTransport: transport, Provider: current.Sandbox.ProviderBinding,
 		Operation: current.Sandbox.Operation, OperationDigest: current.Sandbox.OperationDigest, OperationScopeDigest: current.Sandbox.Operation.ExecutionScopeDigest,
 		EffectKind: runtimeports.OperationScopeEvidenceActionEffectKindV3, Prepared: prepared, Attempt: attempt, ExecuteEnforcement: current.Phase,
 		ExecuteEvidenceHandoff: handoff, Boundary: runtimeports.OperationProviderBoundaryRefV1{ID: "boundary-workspace-read", Revision: 1, Digest: runtimecore.DigestBytes([]byte("boundary-workspace-read"))},
@@ -388,6 +434,33 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if err != nil {
 		t.Fatal(err)
 	}
+	verifyExpectedTTL := func(projection contract.WorkspaceReadExecutionProjectionV1) {
+		t.Helper()
+		if spec.expectedTTLAfter == 0 {
+			return
+		}
+		expectedExpiry := now.Add(spec.expectedTTLAfter).UnixNano()
+		if projection.Reservation.Meta.ExpiresUnixNano != expectedExpiry ||
+			projection.Reservation.TTLClosure.EffectiveExpiresUnixNano != expectedExpiry ||
+			projection.Attempt.Meta.ExpiresUnixNano != expectedExpiry ||
+			projection.Attempt.AdmissionReceipt.ExpiresUnixNano != expectedExpiry ||
+			projection.Observation == nil ||
+			projection.Observation.Meta.ExpiresUnixNano != expectedExpiry ||
+			projection.Observation.ProviderReceipt.ExpiresUnixNano != expectedExpiry {
+			t.Fatalf(
+				"owner admission/reservation TTL did not use Command Meta: expected=%d projection=%#v",
+				expectedExpiry,
+				projection,
+			)
+		}
+		controlledClock.Store(expectedExpiry)
+		if _, executeErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); executeErr == nil {
+			t.Fatal("exact Command Meta expiry restored execution eligibility")
+		}
+		if counted.calls.Load() != 1 {
+			t.Fatalf("exact Command Meta expiry re-entered physical read: %d", counted.calls.Load())
+		}
+	}
 	if spec.expectBeforeActual {
 		if _, err = executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); err == nil {
 			t.Fatal("pre-actual scope rejection unexpectedly succeeded")
@@ -406,7 +479,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		}
 		return
 	}
-	if spec.expectedState != contract.WorkspaceReadObservedV1 || spec.expectedContent != "Praxis" {
+	if spec.singleExecution || spec.expectedState != contract.WorkspaceReadObservedV1 || spec.expectedContent != "Praxis" {
 		_, callErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization)
 		if spec.expectedState == contract.WorkspaceReadObservedV1 {
 			if callErr != nil {
@@ -454,7 +527,8 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		if spec.expectedState == contract.WorkspaceReadObservedV1 && (projection.Observation == nil || projection.Observation.Content != spec.expectedContent || !projection.Observation.Complete) {
 			t.Fatalf("EOF result drifted: %#v", projection.Observation)
 		}
-		if spec.expectedAdapter != 0 && countedCurrent.calls.Load() == 0 {
+		verifyExpectedTTL(projection)
+		if spec.expectedAdapter != 0 && !spec.useFakeActual && countedCurrent.calls.Load() == 0 {
 			t.Fatal("public CurrentServer never inspected workspace read current v2")
 		}
 		return
@@ -521,6 +595,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if projection.Attempt.State != contract.WorkspaceReadObservedV1 || projection.Observation == nil || projection.Observation.Content != "Praxis" {
 		t.Fatalf("unexpected exact Inspect: %#v", projection)
 	}
+	verifyExpectedTTL(projection)
 	if !spec.useFakeActual && countedCurrent.calls.Load() == 0 {
 		t.Fatal("public CurrentServer never inspected workspace read current v2")
 	}
@@ -815,7 +890,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		if counted.calls.Load() != 1 {
 			t.Fatalf("64 public V2 inspections re-entered physical read: %d", counted.calls.Load())
 		}
-		controlledClock.Store(expires.UnixNano())
+		controlledClock.Store(runtimeUnifiedNotAfter.UnixNano())
 		expiredSnapshotBefore := workspaceReadV2DatabaseSnapshot(t, ctx, db)
 		expiredBinding, expiredInspectErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
 		if expiredInspectErr != nil ||
@@ -848,7 +923,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		// history before it can create another owner fact or physical read.
 		splicedCommand := command
 		splicedCommand.SourceToolPayloadDigest = digestWorkspaceReadExecutorTest("spliced-payload")
-		splicedCommand, err = contract.SealWorkspaceReadCommandV1(splicedCommand, command.Meta.ID, now, expires)
+		splicedCommand, err = contract.SealWorkspaceReadCommandV1(splicedCommand, command.Meta.ID, now, commandMetaExpires)
 		if err != nil {
 			t.Fatal(err)
 		}

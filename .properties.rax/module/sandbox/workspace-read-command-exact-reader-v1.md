@@ -9,6 +9,14 @@
 - V17 owner-local row seal绑定完整exact Ref与full canonical body；
 - Command与seal同事务create-once；legacy无proof且禁止迁移或retry自签；
 - expired Command 在 restart 后仍可做历史复读；
+- Command TTL 固定为 `Meta.Expires <= RequestedNotAfter`；任一 exact expiry
+  边界与 owner clock rollback均Fail Closed；
+- caller-bound authority 继续要求
+  `RequestedNotAfter <= Runtime UnifiedNotAfter`；public Executor 纵切证明
+  `Meta < Requested == Unified` 时 Admission/Reservation成功且Effective TTL取
+  Meta，不能以 Meta 比较替代该纵深门；
+- 旧实现下 `Meta.Expires > RequestedNotAfter` 的不安全持久 Fact 即使
+  canonical body/row seal自洽，也拒绝历史与current读取且不会被重封或回填；
 - 只执行 `ValidateShape`，不刷新 TTL、不恢复执行权；
 - 64 个并发 Reader 返回同一 immutable winner；
 - typed nil、取消、Unavailable、Ref/body/digest及Created/Updated splice均

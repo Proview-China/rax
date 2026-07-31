@@ -331,6 +331,183 @@ func TestWorkspaceReadCommandExactReaderV1ReadsExpiredFactAcrossRestart(t *testi
 	}
 }
 
+func TestWorkspaceReadCommandExactReaderV1PersistsShorterMetaTTLWithoutRenewal(t *testing.T) {
+	ctx := context.Background()
+	created := time.Unix(1_950_000_025, 0)
+	metaExpires := created.Add(time.Minute)
+	requested := created.Add(2 * time.Minute)
+	current := created
+	store, err := OpenWithClock(
+		ctx,
+		filepath.Join(t.TempDir(), "sandbox.db"),
+		func() time.Time { return current },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = store.Close() })
+	_, command := workspaceReadCompletionInputFixtureV1(t, created, requested)
+	command, err = contract.SealWorkspaceReadCommandV1(
+		command,
+		command.Meta.ID,
+		created,
+		metaExpires,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if command.Meta.ExpiresUnixNano >= command.RequestedNotAfterUnixNano {
+		t.Fatalf(
+			"test precondition failed: meta=%d requested=%d",
+			command.Meta.ExpiresUnixNano,
+			command.RequestedNotAfterUnixNano,
+		)
+	}
+	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+		t.Fatal(err)
+	}
+
+	current = metaExpires.Add(-time.Nanosecond)
+	got, err := store.InspectWorkspaceReadCommandCurrentV1(ctx, command.Meta.Ref())
+	if err != nil || !reflect.DeepEqual(got, command) {
+		t.Fatalf("shorter Meta TTL was not current before expiry: got=%#v err=%v", got, err)
+	}
+	current = metaExpires
+	if _, err = store.InspectWorkspaceReadCommandCurrentV1(ctx, command.Meta.Ref()); err == nil {
+		t.Fatal("shorter Meta TTL remained current at exact expiry")
+	}
+	got, err = store.InspectWorkspaceReadCommandExactV1(ctx, command.Meta.Ref())
+	if err != nil || !reflect.DeepEqual(got, command) {
+		t.Fatalf("safe historical Command was not readable unchanged: got=%#v err=%v", got, err)
+	}
+	if got.Meta.ExpiresUnixNano != metaExpires.UnixNano() ||
+		got.RequestedNotAfterUnixNano != requested.UnixNano() {
+		t.Fatalf("historical Command TTL was renewed: %#v", got)
+	}
+}
+
+func TestWorkspaceReadCommandExactReaderV1RejectsUnsafeHistoricalTTLWithoutRepair(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_950_000_050, 0)
+	metaExpires := now.Add(time.Minute)
+	database := filepath.Join(t.TempDir(), "sandbox.db")
+	store, err := OpenWithClock(ctx, database, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, command := workspaceReadCompletionInputFixtureV1(t, now, metaExpires)
+	command.RequestedNotAfterUnixNano = now.Add(30 * time.Second).UnixNano()
+	payload := command
+	payload.Meta = contract.Meta{ExpiresUnixNano: command.Meta.ExpiresUnixNano}
+	command.Meta.Digest, err = contract.Digest("workspace-read-command", payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := encode(command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bodySeal, err := workspaceReadCommandCanonicalBodySealV1(command.Meta.Ref(), body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.db.ExecContext(
+		ctx,
+		`INSERT INTO workspace_read_command_current(command_id,revision,digest,body)
+		 VALUES(?,?,?,?)`,
+		command.Meta.ID,
+		command.Meta.Revision,
+		command.Meta.Digest,
+		body,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.db.ExecContext(
+		ctx,
+		`INSERT INTO workspace_read_command_body_seal(
+			command_id,revision,digest,canonical_body_digest
+		 ) VALUES(?,?,?,?)`,
+		command.Meta.ID,
+		command.Meta.Revision,
+		command.Meta.Digest,
+		bodySeal,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenWithClock(ctx, database, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	reopened.db.SetMaxOpenConns(1)
+	reopened.db.SetMaxIdleConns(1)
+	var changesBefore int64
+	var bodyBefore []byte
+	var sealBefore string
+	if err = reopened.db.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&changesBefore); err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.db.QueryRowContext(
+		ctx,
+		`SELECT command.body,seal.canonical_body_digest
+		   FROM workspace_read_command_current AS command
+		   JOIN workspace_read_command_body_seal AS seal
+		     ON seal.command_id=command.command_id
+		  WHERE command.command_id=?`,
+		command.Meta.ID,
+	).Scan(&bodyBefore, &sealBefore); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err = reopened.InspectWorkspaceReadCommandExactV1(
+		ctx,
+		command.Meta.Ref(),
+	); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("unsafe historical Command error=%v", err)
+	}
+	if _, err = reopened.InspectWorkspaceReadCommandCurrentV1(
+		ctx,
+		command.Meta.Ref(),
+	); err == nil {
+		t.Fatal("unsafe historical Command remained current")
+	}
+	if _, err = reopened.CreateWorkspaceReadCommandV1(ctx, command); err == nil {
+		t.Fatal("unsafe historical Command retry silently repaired the stored fact")
+	}
+
+	var changesAfter int64
+	var bodyAfter []byte
+	var sealAfter string
+	if err = reopened.db.QueryRowContext(ctx, `SELECT total_changes()`).Scan(&changesAfter); err != nil {
+		t.Fatal(err)
+	}
+	if err = reopened.db.QueryRowContext(
+		ctx,
+		`SELECT command.body,seal.canonical_body_digest
+		   FROM workspace_read_command_current AS command
+		   JOIN workspace_read_command_body_seal AS seal
+		     ON seal.command_id=command.command_id
+		  WHERE command.command_id=?`,
+		command.Meta.ID,
+	).Scan(&bodyAfter, &sealAfter); err != nil {
+		t.Fatal(err)
+	}
+	if changesAfter != changesBefore || !reflect.DeepEqual(bodyAfter, bodyBefore) || sealAfter != sealBefore {
+		t.Fatalf(
+			"unsafe historical Command was mutated: changes=%d->%d body_equal=%t seal=%q->%q",
+			changesBefore,
+			changesAfter,
+			reflect.DeepEqual(bodyAfter, bodyBefore),
+			sealBefore,
+			sealAfter,
+		)
+	}
+}
+
 func TestWorkspaceReadCommandExactReaderV1SixtyFourConcurrentReadsAreImmutableAndWriteFree(t *testing.T) {
 	ctx := context.Background()
 	now := time.Unix(1_950_000_100, 0)

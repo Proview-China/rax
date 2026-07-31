@@ -43,6 +43,19 @@ mutable current，禁止刷新 `ExpiresUnixNano` 或
 `RequestedNotAfterUnixNano`。Command 已过期仍可被读取，但它保留原始过期
 时间且不能据此重新执行。
 
+`WorkspaceReadCommandV1` 的 TTL 方向冻结为
+`Meta.ExpiresUnixNano <= RequestedNotAfterUnixNano`。Meta expiry 是创建时所有
+已验证权威上界的自然最小值，不能被 caller 的 requested bound 延长；
+caller bound 本身仍必须满足
+`RequestedNotAfterUnixNano <= Runtime Authorization.UnifiedNotAfterUnixNano`，
+因此完整闭包是 `Meta.Expires <= RequestedNotAfter <= UnifiedNotAfter`。
+Tool 与 Sandbox kernel 的 caller-bound authority 复验不得改成只比较 Meta；
+`now == Meta.ExpiresUnixNano` 或 `now == RequestedNotAfterUnixNano` 均不再
+current，owner clock 回退也 Fail Closed。既有持久 Fact 即使 body 与 row seal
+在旧实现下可自洽，只要 `Meta.ExpiresUnixNano >
+RequestedNotAfterUnixNano`，历史 exact read 也必须返回 Conflict，且禁止
+重封、回填或静默修复。
+
 ## Owner 边界
 
 公开接口属于 `ExecutionRuntime/sandbox/ports`：
