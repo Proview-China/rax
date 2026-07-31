@@ -219,6 +219,45 @@ func (s *Store) InspectGovernedModelTurnProviderBoundaryAttemptV3(
 	return fact.CloneV3(), nil
 }
 
+func (s *Store) InspectGovernedModelTurnProviderBoundaryTurnAttemptV3(
+	ctx context.Context,
+	ref modelinvoker.GovernedModelTurnAttemptRefV3,
+) (modelinvoker.GovernedModelTurnProviderBoundaryFactV3, error) {
+	if err := contextErrorV1(ctx, "inspect_provider_boundary_turn_attempt_v3"); err != nil {
+		return modelinvoker.GovernedModelTurnProviderBoundaryFactV3{}, err
+	}
+	if err := ref.Validate(); err != nil {
+		return modelinvoker.GovernedModelTurnProviderBoundaryFactV3{}, errorV1(
+			modelinvoker.GovernedModelInvocationErrorInvalid,
+			"inspect_provider_boundary_turn_attempt_v3",
+			"V3 Turn Attempt Ref is invalid",
+			err,
+		)
+	}
+	row, err := loadGovernedModelTurnProviderBoundaryRowV3(
+		ctx,
+		s.db,
+		`WHERE turn_attempt_digest=?`,
+		string(ref.Digest),
+	)
+	if err != nil {
+		return modelinvoker.GovernedModelTurnProviderBoundaryFactV3{}, err
+	}
+	fact, err := row.decodeV3()
+	if err != nil {
+		return modelinvoker.GovernedModelTurnProviderBoundaryFactV3{}, err
+	}
+	if fact.TurnRef.AttemptRefV3() != ref {
+		return modelinvoker.GovernedModelTurnProviderBoundaryFactV3{}, errorV1(
+			modelinvoker.GovernedModelInvocationErrorConflict,
+			"inspect_provider_boundary_turn_attempt_v3",
+			"stored provider boundary belongs to another V3 Turn Attempt",
+			nil,
+		)
+	}
+	return fact.CloneV3(), nil
+}
+
 func (s *Store) InspectExactGovernedModelTurnProviderBoundaryV3(
 	ctx context.Context,
 	ref modelinvoker.GovernedModelTurnProviderBoundaryRefV3,

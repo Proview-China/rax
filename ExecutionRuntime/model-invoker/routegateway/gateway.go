@@ -74,20 +74,37 @@ func WithGovernedModelTurnsV2(dependencies GovernedModelTurnDependenciesV2) Opti
 	}
 }
 
+// WithGovernedModelTurnActualBoundaryV3 enables only the additive V3
+// pre-invoke reference path. It does not alter V1/V2, write a new Provider
+// boundary, or make direct Invoke governed.
+func WithGovernedModelTurnActualBoundaryV3(
+	dependencies GovernedModelTurnActualBoundaryDependenciesV3,
+) Option {
+	return func(gateway *Gateway) error {
+		if err := dependencies.validate(); err != nil {
+			return err
+		}
+		copy := dependencies
+		gateway.governedTurnActualBoundaryV3 = &copy
+		return nil
+	}
+}
+
 type Gateway struct {
-	catalog                   *catalog.Catalog
-	policy                    *modelinvoker.RouteInvoker
-	bindings                  RuntimeBindingResolver
-	secrets                   SecretResolver
-	factories                 *FactoryRegistry
-	pool                      *adapterPool
-	now                       func() time.Time
-	httpClient                *http.Client
-	subscriptionAuthorization modelinvoker.SubscriptionAuthorizationResolver
-	governedV1                *GovernedModelInvocationDependenciesV1
-	governedTurnV2            *GovernedModelTurnDependenciesV2
-	closeOnce                 sync.Once
-	closeErr                  error
+	catalog                      *catalog.Catalog
+	policy                       *modelinvoker.RouteInvoker
+	bindings                     RuntimeBindingResolver
+	secrets                      SecretResolver
+	factories                    *FactoryRegistry
+	pool                         *adapterPool
+	now                          func() time.Time
+	httpClient                   *http.Client
+	subscriptionAuthorization    modelinvoker.SubscriptionAuthorizationResolver
+	governedV1                   *GovernedModelInvocationDependenciesV1
+	governedTurnV2               *GovernedModelTurnDependenciesV2
+	governedTurnActualBoundaryV3 *GovernedModelTurnActualBoundaryDependenciesV3
+	closeOnce                    sync.Once
+	closeErr                     error
 }
 
 func New(routeCatalog *catalog.Catalog, bindings RuntimeBindingResolver, secrets SecretResolver, factories *FactoryRegistry, options ...Option) (*Gateway, error) {

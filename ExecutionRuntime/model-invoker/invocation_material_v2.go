@@ -159,6 +159,12 @@ func SealInvocationMaterialAuthorizationV2(a InvocationMaterialAuthorizationV2) 
 	return a, a.Validate()
 }
 
+type invocationMaterialAuthorizationClosureV3 struct {
+	authorization InvocationMaterialAuthorizationV2
+	contextPair   InvocationMaterialContextPairProjectionV2
+	toolPair      InvocationMaterialToolPairProjectionV2
+}
+
 func (a *InvocationMaterialAuthorizerV2) authorizeV2(
 	ctx context.Context,
 	prepared PreparedModelInvocationFactV1,
@@ -167,23 +173,50 @@ func (a *InvocationMaterialAuthorizerV2) authorizeV2(
 	expected InvocationMaterialExactClosureV2,
 	now time.Time,
 ) (InvocationMaterialAuthorizationV2, error) {
+	closure, err := a.authorizeClosureV3(
+		ctx,
+		prepared,
+		current,
+		call,
+		expected,
+		now,
+	)
+	if err != nil {
+		return InvocationMaterialAuthorizationV2{}, err
+	}
+	return closure.authorization, nil
+}
+
+// authorizeClosureV3 derives the authorization and the complete Context/Tool
+// projections from the same authoritative reads. Its compatibility wrapper
+// above preserves the V2 contract while V3 S1/S2 callers can freeze the exact
+// source bodies without a second-read TOCTOU window.
+func (a *InvocationMaterialAuthorizerV2) authorizeClosureV3(
+	ctx context.Context,
+	prepared PreparedModelInvocationFactV1,
+	current PreparedModelInvocationCurrentProjectionV1,
+	call RouteCall,
+	expected InvocationMaterialExactClosureV2,
+	now time.Time,
+) (invocationMaterialAuthorizationClosureV3, error) {
+	var closure invocationMaterialAuthorizationClosureV3
 	if a == nil || ctx == nil || ctx.Err() != nil || now.IsZero() ||
 		expected.ValidateAgainstPreparedV2(prepared) != nil ||
 		current.ValidateAgainstFact(prepared) != nil ||
 		current.ValidateCurrent(current.Ref(), now) != nil {
-		return InvocationMaterialAuthorizationV2{}, governedInvalidV1("invocation material V2 Authorizer input is invalid")
+		return closure, governedInvalidV1("invocation material V2 Authorizer input is invalid")
 	}
 	contextDigest, err := DigestGovernedModelTurnContextV2(call)
 	if err != nil {
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
 	requestToolsDigest, err := DigestGovernedModelTurnRequestToolsV2(call)
 	if err != nil {
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
 	if contextDigest != expected.SourceLineage.ContextMappedInputDigest ||
 		requestToolsDigest != expected.SourceLineage.RequestToolsDigest {
-		return InvocationMaterialAuthorizationV2{}, governedConflictV1("RouteCall bytes differ from expected source lineage")
+		return closure, governedConflictV1("RouteCall bytes differ from expected source lineage")
 	}
 	contextPair, err := a.config.ContextPair.InspectExactInvocationContextPairV2(
 		ctx,
@@ -192,7 +225,7 @@ func (a *InvocationMaterialAuthorizerV2) authorizeV2(
 		contextDigest,
 	)
 	if err != nil {
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
 	if err := contextPair.ValidateCurrentV2(
 		expected.SourceLineage.ContextFrame,
@@ -200,7 +233,7 @@ func (a *InvocationMaterialAuthorizerV2) authorizeV2(
 		contextDigest,
 		now,
 	); err != nil {
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
 	toolPair, err := a.config.ToolPair.InspectExactInvocationToolPairV2(
 		ctx,
@@ -209,7 +242,7 @@ func (a *InvocationMaterialAuthorizerV2) authorizeV2(
 		requestToolsDigest,
 	)
 	if err != nil {
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
 	if err := toolPair.ValidateCurrentV2(
 		expected.SourceLineage.ToolInjectionMaterial,
@@ -219,28 +252,28 @@ func (a *InvocationMaterialAuthorizerV2) authorizeV2(
 		requestToolsDigest,
 		now,
 	); err != nil {
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
 	provider, err := a.config.ProviderInjection.InspectExactInvocationProviderInjectionV1(ctx, expected.ProviderInjection)
 	if err != nil || provider.ValidateCurrentV1(expected.ProviderInjection, now) != nil {
 		if err == nil {
 			err = governedConflictV1("invocation material V2 ProviderInjection source is not current")
 		}
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
 	route, err := a.config.Route.InspectExactInvocationRouteV1(ctx, expected.Route)
 	if err != nil || route.ValidateCurrentV1(expected.Route, now) != nil {
 		if err == nil {
 			err = governedConflictV1("invocation material V2 Route source is not current")
 		}
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
 	profile, err := a.config.Profile.InspectExactInvocationProfileV1(ctx, expected.Profile)
 	if err != nil || profile.ValidateCurrentV1(expected.Profile, now) != nil {
 		if err == nil {
 			err = governedConflictV1("invocation material V2 Profile source is not current")
 		}
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
 	observed, err := SealInvocationMaterialSourceLineageV2(InvocationMaterialSourceLineageV2{
 		ContextFrame:             contextPair.ContextFrame,
@@ -255,13 +288,13 @@ func (a *InvocationMaterialAuthorizerV2) authorizeV2(
 	if err != nil || observed != expected.SourceLineage ||
 		provider.Ref != expected.ProviderInjection ||
 		route.Ref != expected.Route || profile.Ref != expected.Profile {
-		return InvocationMaterialAuthorizationV2{}, governedConflictV1("invocation material V2 exact Owner readers drifted")
+		return closure, governedConflictV1("invocation material V2 exact Owner readers drifted")
 	}
 	routeCallDigest, err := DigestGovernedModelTurnRouteCallV2(call)
 	if err != nil {
-		return InvocationMaterialAuthorizationV2{}, err
+		return closure, err
 	}
-	return SealInvocationMaterialAuthorizationV2(InvocationMaterialAuthorizationV2{
+	authorization, err := SealInvocationMaterialAuthorizationV2(InvocationMaterialAuthorizationV2{
 		PreparedRef:          prepared.Ref(),
 		CurrentRef:           current.Ref(),
 		RouteCallDigest:      routeCallDigest,
@@ -280,6 +313,15 @@ func (a *InvocationMaterialAuthorizerV2) authorizeV2(
 			profile.ExpiresUnixNano,
 		),
 	})
+	if err != nil {
+		return closure, err
+	}
+	closure = invocationMaterialAuthorizationClosureV3{
+		authorization: authorization,
+		contextPair:   contextPair,
+		toolPair:      toolPair,
+	}
+	return closure, nil
 }
 
 type InvocationMaterialRefV2 struct {
