@@ -53,7 +53,7 @@ func (c WorkspaceReadCommandV1) ValidateShape() error {
 	if err := c.Meta.ValidateShape(); err != nil {
 		return err
 	}
-	if strings.TrimSpace(c.TenantID) == "" || c.SourceToolCommand.ValidateShape("source Tool command") != nil || strings.TrimSpace(c.SourceToolPayloadSchema) == "" || !ValidDigest(c.SourceToolPayloadDigest) || c.SourceToolPayloadRevision == 0 || c.WorkspaceView.ValidateShape("workspace view") != nil || !ValidDigest(c.FileScopeDigest) || ValidateLogicalPath(c.RelativePath) != nil || c.MaxBytes == 0 || c.MaxBytes > WorkspaceReadMaxBytesV1 || c.RequestedNotAfterUnixNano <= 0 || c.RequestedNotAfterUnixNano > c.Meta.ExpiresUnixNano {
+	if strings.TrimSpace(c.TenantID) == "" || c.SourceToolCommand.ValidateShape("source Tool command") != nil || strings.TrimSpace(c.SourceToolPayloadSchema) == "" || !ValidDigest(c.SourceToolPayloadDigest) || c.SourceToolPayloadRevision == 0 || c.WorkspaceView.ValidateShape("workspace view") != nil || !ValidDigest(c.FileScopeDigest) || ValidateLogicalPath(c.RelativePath) != nil || c.MaxBytes == 0 || c.MaxBytes > WorkspaceReadMaxBytesV1 || c.RequestedNotAfterUnixNano <= 0 || c.Meta.ExpiresUnixNano > c.RequestedNotAfterUnixNano {
 		return errors.New("workspace read command coordinates are incomplete")
 	}
 	if c.ExpectedFileRef != nil && c.ExpectedFileRef.ValidateShape("expected file") != nil {

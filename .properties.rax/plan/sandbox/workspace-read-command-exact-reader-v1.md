@@ -12,7 +12,14 @@
 7. 增加过期后历史读取、重启、64并发、typed nil/context、Unavailable、
    Ref/body/digest/Created/Updated canonical splice、legacy migration、事务
    rollback与零写/零Provider证明；
-8. 运行 focused ordinary×100、race×20、Sandbox full ordinary/race、
+8. 冻结 Command TTL 为 `Meta.Expires <= RequestedNotAfter`，覆盖 equal、
+   Meta earlier、Meta later Conflict、两个 exact expiry、owner clock rollback，
+   并证明旧方向的不安全持久 Fact 只读 Fail Closed 且零 reseal/backfill；
+9. 以 public Physical Executor 的 owner-local fake actual 纵切证明
+   `Meta < Requested == Runtime Unified` 可创建 Admission/Reservation、
+   Effective TTL 精确取 Meta，Meta exact boundary 后零 actual-point 重入；
+   同时保留 `Requested > Runtime Unified` 的 admission 前拒绝；
+10. 运行 focused ordinary×100、race×20、Sandbox full ordinary/race、
    `go vet`、import boundary 与 `git diff --check`。
 
 ## 产物与非目标
