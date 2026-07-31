@@ -136,6 +136,16 @@ type GovernedModelTurnProviderBoundaryRepositoryV3 interface {
 	) (GovernedModelTurnProviderBoundaryFactV3, error)
 }
 
+// GovernedModelTurnProviderBoundaryTurnAttemptReaderV3 exposes the immutable
+// winner for an original V3 Turn attempt. It lets a physical gateway reject a
+// replay before resolving credentials or preparing a Provider adapter.
+type GovernedModelTurnProviderBoundaryTurnAttemptReaderV3 interface {
+	InspectGovernedModelTurnProviderBoundaryTurnAttemptV3(
+		context.Context,
+		GovernedModelTurnAttemptRefV3,
+	) (GovernedModelTurnProviderBoundaryFactV3, error)
+}
+
 func GovernedModelTurnProviderBoundaryOwnerV3() core.OwnerRef {
 	return core.OwnerRef{
 		Domain: governedModelTurnProviderBoundaryOwnerDomainV3,
@@ -321,7 +331,7 @@ func DeriveGovernedModelTurnProviderBoundaryRefV3(
 			"governed model turn provider boundary V3 lineage drifted",
 		)
 	}
-	if err := validateRuntimeRequestWithoutBoundaryV3(request); err != nil {
+	if err := ValidateModelProviderActualPointRequestDraftV3(request); err != nil {
 		return GovernedModelTurnProviderBoundaryRefV3{}, err
 	}
 	operationDigest, err := request.Operation.DigestV3()
@@ -422,9 +432,9 @@ func BuildGovernedModelTurnProviderBoundaryFactV3(
 	if err != nil {
 		return GovernedModelTurnProviderBoundaryFactV3{}, err
 	}
-	if turn.RefV3() != draft.TurnRef {
+	if turn.Validate() != nil || turn.RefV3() != draft.TurnRef {
 		return GovernedModelTurnProviderBoundaryFactV3{}, governedConflictV1(
-			"governed model turn provider boundary V3 Turn exact Reader drifted",
+			"governed model turn provider boundary V3 Turn exact Reader returned invalid or drifted content",
 		)
 	}
 	if _, err := validateCurrentGovernedModelTurnWinnerV3(
@@ -690,7 +700,10 @@ func validateGovernedModelTurnProviderBoundaryLineageV3(
 	return nil
 }
 
-func validateRuntimeRequestWithoutBoundaryV3(
+// ValidateModelProviderActualPointRequestDraftV3 validates every Runtime
+// actual-point coordinate that exists before Model derives ModelBoundary. It
+// performs no reads and does not grant dispatch authority.
+func ValidateModelProviderActualPointRequestDraftV3(
 	request runtimeports.InspectCurrentModelProviderActualPointRequestV1,
 ) error {
 	boundary := request.ModelBoundary

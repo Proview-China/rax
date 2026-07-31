@@ -40,7 +40,8 @@ type adapterLease struct {
 	entry    *poolEntry
 	provider modelinvoker.Provider
 	endpoint string
-	once     sync.Once
+	mu       sync.Mutex
+	released bool
 	err      error
 }
 
@@ -171,26 +172,57 @@ func (l *adapterLease) release() error {
 	if l == nil {
 		return nil
 	}
-	l.once.Do(func() {
-		p, entry := l.pool, l.entry
-		if p == nil || entry == nil {
-			return
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.err = errors.Join(l.err, l.transitionLocked(false))
+	return l.err
+}
+
+// retire prevents a reversibly prepared adapter from being reused, then
+// releases this lease. The closer still runs exactly once when the final
+// outstanding reference is released.
+func (l *adapterLease) retire() error {
+	if l == nil {
+		return nil
+	}
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.err = errors.Join(l.err, l.transitionLocked(true))
+	return l.err
+}
+
+// transitionLocked makes release and retirement commutative for one lease.
+// A prior release may leave an idle reusable entry open; a later retirement
+// must still mark it stale and close it exactly once. l.mu serializes the
+// closer and its error so concurrent terminal calls observe the same result.
+func (l *adapterLease) transitionLocked(retire bool) error {
+	p, entry := l.pool, l.entry
+	if p == nil || entry == nil {
+		return nil
+	}
+	var closer io.Closer
+	p.mu.Lock()
+	if retire {
+		entry.stale = true
+		if p.entries[entry.key] == entry {
+			delete(p.entries, entry.key)
 		}
-		var closer io.Closer
-		p.mu.Lock()
+	}
+	if !l.released {
 		if entry.refs > 0 {
 			entry.refs--
 		}
-		if entry.refs == 0 && (entry.stale || p.closed) && !entry.closed {
-			entry.closed = true
-			closer = entry.closer
-		}
-		p.mu.Unlock()
-		if closer != nil {
-			l.err = closeAll([]io.Closer{closer})
-		}
-	})
-	return l.err
+		l.released = true
+	}
+	if entry.refs == 0 && (entry.stale || p.closed) && !entry.closed {
+		entry.closed = true
+		closer = entry.closer
+	}
+	p.mu.Unlock()
+	if closer == nil {
+		return nil
+	}
+	return closeAll([]io.Closer{closer})
 }
 
 func (p *adapterPool) close() error {
