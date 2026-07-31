@@ -97,7 +97,8 @@ func TestWorkspaceReadCommandExactReaderV1V17MigrationDoesNotSelfSealLegacyBody(
 	}
 	if _, err = store.db.ExecContext(
 		ctx,
-		`DROP TABLE workspace_read_command_body_seal`,
+		`DROP TABLE workspace_read_command_body_seal;
+		 DROP TABLE workspace_read_runtime_attempt_admission_binding_v2`,
 	); err != nil {
 		t.Fatal(err)
 	}

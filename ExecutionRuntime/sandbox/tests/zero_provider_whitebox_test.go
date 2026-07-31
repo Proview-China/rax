@@ -96,7 +96,11 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 		hostRoot := strings.HasPrefix(relative, "hostroot"+string(filepath.Separator))
 		statePlaneAdapter := strings.HasPrefix(relative, filepath.Join("storage", "sqlite")+string(filepath.Separator))
 		workspaceDriver := strings.HasPrefix(relative, "workspacefs"+string(filepath.Separator))
-		workspaceReadRuntimeEntry := relative == filepath.Join("kernel", "workspace_read_v1.go") || relative == filepath.Join("ports", "workspace_read_v1.go") || relative == filepath.Join("ports", "workspace_read_current_v1.go")
+		workspaceReadRuntimeEntry := relative == filepath.Join("kernel", "workspace_read_v1.go") ||
+			relative == filepath.Join("ports", "workspace_read_v1.go") ||
+			relative == filepath.Join("ports", "workspace_read_current_v1.go") ||
+			relative == filepath.Join("ports", "workspace_read_admission_attempt_binding_v2.go") ||
+			relative == filepath.Join("internal", "owner", "workspaceread", "authorized_reservation_v2.go")
 		if relative, _ := filepath.Rel(root, path); strings.HasPrefix(relative, "runtimeadapter"+string(filepath.Separator)) {
 			payload, err := os.ReadFile(path)
 			if err != nil {

@@ -11,6 +11,7 @@ import (
 	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
+	ownerworkspaceread "github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/owner/workspaceread"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
 
@@ -76,22 +77,40 @@ type WorkspaceReadActualPointResultV1 struct {
 	ProviderReceipt   contract.WorkspaceReadReceiptBindingV1
 }
 
+// workspaceReadAuthorizedOwnerStoreV2 is an internal Sandbox composition seam.
+// It is intentionally absent from public ports: only the Sandbox kernel may
+// submit the complete Runtime authorization that lets SQLite construct the V2
+// historical Owner fact.
+type workspaceReadAuthorizedOwnerStoreV2 interface {
+	sandboxports.WorkspaceReadOwnerStoreV1
+	sandboxports.WorkspaceReadRuntimeAttemptAdmissionReaderV2
+	ReserveWorkspaceReadAuthorizedV2(
+		context.Context,
+		ownerworkspaceread.AuthorizedReservationV2,
+	) (contract.WorkspaceReadExecutionProjectionV1, bool, error)
+}
+
 type WorkspaceReadPhysicalExecutorV1 struct {
-	commands       sandboxports.WorkspaceReadCommandCurrentReaderV1
-	associations   runtimeports.PreparedDomainCommandAssociationCurrentReaderV1
-	workspaces     sandboxports.WorkspaceCurrentReaderV1
-	sandboxCurrent runtimeports.OperationDispatchSandboxCurrentReaderV4
-	enforcement    runtimeports.OperationDispatchEnforcementGovernancePortV4
-	store          sandboxports.WorkspaceReadOwnerStoreV1
-	actualPoint    WorkspaceReadActualPointV1
-	clock          func() time.Time
+	commands        sandboxports.WorkspaceReadCommandCurrentReaderV1
+	associations    runtimeports.PreparedDomainCommandAssociationCurrentReaderV1
+	workspaces      sandboxports.WorkspaceCurrentReaderV1
+	sandboxCurrent  runtimeports.OperationDispatchSandboxCurrentReaderV4
+	enforcement     runtimeports.OperationDispatchEnforcementGovernancePortV4
+	store           sandboxports.WorkspaceReadOwnerStoreV1
+	authorizedStore workspaceReadAuthorizedOwnerStoreV2
+	actualPoint     WorkspaceReadActualPointV1
+	clock           func() time.Time
 }
 
 func NewWorkspaceReadPhysicalExecutorV1(commands sandboxports.WorkspaceReadCommandCurrentReaderV1, associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1, workspaces sandboxports.WorkspaceCurrentReaderV1, sandboxCurrent runtimeports.OperationDispatchSandboxCurrentReaderV4, enforcement runtimeports.OperationDispatchEnforcementGovernancePortV4, store sandboxports.WorkspaceReadOwnerStoreV1, actualPoint WorkspaceReadActualPointV1, clock func() time.Time) (*WorkspaceReadPhysicalExecutorV1, error) {
 	if commands == nil || associations == nil || workspaces == nil || sandboxCurrent == nil || enforcement == nil || store == nil || actualPoint == nil || clock == nil {
 		return nil, runtimecore.NewError(runtimecore.ErrorInvalidArgument, runtimecore.ReasonInvalidReference, "workspace read physical executor dependencies are incomplete")
 	}
-	return &WorkspaceReadPhysicalExecutorV1{commands: commands, associations: associations, workspaces: workspaces, sandboxCurrent: sandboxCurrent, enforcement: enforcement, store: store, actualPoint: actualPoint, clock: clock}, nil
+	authorizedStore, ok := store.(workspaceReadAuthorizedOwnerStoreV2)
+	if !ok || nilLikeWorkspaceReadInspectionV2(authorizedStore) {
+		return nil, runtimecore.NewError(runtimecore.ErrorInvalidArgument, runtimecore.ReasonInvalidReference, "workspace read Runtime-attempt history store is incomplete")
+	}
+	return &WorkspaceReadPhysicalExecutorV1{commands: commands, associations: associations, workspaces: workspaces, sandboxCurrent: sandboxCurrent, enforcement: enforcement, store: store, authorizedStore: authorizedStore, actualPoint: actualPoint, clock: clock}, nil
 }
 
 func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(ctx context.Context, authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) (runtimeports.ControlledOperationProviderAdmissionReceiptRefV2, error) {
@@ -187,7 +206,18 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 	if err != nil {
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
-	projection, created, err := e.store.ReserveWorkspaceReadV1(ctx, reservation, attempt, handoff)
+	authorizedStore := e.authorizedStore
+	if authorizedStore == nil {
+		authorizedStore, _ = e.store.(workspaceReadAuthorizedOwnerStoreV2)
+	}
+	if nilLikeWorkspaceReadInspectionV2(authorizedStore) {
+		return receipt, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read Runtime-attempt history store is unavailable")
+	}
+	ownerRequest, err := ownerworkspaceread.NewAuthorizedReservationV2(reservation, attempt, handoff, authorization, s1)
+	if err != nil {
+		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
+	}
+	projection, created, err := authorizedStore.ReserveWorkspaceReadAuthorizedV2(ctx, ownerRequest)
 	if err != nil {
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
@@ -405,6 +435,17 @@ func (e *WorkspaceReadPhysicalExecutorV1) InspectWorkspaceReadAttemptForAdmissio
 	return e.store.InspectWorkspaceReadAttemptForAdmissionV1(ctx, receipt)
 }
 
+func (e *WorkspaceReadPhysicalExecutorV1) InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx context.Context, attempt runtimeports.OperationDispatchAttemptRefV3) (sandboxports.WorkspaceReadAdmissionAttemptBindingV2, error) {
+	if e == nil || e.store == nil {
+		return sandboxports.WorkspaceReadAdmissionAttemptBindingV2{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read Runtime-attempt Inspect is unavailable")
+	}
+	reader, ok := e.store.(sandboxports.WorkspaceReadRuntimeAttemptAdmissionReaderV2)
+	if !ok || nilLikeWorkspaceReadInspectionV2(reader) {
+		return sandboxports.WorkspaceReadAdmissionAttemptBindingV2{}, runtimecore.NewError(runtimecore.ErrorUnavailable, runtimecore.ReasonComponentMissing, "workspace read Runtime-attempt reader is unavailable")
+	}
+	return reader.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, attempt)
+}
+
 func (e *WorkspaceReadPhysicalExecutorV1) readCurrentClosureV1(ctx context.Context, authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) (runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1, contract.WorkspaceReadCommandV1, contract.WorkspaceView, time.Time, error) {
 	now := e.clock()
 	if err := authorization.ValidateCurrent(now); err != nil {
@@ -575,4 +616,5 @@ func nilLikeWorkspaceReadInspectionV2(value any) bool {
 
 var _ sandboxports.WorkspaceReadExecutionPortV1 = (*WorkspaceReadPhysicalExecutorV1)(nil)
 var _ sandboxports.WorkspaceReadExecutionPortV2 = (*WorkspaceReadPhysicalExecutorV1)(nil)
+var _ sandboxports.WorkspaceReadExecutionPortV3 = (*WorkspaceReadPhysicalExecutorV1)(nil)
 var _ sandboxports.WorkspaceReadCommandExactReaderV1 = (*WorkspaceReadPhysicalExecutorV1)(nil)

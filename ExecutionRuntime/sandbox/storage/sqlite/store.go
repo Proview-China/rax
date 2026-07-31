@@ -22,7 +22,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 17
+const schemaVersion = 18
 
 type Store struct {
 	db                            *sql.DB
@@ -89,12 +89,18 @@ func (s *Store) initialize(ctx context.Context) error {
 		return fmt.Errorf("begin Sandbox SQLite schema transaction: %w", err)
 	}
 	defer tx.Rollback()
+	if err := preflightWorkspaceReadRuntimeAttemptBindingMigrationV2(ctx, tx, version); err != nil {
+		return err
+	}
 	for _, statement := range schemaStatements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create Sandbox SQLite schema: %w", err)
 		}
 	}
 	if err := verifyWorkspaceReadCommandBodySealSchemaV1(ctx, tx); err != nil {
+		return err
+	}
+	if err := verifyWorkspaceReadRuntimeAttemptBindingSchemaV2(ctx, tx); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
@@ -258,6 +264,32 @@ var schemaStatements = []string{
 		body BLOB NOT NULL,
 		PRIMARY KEY(admission_id,admission_revision,admission_digest),
 		UNIQUE(attempt_id,attempt_revision,attempt_digest))`,
+	`CREATE TABLE IF NOT EXISTS workspace_read_runtime_attempt_admission_binding_v2 (
+		runtime_attempt_digest TEXT NOT NULL PRIMARY KEY,
+		operation_digest TEXT NOT NULL, effect_id TEXT NOT NULL,
+		intent_revision INTEGER NOT NULL, intent_digest TEXT NOT NULL,
+		permit_id TEXT NOT NULL, permit_revision INTEGER NOT NULL, permit_digest TEXT NOT NULL,
+		runtime_attempt_id TEXT NOT NULL,
+		delegation_present INTEGER NOT NULL, delegation_id TEXT NOT NULL,
+		delegation_revision INTEGER NOT NULL, delegation_digest TEXT NOT NULL,
+		authorization_digest TEXT NOT NULL,
+		association_id TEXT NOT NULL, association_revision INTEGER NOT NULL, association_digest TEXT NOT NULL,
+		domain_command_id TEXT NOT NULL, domain_command_revision INTEGER NOT NULL, domain_command_digest TEXT NOT NULL,
+		command_id TEXT NOT NULL, command_revision INTEGER NOT NULL, command_digest TEXT NOT NULL,
+		admission_id TEXT NOT NULL, admission_revision INTEGER NOT NULL, admission_digest TEXT NOT NULL,
+		workspace_attempt_id TEXT NOT NULL, workspace_attempt_revision INTEGER NOT NULL,
+		workspace_attempt_digest TEXT NOT NULL, binding_digest TEXT NOT NULL, body BLOB NOT NULL)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_attempt_identity_v2
+		ON workspace_read_runtime_attempt_admission_binding_v2(
+			operation_digest,effect_id,intent_revision,intent_digest,
+			permit_id,permit_revision,permit_digest,runtime_attempt_id,
+			delegation_present,delegation_id,delegation_revision,delegation_digest)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_admission_identity_v2
+		ON workspace_read_runtime_attempt_admission_binding_v2(
+			admission_id,admission_revision,admission_digest)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_workspace_attempt_identity_v2
+		ON workspace_read_runtime_attempt_admission_binding_v2(
+			workspace_attempt_id,workspace_attempt_revision,workspace_attempt_digest)`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_attempt_owner_incarnation (
 		attempt_id TEXT PRIMARY KEY, owner_incarnation_id TEXT NOT NULL, reserved_unix_nano INTEGER NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_recovery_evidence (
@@ -338,6 +370,301 @@ func verifyWorkspaceReadCommandBodySealSchemaV1(ctx context.Context, tx *sql.Tx)
 	}
 	if index != len(expected) {
 		return errors.New("workspace read Command body seal schema is incomplete")
+	}
+	return nil
+}
+
+func preflightWorkspaceReadRuntimeAttemptBindingMigrationV2(ctx context.Context, tx *sql.Tx, version int) error {
+	if version >= 18 {
+		if err := verifyWorkspaceReadRuntimeAttemptBindingSchemaV2(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v18 workspace read Runtime-attempt schema drifted: %v", ports.ErrConflict, err)
+		}
+		return nil
+	}
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT type,name FROM sqlite_master
+		  WHERE name LIKE 'workspace_read_runtime_%'
+		  ORDER BY type,name`,
+	)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Runtime-attempt migration namespace: %w", err)
+	}
+	defer rows.Close()
+	var objects []string
+	for rows.Next() {
+		var kind, name string
+		if err := rows.Scan(&kind, &name); err != nil {
+			return fmt.Errorf("decode workspace read Runtime-attempt migration namespace: %w", err)
+		}
+		objects = append(objects, kind+":"+name)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect workspace read Runtime-attempt migration namespace rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Runtime-attempt migration namespace rows: %w", err)
+	}
+	if len(objects) != 0 {
+		return fmt.Errorf("%w: workspace read Runtime-attempt migration namespace is partial without a v18 ledger: %v", ports.ErrConflict, objects)
+	}
+	return nil
+}
+
+func verifyWorkspaceReadRuntimeAttemptBindingSchemaV2(ctx context.Context, tx *sql.Tx) error {
+	if ctx == nil || tx == nil {
+		return errors.New("verify workspace read Runtime-attempt binding schema requires context and transaction")
+	}
+	rows, err := tx.QueryContext(ctx, `PRAGMA table_xinfo(workspace_read_runtime_attempt_admission_binding_v2)`)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Runtime-attempt binding schema: %w", err)
+	}
+	defer rows.Close()
+	expected := []struct {
+		name       string
+		kind       string
+		primaryKey int
+	}{
+		{name: "runtime_attempt_digest", kind: "TEXT", primaryKey: 1},
+		{name: "operation_digest", kind: "TEXT"},
+		{name: "effect_id", kind: "TEXT"},
+		{name: "intent_revision", kind: "INTEGER"},
+		{name: "intent_digest", kind: "TEXT"},
+		{name: "permit_id", kind: "TEXT"},
+		{name: "permit_revision", kind: "INTEGER"},
+		{name: "permit_digest", kind: "TEXT"},
+		{name: "runtime_attempt_id", kind: "TEXT"},
+		{name: "delegation_present", kind: "INTEGER"},
+		{name: "delegation_id", kind: "TEXT"},
+		{name: "delegation_revision", kind: "INTEGER"},
+		{name: "delegation_digest", kind: "TEXT"},
+		{name: "authorization_digest", kind: "TEXT"},
+		{name: "association_id", kind: "TEXT"},
+		{name: "association_revision", kind: "INTEGER"},
+		{name: "association_digest", kind: "TEXT"},
+		{name: "domain_command_id", kind: "TEXT"},
+		{name: "domain_command_revision", kind: "INTEGER"},
+		{name: "domain_command_digest", kind: "TEXT"},
+		{name: "command_id", kind: "TEXT"},
+		{name: "command_revision", kind: "INTEGER"},
+		{name: "command_digest", kind: "TEXT"},
+		{name: "admission_id", kind: "TEXT"},
+		{name: "admission_revision", kind: "INTEGER"},
+		{name: "admission_digest", kind: "TEXT"},
+		{name: "workspace_attempt_id", kind: "TEXT"},
+		{name: "workspace_attempt_revision", kind: "INTEGER"},
+		{name: "workspace_attempt_digest", kind: "TEXT"},
+		{name: "binding_digest", kind: "TEXT"},
+		{name: "body", kind: "BLOB"},
+	}
+	index := 0
+	for rows.Next() {
+		var (
+			columnID    int
+			name        string
+			kind        string
+			notNull     int
+			defaultBody sql.NullString
+			primaryKey  int
+			hidden      int
+		)
+		if err := rows.Scan(&columnID, &name, &kind, &notNull, &defaultBody, &primaryKey, &hidden); err != nil {
+			return fmt.Errorf("decode workspace read Runtime-attempt binding schema: %w", err)
+		}
+		if index >= len(expected) ||
+			columnID != index ||
+			name != expected[index].name ||
+			kind != expected[index].kind ||
+			notNull != 1 ||
+			primaryKey != expected[index].primaryKey ||
+			hidden != 0 ||
+			defaultBody.Valid {
+			return errors.New("workspace read Runtime-attempt binding schema is incompatible")
+		}
+		index++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect workspace read Runtime-attempt binding schema rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Runtime-attempt binding schema rows: %w", err)
+	}
+	if index != len(expected) {
+		return errors.New("workspace read Runtime-attempt binding schema is incomplete")
+	}
+	if err := verifyWorkspaceReadRuntimeAttemptBindingNamespaceV2(ctx, tx); err != nil {
+		return err
+	}
+	return verifyWorkspaceReadRuntimeAttemptBindingIndexesV2(ctx, tx)
+}
+
+func verifyWorkspaceReadRuntimeAttemptBindingNamespaceV2(ctx context.Context, tx *sql.Tx) error {
+	const table = "workspace_read_runtime_attempt_admission_binding_v2"
+	expected := map[string]string{
+		"table:" + table:                                             table,
+		"index:sqlite_autoindex_" + table + "_1":                     table,
+		"index:workspace_read_runtime_attempt_identity_v2":           table,
+		"index:workspace_read_runtime_admission_identity_v2":         table,
+		"index:workspace_read_runtime_workspace_attempt_identity_v2": table,
+	}
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT type,name,tbl_name FROM sqlite_master
+		  WHERE name LIKE 'workspace_read_runtime_%' OR tbl_name=?
+		  ORDER BY type,name`,
+		table,
+	)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Runtime-attempt namespace: %w", err)
+	}
+	defer rows.Close()
+	found := make(map[string]string, len(expected))
+	for rows.Next() {
+		var kind, name, tableName string
+		if err := rows.Scan(&kind, &name, &tableName); err != nil {
+			return fmt.Errorf("decode workspace read Runtime-attempt namespace: %w", err)
+		}
+		key := kind + ":" + name
+		if expected[key] != tableName {
+			return errors.New("workspace read Runtime-attempt namespace contains an unexpected object")
+		}
+		found[key] = tableName
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect workspace read Runtime-attempt namespace rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Runtime-attempt namespace rows: %w", err)
+	}
+	if len(found) != len(expected) {
+		return errors.New("workspace read Runtime-attempt namespace is incomplete")
+	}
+	return nil
+}
+
+func verifyWorkspaceReadRuntimeAttemptBindingIndexesV2(ctx context.Context, tx *sql.Tx) error {
+	type indexExpectation struct {
+		sequence int
+		origin   string
+		columns  []string
+		cids     []int
+	}
+	expected := map[string]indexExpectation{
+		"workspace_read_runtime_attempt_identity_v2": {
+			sequence: 2,
+			origin:   "c",
+			columns: []string{
+				"operation_digest", "effect_id", "intent_revision", "intent_digest",
+				"permit_id", "permit_revision", "permit_digest", "runtime_attempt_id",
+				"delegation_present", "delegation_id", "delegation_revision", "delegation_digest",
+			},
+			cids: []int{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12},
+		},
+		"workspace_read_runtime_admission_identity_v2": {
+			sequence: 1,
+			origin:   "c",
+			columns:  []string{"admission_id", "admission_revision", "admission_digest"},
+			cids:     []int{23, 24, 25},
+		},
+		"workspace_read_runtime_workspace_attempt_identity_v2": {
+			sequence: 0,
+			origin:   "c",
+			columns:  []string{"workspace_attempt_id", "workspace_attempt_revision", "workspace_attempt_digest"},
+			cids:     []int{26, 27, 28},
+		},
+		"sqlite_autoindex_workspace_read_runtime_attempt_admission_binding_v2_1": {
+			sequence: 3,
+			origin:   "pk",
+			columns:  []string{"runtime_attempt_digest"},
+			cids:     []int{0},
+		},
+	}
+	rows, err := tx.QueryContext(ctx, `PRAGMA index_list(workspace_read_runtime_attempt_admission_binding_v2)`)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Runtime-attempt binding indexes: %w", err)
+	}
+	found := make(map[string]bool, len(expected))
+	position := 0
+	for rows.Next() {
+		var sequence, unique, partial int
+		var name, origin string
+		if err := rows.Scan(&sequence, &name, &unique, &origin, &partial); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("decode workspace read Runtime-attempt binding index: %w", err)
+		}
+		expectation, ok := expected[name]
+		if !ok ||
+			sequence != position ||
+			sequence != expectation.sequence ||
+			unique != 1 ||
+			origin != expectation.origin ||
+			partial != 0 ||
+			found[name] {
+			_ = rows.Close()
+			return errors.New("workspace read Runtime-attempt binding index list is incompatible")
+		}
+		found[name] = true
+		position++
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("inspect workspace read Runtime-attempt binding index rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Runtime-attempt binding index rows: %w", err)
+	}
+	if position != len(expected) {
+		return errors.New("workspace read Runtime-attempt binding index list is incomplete")
+	}
+	for name, expectation := range expected {
+		if !found[name] {
+			return errors.New("workspace read Runtime-attempt binding unique index is missing")
+		}
+		indexRows, err := tx.QueryContext(ctx, `PRAGMA index_xinfo(`+name+`)`)
+		if err != nil {
+			return fmt.Errorf("inspect workspace read Runtime-attempt binding index columns: %w", err)
+		}
+		position := 0
+		for indexRows.Next() {
+			var sequence, columnID, descending, key int
+			var column, collation sql.NullString
+			if err := indexRows.Scan(&sequence, &columnID, &column, &descending, &collation, &key); err != nil {
+				_ = indexRows.Close()
+				return fmt.Errorf("decode workspace read Runtime-attempt binding index column: %w", err)
+			}
+			if sequence != position || descending != 0 || !collation.Valid || collation.String != "BINARY" {
+				_ = indexRows.Close()
+				return errors.New("workspace read Runtime-attempt binding index columns drifted")
+			}
+			if position < len(expectation.columns) {
+				if key != 1 ||
+					columnID != expectation.cids[position] ||
+					!column.Valid ||
+					column.String != expectation.columns[position] {
+					_ = indexRows.Close()
+					return errors.New("workspace read Runtime-attempt binding key columns drifted")
+				}
+			} else if position == len(expectation.columns) {
+				if key != 0 || columnID != -1 || column.Valid {
+					_ = indexRows.Close()
+					return errors.New("workspace read Runtime-attempt binding auxiliary index column drifted")
+				}
+			} else {
+				_ = indexRows.Close()
+				return errors.New("workspace read Runtime-attempt binding index has extra columns")
+			}
+			position++
+		}
+		if err := indexRows.Err(); err != nil {
+			_ = indexRows.Close()
+			return fmt.Errorf("inspect workspace read Runtime-attempt binding index column rows: %w", err)
+		}
+		if err := indexRows.Close(); err != nil {
+			return fmt.Errorf("close workspace read Runtime-attempt binding index column rows: %w", err)
+		}
+		if position != len(expectation.columns)+1 {
+			return errors.New("workspace read Runtime-attempt binding index columns are incomplete")
+		}
 	}
 	return nil
 }
