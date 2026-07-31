@@ -1,6 +1,6 @@
 # Workspace Read Admission Attempt Binding V2 Plan
 
-状态：`implemented-candidate / owner-local / uncommitted`。
+状态：`implemented-candidate / owner-local / PR #76 / 已提交未合并`。
 
 ## 文件落点
 
@@ -30,11 +30,14 @@
 - 64并发只读前后全部相关表count与canonical row hash不变；
 - V1-only actual path拒绝，Reader零Provider、零写；
 - v18 missing/extra/partial/NOCASE/lowercase-binary/index seq/key/aux/ledger
-  反例全部Fail Closed；
+  及完整`sqlite_master.sql`词法语义反例全部Fail Closed；
+- extra CHECK、extra FK、trigger与非索引列COLLATE漂移均返回Conflict且绝不repair；
+- V2历史exact binding过期后仍可读取，但不恢复current或execute资格，
+  physical read与recovery evidence增量均为零；
 - full ordinary、full race、vet与module verify通过。
 
 ## 剩余边界
 
 本计划只完成Sandbox owner-local历史恢复坐标。Tool consumer adapter、Runtime或
 Application composition、production Provider/root、跨Owner发布资格均不属于
-本切片，继续NO-GO。变更在联合审计前保持未提交。
+本切片，继续NO-GO。变更已发布至ready PR #76，等待独立返修复审，尚未合并。

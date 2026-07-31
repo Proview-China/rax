@@ -24,6 +24,35 @@ import (
 
 const schemaVersion = 18
 
+const (
+	workspaceReadRuntimeAttemptBindingTableDDLV2 = `CREATE TABLE IF NOT EXISTS workspace_read_runtime_attempt_admission_binding_v2 (
+		runtime_attempt_digest TEXT NOT NULL PRIMARY KEY,
+		operation_digest TEXT NOT NULL, effect_id TEXT NOT NULL,
+		intent_revision INTEGER NOT NULL, intent_digest TEXT NOT NULL,
+		permit_id TEXT NOT NULL, permit_revision INTEGER NOT NULL, permit_digest TEXT NOT NULL,
+		runtime_attempt_id TEXT NOT NULL,
+		delegation_present INTEGER NOT NULL, delegation_id TEXT NOT NULL,
+		delegation_revision INTEGER NOT NULL, delegation_digest TEXT NOT NULL,
+		authorization_digest TEXT NOT NULL,
+		association_id TEXT NOT NULL, association_revision INTEGER NOT NULL, association_digest TEXT NOT NULL,
+		domain_command_id TEXT NOT NULL, domain_command_revision INTEGER NOT NULL, domain_command_digest TEXT NOT NULL,
+		command_id TEXT NOT NULL, command_revision INTEGER NOT NULL, command_digest TEXT NOT NULL,
+		admission_id TEXT NOT NULL, admission_revision INTEGER NOT NULL, admission_digest TEXT NOT NULL,
+		workspace_attempt_id TEXT NOT NULL, workspace_attempt_revision INTEGER NOT NULL,
+		workspace_attempt_digest TEXT NOT NULL, binding_digest TEXT NOT NULL, body BLOB NOT NULL)`
+	workspaceReadRuntimeAttemptIdentityIndexDDLV2 = `CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_attempt_identity_v2
+		ON workspace_read_runtime_attempt_admission_binding_v2(
+			operation_digest,effect_id,intent_revision,intent_digest,
+			permit_id,permit_revision,permit_digest,runtime_attempt_id,
+			delegation_present,delegation_id,delegation_revision,delegation_digest)`
+	workspaceReadRuntimeAdmissionIdentityIndexDDLV2 = `CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_admission_identity_v2
+		ON workspace_read_runtime_attempt_admission_binding_v2(
+			admission_id,admission_revision,admission_digest)`
+	workspaceReadRuntimeWorkspaceAttemptIdentityIndexDDLV2 = `CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_workspace_attempt_identity_v2
+		ON workspace_read_runtime_attempt_admission_binding_v2(
+			workspace_attempt_id,workspace_attempt_revision,workspace_attempt_digest)`
+)
+
 type Store struct {
 	db                            *sql.DB
 	clock                         func() time.Time
@@ -264,32 +293,10 @@ var schemaStatements = []string{
 		body BLOB NOT NULL,
 		PRIMARY KEY(admission_id,admission_revision,admission_digest),
 		UNIQUE(attempt_id,attempt_revision,attempt_digest))`,
-	`CREATE TABLE IF NOT EXISTS workspace_read_runtime_attempt_admission_binding_v2 (
-		runtime_attempt_digest TEXT NOT NULL PRIMARY KEY,
-		operation_digest TEXT NOT NULL, effect_id TEXT NOT NULL,
-		intent_revision INTEGER NOT NULL, intent_digest TEXT NOT NULL,
-		permit_id TEXT NOT NULL, permit_revision INTEGER NOT NULL, permit_digest TEXT NOT NULL,
-		runtime_attempt_id TEXT NOT NULL,
-		delegation_present INTEGER NOT NULL, delegation_id TEXT NOT NULL,
-		delegation_revision INTEGER NOT NULL, delegation_digest TEXT NOT NULL,
-		authorization_digest TEXT NOT NULL,
-		association_id TEXT NOT NULL, association_revision INTEGER NOT NULL, association_digest TEXT NOT NULL,
-		domain_command_id TEXT NOT NULL, domain_command_revision INTEGER NOT NULL, domain_command_digest TEXT NOT NULL,
-		command_id TEXT NOT NULL, command_revision INTEGER NOT NULL, command_digest TEXT NOT NULL,
-		admission_id TEXT NOT NULL, admission_revision INTEGER NOT NULL, admission_digest TEXT NOT NULL,
-		workspace_attempt_id TEXT NOT NULL, workspace_attempt_revision INTEGER NOT NULL,
-		workspace_attempt_digest TEXT NOT NULL, binding_digest TEXT NOT NULL, body BLOB NOT NULL)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_attempt_identity_v2
-		ON workspace_read_runtime_attempt_admission_binding_v2(
-			operation_digest,effect_id,intent_revision,intent_digest,
-			permit_id,permit_revision,permit_digest,runtime_attempt_id,
-			delegation_present,delegation_id,delegation_revision,delegation_digest)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_admission_identity_v2
-		ON workspace_read_runtime_attempt_admission_binding_v2(
-			admission_id,admission_revision,admission_digest)`,
-	`CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_workspace_attempt_identity_v2
-		ON workspace_read_runtime_attempt_admission_binding_v2(
-			workspace_attempt_id,workspace_attempt_revision,workspace_attempt_digest)`,
+	workspaceReadRuntimeAttemptBindingTableDDLV2,
+	workspaceReadRuntimeAttemptIdentityIndexDDLV2,
+	workspaceReadRuntimeAdmissionIdentityIndexDDLV2,
+	workspaceReadRuntimeWorkspaceAttemptIdentityIndexDDLV2,
 	`CREATE TABLE IF NOT EXISTS workspace_read_attempt_owner_incarnation (
 		attempt_id TEXT PRIMARY KEY, owner_incarnation_id TEXT NOT NULL, reserved_unix_nano INTEGER NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_recovery_evidence (
@@ -495,7 +502,191 @@ func verifyWorkspaceReadRuntimeAttemptBindingSchemaV2(ctx context.Context, tx *s
 	if err := verifyWorkspaceReadRuntimeAttemptBindingNamespaceV2(ctx, tx); err != nil {
 		return err
 	}
+	if err := verifyWorkspaceReadRuntimeAttemptBindingDDLV2(ctx, tx); err != nil {
+		return err
+	}
 	return verifyWorkspaceReadRuntimeAttemptBindingIndexesV2(ctx, tx)
+}
+
+func verifyWorkspaceReadRuntimeAttemptBindingDDLV2(ctx context.Context, tx *sql.Tx) error {
+	type ddlExpectation struct {
+		kind      string
+		name      string
+		statement string
+	}
+	expected := []ddlExpectation{
+		{
+			kind:      "table",
+			name:      "workspace_read_runtime_attempt_admission_binding_v2",
+			statement: workspaceReadRuntimeAttemptBindingTableDDLV2,
+		},
+		{
+			kind:      "index",
+			name:      "workspace_read_runtime_attempt_identity_v2",
+			statement: workspaceReadRuntimeAttemptIdentityIndexDDLV2,
+		},
+		{
+			kind:      "index",
+			name:      "workspace_read_runtime_admission_identity_v2",
+			statement: workspaceReadRuntimeAdmissionIdentityIndexDDLV2,
+		},
+		{
+			kind:      "index",
+			name:      "workspace_read_runtime_workspace_attempt_identity_v2",
+			statement: workspaceReadRuntimeWorkspaceAttemptIdentityIndexDDLV2,
+		},
+		{
+			kind: "index",
+			name: "sqlite_autoindex_workspace_read_runtime_attempt_admission_binding_v2_1",
+		},
+	}
+	for _, expectation := range expected {
+		var (
+			kind      string
+			name      string
+			statement sql.NullString
+		)
+		if err := tx.QueryRowContext(
+			ctx,
+			`SELECT type,name,sql FROM sqlite_master WHERE type=? AND name=?`,
+			expectation.kind,
+			expectation.name,
+		).Scan(&kind, &name, &statement); err != nil {
+			return fmt.Errorf("inspect workspace read Runtime-attempt DDL %s: %w", expectation.name, err)
+		}
+		if kind != expectation.kind || name != expectation.name {
+			return errors.New("workspace read Runtime-attempt DDL identity drifted")
+		}
+		if expectation.statement == "" {
+			if statement.Valid {
+				return errors.New("workspace read Runtime-attempt implicit index unexpectedly has explicit DDL")
+			}
+			continue
+		}
+		if !statement.Valid {
+			return errors.New("workspace read Runtime-attempt DDL is missing")
+		}
+		actualTokens, err := canonicalSQLiteDDLTokensV2(statement.String)
+		if err != nil {
+			return fmt.Errorf("parse stored workspace read Runtime-attempt DDL %s: %w", expectation.name, err)
+		}
+		expectedTokens, err := canonicalSQLiteDDLTokensV2(expectation.statement)
+		if err != nil {
+			return fmt.Errorf("parse expected workspace read Runtime-attempt DDL %s: %w", expectation.name, err)
+		}
+		if !equalSQLiteDDLTokensV2(actualTokens, expectedTokens) {
+			return errors.New("workspace read Runtime-attempt DDL semantics drifted")
+		}
+	}
+	return nil
+}
+
+func canonicalSQLiteDDLTokensV2(statement string) ([]string, error) {
+	tokens := make([]string, 0, len(statement)/4)
+	for index := 0; index < len(statement); {
+		switch {
+		case isSQLiteDDLWhitespaceV2(statement[index]):
+			index++
+		case index+1 < len(statement) && statement[index:index+2] == "--":
+			index += 2
+			for index < len(statement) && statement[index] != '\n' && statement[index] != '\r' {
+				index++
+			}
+		case index+1 < len(statement) && statement[index:index+2] == "/*":
+			end := strings.Index(statement[index+2:], "*/")
+			if end < 0 {
+				return nil, errors.New("SQLite DDL contains an unterminated block comment")
+			}
+			index += end + 4
+		case statement[index] == '\'' || statement[index] == '"' || statement[index] == '`':
+			start := index
+			quote := statement[index]
+			index++
+			closed := false
+			for index < len(statement) {
+				if statement[index] != quote {
+					index++
+					continue
+				}
+				if index+1 < len(statement) && statement[index+1] == quote {
+					index += 2
+					continue
+				}
+				index++
+				closed = true
+				break
+			}
+			if !closed {
+				return nil, errors.New("SQLite DDL contains an unterminated quoted token")
+			}
+			tokens = append(tokens, "quoted:"+statement[start:index])
+		case statement[index] == '[':
+			start := index
+			index++
+			for index < len(statement) && statement[index] != ']' {
+				index++
+			}
+			if index == len(statement) {
+				return nil, errors.New("SQLite DDL contains an unterminated bracketed identifier")
+			}
+			index++
+			tokens = append(tokens, "quoted:"+statement[start:index])
+		case isSQLiteDDLWordV2(statement[index]):
+			start := index
+			for index < len(statement) && isSQLiteDDLWordV2(statement[index]) {
+				index++
+			}
+			tokens = append(tokens, "word:"+strings.ToUpper(statement[start:index]))
+		default:
+			tokens = append(tokens, "punct:"+statement[index:index+1])
+			index++
+		}
+	}
+	if len(tokens) >= 5 &&
+		tokens[0] == "word:CREATE" &&
+		(tokens[1] == "word:TABLE" ||
+			(len(tokens) >= 6 && tokens[1] == "word:UNIQUE" && tokens[2] == "word:INDEX")) {
+		position := 2
+		if tokens[1] == "word:UNIQUE" {
+			position = 3
+		}
+		if len(tokens) >= position+3 &&
+			tokens[position] == "word:IF" &&
+			tokens[position+1] == "word:NOT" &&
+			tokens[position+2] == "word:EXISTS" {
+			tokens = append(tokens[:position], tokens[position+3:]...)
+		}
+	}
+	return tokens, nil
+}
+
+func isSQLiteDDLWhitespaceV2(value byte) bool {
+	switch value {
+	case ' ', '\t', '\r', '\n', '\f':
+		return true
+	default:
+		return false
+	}
+}
+
+func isSQLiteDDLWordV2(value byte) bool {
+	return value >= 'a' && value <= 'z' ||
+		value >= 'A' && value <= 'Z' ||
+		value >= '0' && value <= '9' ||
+		value == '_' ||
+		value == '$'
+}
+
+func equalSQLiteDDLTokensV2(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for index := range left {
+		if left[index] != right[index] {
+			return false
+		}
+	}
+	return true
 }
 
 func verifyWorkspaceReadRuntimeAttemptBindingNamespaceV2(ctx context.Context, tx *sql.Tx) error {

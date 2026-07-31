@@ -161,6 +161,14 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if binary == "" && !spec.useFakeActual {
 		t.Skip("set PRAXIS_SANDBOX_DATAPLANE_BIN to run the public executor black box")
 	}
+	clock := time.Now
+	var controlledClock atomic.Int64
+	if spec.verifyBindingV2 {
+		controlledClock.Store(time.Now().UTC().UnixNano())
+		clock = func() time.Time {
+			return time.Unix(0, controlledClock.Load()).UTC()
+		}
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	root, err := os.MkdirTemp("/tmp", "praxis-wr-executor-")
@@ -177,7 +185,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		t.Fatal(err)
 	}
 
-	now := time.Now().UTC()
+	now := clock().UTC()
 	expires := now.Add(30 * time.Second)
 	workspaceExpires := time.Unix(0, 4_000_000_008_000_000_000)
 	workspaceDigest := "sha256:021c67f065e27e7e93918819bfbd85d62dc7c9a50a7599779b68bdc4a293f2ba"
@@ -290,7 +298,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	}
 
 	databasePath := filepath.Join(root, "sandbox.sqlite")
-	store, err := sqlitestore.OpenWithClock(ctx, databasePath, time.Now)
+	store, err := sqlitestore.OpenWithClock(ctx, databasePath, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,12 +317,12 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		fixedWorkspaceReadAssociationReaderV1{association},
 		store,
 		store,
-		time.Now,
+		clock,
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	exactCurrent, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(baseCurrent, store, store, time.Now)
+	exactCurrent, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(baseCurrent, store, store, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +335,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		currentServer := dataplaneadapter.CurrentServer{
 			SocketPath: currentSocket, SocketMode: 0o660, AllowedUID: uint32(os.Getuid()),
 			Governance: fixedWorkspaceReadEnforcementReaderV1{value: current},
-			Sandbox:    testkit.NewMemoryStore(), WorkspaceReadCurrentV2: countedCurrent, Now: time.Now,
+			Sandbox:    testkit.NewMemoryStore(), WorkspaceReadCurrentV2: countedCurrent, Now: clock,
 		}
 		listener, listenErr := currentServer.Listen()
 		if listenErr != nil {
@@ -376,7 +384,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			t.Fatal(err)
 		}
 	}
-	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(store, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, time.Now)
+	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(store, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -546,7 +554,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 				t.Fatalf("Delegation %s splice was accepted", splice.name)
 			}
 		}
-		restarted, openErr := sqlitestore.OpenWithClock(ctx, databasePath, time.Now)
+		restarted, openErr := sqlitestore.OpenWithClock(ctx, databasePath, clock)
 		if openErr != nil {
 			t.Fatal(openErr)
 		}
@@ -558,7 +566,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		const restartHandles = 8
 		handles := make([]*sqlitestore.Store, 0, restartHandles)
 		for range restartHandles {
-			handle, openHandleErr := sqlitestore.OpenWithClock(ctx, databasePath, time.Now)
+			handle, openHandleErr := sqlitestore.OpenWithClock(ctx, databasePath, clock)
 			if openHandleErr != nil {
 				t.Fatal(openHandleErr)
 			}
@@ -806,6 +814,30 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		}
 		if counted.calls.Load() != 1 {
 			t.Fatalf("64 public V2 inspections re-entered physical read: %d", counted.calls.Load())
+		}
+		controlledClock.Store(expires.UnixNano())
+		expiredSnapshotBefore := workspaceReadV2DatabaseSnapshot(t, ctx, db)
+		expiredBinding, expiredInspectErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
+		if expiredInspectErr != nil ||
+			!reflect.DeepEqual(expiredBinding.RuntimeAttempt, authorization.Attempt) ||
+			expiredBinding.WorkspaceReadAttempt.OwnerRef() != origin.Meta.Ref() {
+			t.Fatalf("expired V2 historical exact Inspect failed: %#v err=%v", expiredBinding, expiredInspectErr)
+		}
+		if _, executeErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); executeErr == nil {
+			t.Fatal("expired V2 historical binding restored execution eligibility")
+		}
+		if counted.calls.Load() != 1 {
+			t.Fatalf("expired historical Inspect or execute re-entered physical read: %d", counted.calls.Load())
+		}
+		var recoveryRows int
+		if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_read_recovery_evidence`).Scan(&recoveryRows); err != nil {
+			t.Fatal(err)
+		}
+		if recoveryRows != 0 {
+			t.Fatalf("expired historical Inspect restored owner current state: recovery rows=%d", recoveryRows)
+		}
+		if expiredSnapshotAfter := workspaceReadV2DatabaseSnapshot(t, ctx, db); !reflect.DeepEqual(expiredSnapshotAfter, expiredSnapshotBefore) {
+			t.Fatalf("expired historical Inspect or rejected execute changed owner rows: before=%v after=%v", expiredSnapshotBefore, expiredSnapshotAfter)
 		}
 		var rows int
 		if err = db.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_read_runtime_attempt_admission_binding_v2`).Scan(&rows); err != nil || rows != 1 {
