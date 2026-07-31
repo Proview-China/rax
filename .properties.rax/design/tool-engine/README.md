@@ -12,6 +12,10 @@
   合并也不等于production GO。
 - 实现语言：Go。当前没有经基准证明的计算稠密热点，不规划Rust、FFI或独立Rust进程。
 - 体系图：[architecture.drawio](architecture.drawio)。对象、状态机、Single Call Tool侧Port和调用链见[contracts.md](contracts.md)，Application/Runtime/Harness Owner映射见[integration.md](integration.md)，验收见[acceptance.md](acceptance.md)，公共缺口见[port-delta.md](port-delta.md)，PD-TM-04 live字段修正见[第七设计修正候选](pd-tm-04-seventh-candidate.md)，M2 C slice见[ToolSurfaceManifestCurrent V1](tool-surface-manifest-current-v1.md)，现有生态供应链组装见[Tool Package Offline Verification与Admission V1](package-offline-verification-v1.md)，MCP语义进入Registry的唯一接法见[MCP Tool Mapping Manifest V1](mcp-tool-mapping-manifest-v1.md)，开发者只读对象面见[Registry Catalog Exact Inspect V1](catalog-exact-inspect-v1.md)，Model Route实际工具兼容缺口见[PD-TM-05联合候选](model-route-tool-compatibility-v1.md)。
+- `workspace.read`到Sandbox V2 exact inspection与bounded inspect-only恢复见
+  [Workspace Read Sandbox Adapter V1](workspace-read-sandbox-adapter-v1.md)；Tool已直接消费
+  Sandbox public historical Command exact Reader闭合`SourceCommand`及payload/workspace/range。
+  Runtime Attempt→Admission真实Reader与production composition仍NO-GO。
 
 ## 2. 目标
 

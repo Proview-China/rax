@@ -8,12 +8,14 @@ require (
 	github.com/Proview-China/rax/ExecutionRuntime/harness v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/model-invoker v0.0.0
 	github.com/Proview-China/rax/ExecutionRuntime/runtime v0.0.0
+	github.com/Proview-China/rax/ExecutionRuntime/sandbox v0.0.0
 	github.com/in-toto/attestation v1.1.2
 	github.com/modelcontextprotocol/go-sdk v1.6.1
 	github.com/opencontainers/image-spec v1.1.1
 	github.com/sigstore/sigstore v1.10.0
 	github.com/sigstore/sigstore-go v1.1.4
 	google.golang.org/protobuf v1.36.10
+	modernc.org/sqlite v1.53.0
 )
 
 require github.com/Proview-China/rax/ExecutionRuntime/agent-definition v0.0.0 // indirect
@@ -106,7 +108,6 @@ require (
 	modernc.org/libc v1.73.4 // indirect
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.11.0 // indirect
-	modernc.org/sqlite v1.53.0 // indirect
 )
 
 replace github.com/Proview-China/rax/ExecutionRuntime/application => ../application
@@ -120,6 +121,8 @@ replace github.com/Proview-China/rax/ExecutionRuntime/harness => ../harness
 replace github.com/Proview-China/rax/ExecutionRuntime/model-invoker => ../model-invoker
 
 replace github.com/Proview-China/rax/ExecutionRuntime/runtime => ../runtime
+
+replace github.com/Proview-China/rax/ExecutionRuntime/sandbox => ../sandbox
 
 replace github.com/Proview-China/rax/ExecutionRuntime/review => ../review
 

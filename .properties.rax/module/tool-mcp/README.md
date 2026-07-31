@@ -156,3 +156,7 @@ Prepared historical/current/Association与actual-point exact复读，但尚未�
 Component Release/readiness V1已形成owner-local代码候选：`release`包直接发布Assembler公共`ComponentReleaseV1`，将当前能力分为`reference_only`、`standalone`和`production`。当前G6A P4、Surface/Binding Current、Controlled Provider Adapter与official MCP SDK软件事实可支撑standalone；durable store、Credential、真实Provider transport/current、actual-point部署、完整MCP lifecycle cleanup、deployment attestation和独立Certification未闭合，因此production继续NO-GO。Factory仅为descriptor，不代表production root已注册。
 
 Settled ToolResult到Context的exact-chain adapter已形成owner-local代码事实：它只复验Application Result、ToolResult、DomainResult、SettledToolResultProjection与Runtime V4 closure的exact chain、DomainResult语义映射和current TTL，不创建Context-owned字段。Tool projection的durable producer/current reader与Context refresh input current仍未冻结，production Context bridge继续NO-GO。
+
+[workspace.read → Sandbox Adapter V1](workspace-read-sandbox-adapter-v1.md)当前是
+`owner_local_reference_reaudit_pending`：只通过Sandbox public ports执行或Inspect原Attempt，
+CorePack保持`Executable=false`，不代表production composition。
