@@ -52,6 +52,380 @@ func TestGovernedModelTurnV3ActualBoundaryFailsClosedWithoutExactCredentialCurre
 	}
 }
 
+func TestGovernedModelTurnV3ActualBoundaryRejectsProviderInjectionShapeDrift(
+	t *testing.T,
+) {
+	falseValue := false
+	trueValue := true
+	tests := []struct {
+		name           string
+		mutateCall     func(*modelinvoker.RouteCall)
+		mutatePrepared func(*modelinvoker.Request)
+	}{
+		{
+			name: "provider",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.Provider = "anthropic"
+			},
+		},
+		{
+			name: "protocol",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.Protocol = modelinvoker.ProtocolChatCompletions
+			},
+		},
+		{
+			name: "tool_order",
+			mutateCall: func(call *modelinvoker.RouteCall) {
+				second := call.Request.Tools[0]
+				second.Name = "workspace_search"
+				second.Description = "search one workspace"
+				second.Parameters = []byte(`{"type":"object","properties":{"query":{"type":"string"}},"required":["query"],"additionalProperties":false}`)
+				call.Request.Tools = append(call.Request.Tools, second)
+			},
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.Tools[0], request.Tools[1] =
+					request.Tools[1], request.Tools[0]
+			},
+		},
+		{
+			name: "tool_name",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.Tools[0].Name = "workspace_inspect"
+			},
+		},
+		{
+			name: "tool_description",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.Tools[0].Description = "inspect one file"
+			},
+		},
+		{
+			name: "tool_parameters",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.Tools[0].Parameters =
+					[]byte(`{"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer"}},"required":["path"],"additionalProperties":false}`)
+			},
+		},
+		{
+			name: "tool_strict",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.Tools[0].Strict = &falseValue
+			},
+		},
+		{
+			name: "tool_choice",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.ToolChoice = modelinvoker.ToolChoice{
+					Mode: modelinvoker.ToolChoiceAuto,
+				}
+			},
+		},
+		{
+			name: "parallel_unspecified",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.ParallelToolCalls = nil
+			},
+		},
+		{
+			name: "parallel_true",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.ParallelToolCalls = &trueValue
+			},
+		},
+		{
+			name: "provider_options_present_empty",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.ProviderOptions = modelinvoker.ProviderOptions{
+					request.Provider: []byte(`{}`),
+				}
+			},
+		},
+		{
+			name: "provider_options_body",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.ProviderOptions = modelinvoker.ProviderOptions{
+					request.Provider: []byte(
+						`{"hosted":{"mode":"search"}}`,
+					),
+				}
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture :=
+				newGovernedActualBoundaryFixtureV3WithProviderInjection(
+					t,
+					nil,
+					test.mutateCall,
+					test.mutatePrepared,
+				)
+			defer fixture.close(t)
+
+			assertProviderInjectionShapeMismatchV3(t, fixture, nil)
+		})
+	}
+}
+
+func TestGovernedModelTurnV3ActualBoundaryAcceptsCanonicalEquivalentProviderInjectionShape(
+	t *testing.T,
+) {
+	tests := []struct {
+		name           string
+		mutateCall     func(*modelinvoker.RouteCall)
+		mutatePrepared func(*modelinvoker.Request)
+	}{
+		{
+			name: "parameters_key_order_and_whitespace",
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.Tools[0].Parameters = []byte(`{
+					"additionalProperties": false,
+					"properties": {"path": {"type": "string"}},
+					"required": ["path"],
+					"type": "object"
+				}`)
+			},
+		},
+		{
+			name: "parameters_paired_surrogate_and_literal_scalar",
+			mutateCall: func(call *modelinvoker.RouteCall) {
+				call.Request.Tools[0].Parameters = []byte(
+					`{"type":"object","marker":"😀"}`,
+				)
+			},
+			mutatePrepared: func(request *modelinvoker.Request) {
+				request.Tools[0].Parameters = []byte(
+					`{"marker":"\ud83d\ude00","type":"object"}`,
+				)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fixture :=
+				newGovernedActualBoundaryFixtureV3WithProviderInjection(
+					t,
+					nil,
+					test.mutateCall,
+					test.mutatePrepared,
+				)
+			defer fixture.close(t)
+
+			result, err :=
+				fixture.gateway.InvokeGovernedModelTurnActualBoundaryV3(
+					context.Background(),
+					fixture.command,
+				)
+			if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) !=
+				modelinvoker.GovernedModelInvocationErrorUnavailable ||
+				result.Boundary.Fact.ID != "" ||
+				result.Invoke.Response.ID != "" ||
+				fixture.state.invoke.Load() != 0 {
+				t.Fatalf(
+					"canonical-equivalent result=%+v provider=%d err=%v",
+					result,
+					fixture.state.invoke.Load(),
+					err,
+				)
+			}
+			if !strings.Contains(
+				err.Error(),
+				"exact credential current proof is unavailable",
+			) {
+				t.Fatalf(
+					"canonical-equivalent did not reach credential hard NO-GO: %v",
+					err,
+				)
+			}
+			assertProviderIrreversibleCountsZeroV3(t, fixture)
+			assertNoProviderBoundaryFactV3(t, fixture)
+		})
+	}
+}
+
+func TestGovernedModelTurnV3ActualBoundaryRejectsInvalidActualProviderInjectionShape(
+	t *testing.T,
+) {
+	const rawSecret = "A2-RAW-PROVIDER-INJECTION-MUST-NOT-LEAK"
+	fixture := newGovernedActualBoundaryFixtureV3WithProviderInjection(
+		t,
+		nil,
+		func(call *modelinvoker.RouteCall) {
+			call.Request.Tools[0].Parameters = []byte(
+				`{"type":"object","marker":"` +
+					rawSecret +
+					`","x":"\ud800"}`,
+			)
+		},
+		func(request *modelinvoker.Request) {
+			request.Tools[0].Parameters = []byte(
+				`{"type":"object","properties":{},"additionalProperties":false}`,
+			)
+		},
+	)
+	defer fixture.close(t)
+
+	result, err := fixture.gateway.InvokeGovernedModelTurnActualBoundaryV3(
+		context.Background(),
+		fixture.command,
+	)
+	if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) !=
+		modelinvoker.GovernedModelInvocationErrorConflict ||
+		result.Boundary.Fact.ID != "" ||
+		result.Invoke.Response.ID != "" ||
+		strings.Contains(err.Error(), rawSecret) {
+		t.Fatalf(
+			"invalid actual provider injection result=%+v err=%v",
+			result,
+			err,
+		)
+	}
+	var governedErr *modelinvoker.GovernedModelInvocationErrorV1
+	if !errors.As(err, &governedErr) ||
+		governedErr.Operation != "turn_v3_provider_injection_shape" {
+		t.Fatalf("invalid actual provider injection operation drifted: %v", err)
+	}
+	assertProviderIrreversibleCountsZeroV3(t, fixture)
+	if fixture.state.closed.Load() != 1 {
+		t.Fatalf(
+			"invalid actual provider injection closes=%d want=1",
+			fixture.state.closed.Load(),
+		)
+	}
+	assertNoProviderBoundaryFactV3(t, fixture)
+}
+
+func TestGovernedModelTurnV3ActualBoundaryProviderInjectionMismatchPreservesReleaseFailure(
+	t *testing.T,
+) {
+	const sentinel = "V3-A2-RELEASE-FAILURE-MUST-NOT-LEAK"
+	releaseFailure := errors.New(sentinel)
+	var releaseFactory *actualBoundaryReleaseErrorFactoryV3
+	fixture := newGovernedActualBoundaryFixtureV3WithProviderInjection(
+		t,
+		func(
+			t *testing.T,
+			routeCatalog *catalog.Catalog,
+			state *callState,
+			dependencies routegateway.GovernedModelTurnActualBoundaryDependenciesV3,
+		) *routegateway.Gateway {
+			t.Helper()
+			releaseFactory = &actualBoundaryReleaseErrorFactoryV3{
+				fakeFactory: fakeFactory{id: "openai", state: state},
+				closeErr:    releaseFailure,
+			}
+			return actualBoundaryGatewayWithOverrideFactoryV3(
+				t,
+				routeCatalog,
+				releaseFactory,
+				state,
+				dependencies,
+			)
+		},
+		nil,
+		func(request *modelinvoker.Request) {
+			request.ToolChoice = modelinvoker.ToolChoice{
+				Mode: modelinvoker.ToolChoiceAuto,
+			}
+		},
+	)
+	defer fixture.close(t)
+
+	assertProviderInjectionShapeMismatchV3(
+		t,
+		fixture,
+		releaseFailure,
+	)
+	if releaseFactory.closeCalls.Load() != 1 {
+		t.Fatalf(
+			"provider injection mismatch closes=%d want=1",
+			releaseFactory.closeCalls.Load(),
+		)
+	}
+}
+
+func assertProviderInjectionShapeMismatchV3(
+	t *testing.T,
+	fixture governedActualBoundaryFixtureV3,
+	releaseFailure error,
+) {
+	t.Helper()
+	result, err := fixture.gateway.InvokeGovernedModelTurnActualBoundaryV3(
+		context.Background(),
+		fixture.command,
+	)
+	if modelinvoker.GovernedModelInvocationErrorKindOfV1(err) !=
+		modelinvoker.GovernedModelInvocationErrorConflict ||
+		result.Boundary.Fact.ID != "" ||
+		result.Invoke.Response.ID != "" ||
+		fixture.state.invoke.Load() != 0 {
+		t.Fatalf(
+			"provider injection mismatch result=%+v provider=%d err=%v",
+			result,
+			fixture.state.invoke.Load(),
+			err,
+		)
+	}
+	if !strings.Contains(err.Error(), "prepared Provider injection shape") {
+		t.Fatalf("provider injection mismatch reason drifted: %v", err)
+	}
+	if releaseFailure != nil {
+		if !errors.Is(err, releaseFailure) ||
+			strings.Contains(err.Error(), releaseFailure.Error()) {
+			t.Fatalf("release failure evidence lost or leaked: %v", err)
+		}
+	}
+	assertProviderIrreversibleCountsZeroV3(t, fixture)
+	assertNoProviderBoundaryFactV3(t, fixture)
+}
+
+func assertProviderIrreversibleCountsZeroV3(
+	t *testing.T,
+	fixture governedActualBoundaryFixtureV3,
+) {
+	t.Helper()
+	for name, calls := range map[string]int64{
+		"authorization": fixture.state.authorization.Load(),
+		"capabilities":  fixture.state.capabilities.Load(),
+		"invoke":        fixture.state.invoke.Load(),
+		"stream":        fixture.state.stream.Load(),
+	} {
+		if calls != 0 {
+			t.Fatalf(
+				"provider injection path touched irreversible %s=%d want=0",
+				name,
+				calls,
+			)
+		}
+	}
+}
+
+func assertNoProviderBoundaryFactV3(
+	t *testing.T,
+	fixture governedActualBoundaryFixtureV3,
+) {
+	t.Helper()
+	turn, err := fixture.store.InspectExactGovernedModelTurnV3(
+		context.Background(),
+		fixture.command.TurnRef,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, inspectErr :=
+		fixture.store.InspectGovernedModelTurnProviderBoundaryTurnAttemptV3(
+			context.Background(),
+			turn.AttemptRefV3(),
+		); modelinvoker.GovernedModelInvocationErrorKindOfV1(inspectErr) !=
+		modelinvoker.GovernedModelInvocationErrorNotFound {
+		t.Fatalf(
+			"provider injection mismatch boundary write error=%v want=not_found",
+			inspectErr,
+		)
+	}
+}
+
 func TestGovernedModelTurnV3ActualBoundaryPreservesAdapterReleaseFailure(
 	t *testing.T,
 ) {
@@ -1002,9 +1376,26 @@ func newGovernedActualBoundaryFixtureV3WithGateway(
 	t *testing.T,
 	gatewayBuilder actualBoundaryGatewayBuilderV3,
 ) governedActualBoundaryFixtureV3 {
+	return newGovernedActualBoundaryFixtureV3WithProviderInjection(
+		t,
+		gatewayBuilder,
+		nil,
+		nil,
+	)
+}
+
+func newGovernedActualBoundaryFixtureV3WithProviderInjection(
+	t *testing.T,
+	gatewayBuilder actualBoundaryGatewayBuilderV3,
+	mutateCall func(*modelinvoker.RouteCall),
+	mutatePreparedProviderRequest func(*modelinvoker.Request),
+) governedActualBoundaryFixtureV3 {
 	t.Helper()
 	call := governedCallV2()
 	call.Request.Tools[0].Name = "workspace_read"
+	if mutateCall != nil {
+		mutateCall(&call)
+	}
 	routeCatalog := defaultCatalog(t)
 	tempState := &callState{}
 	temp := fakeGateway(
@@ -1022,6 +1413,23 @@ func newGovernedActualBoundaryFixtureV3WithGateway(
 		t.Fatal(err)
 	}
 	routeDigest, err := modelinvoker.DigestGovernedRouteSelectionV1(resolution.Route)
+	if err != nil {
+		t.Fatal(err)
+	}
+	concreteProviderRequest := call.Request
+	concreteProviderRequest.Provider = resolution.Route.AdapterID
+	concreteProviderRequest.Protocol = resolution.Route.Protocol
+	concreteProviderRequest.Endpoint = resolution.Route.Endpoint
+	concreteProviderRequest = cloneProviderInjectionRequestV3(
+		concreteProviderRequest,
+	)
+	if mutatePreparedProviderRequest != nil {
+		mutatePreparedProviderRequest(&concreteProviderRequest)
+	}
+	actualProviderInjectionDigest, err :=
+		modelinvoker.ComputeActualProviderInjectionDigestV1(
+			concreteProviderRequest,
+		)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1044,7 +1452,7 @@ func newGovernedActualBoundaryFixtureV3WithGateway(
 			RouteDigest:                   routeDigest,
 			ProfileDigest:                 digestV2(t, "v3-profile", call.Request.Model),
 			ActualToolSurfaceDigest:       digestV2(t, "v3-surface", call.Request.Tools),
-			ActualProviderInjectionDigest: digestV2(t, "v3-provider", call.RouteID),
+			ActualProviderInjectionDigest: actualProviderInjectionDigest,
 			CapabilitySnapshotRef: modelinvoker.PreparedModelInvocationCapabilitySnapshotRefV1{
 				ContractVersion: "1.0.0",
 				ID:              "v3-capability",
@@ -1280,6 +1688,35 @@ func newGovernedActualBoundaryFixtureV3WithGateway(
 			RuntimeRequest: runtimeRequest,
 		},
 	}
+}
+
+func cloneProviderInjectionRequestV3(
+	request modelinvoker.Request,
+) modelinvoker.Request {
+	cloned := request
+	cloned.Tools = make([]modelinvoker.Tool, len(request.Tools))
+	for index, tool := range request.Tools {
+		cloned.Tools[index] = tool
+		cloned.Tools[index].Parameters = append([]byte(nil), tool.Parameters...)
+		if tool.Strict != nil {
+			strict := *tool.Strict
+			cloned.Tools[index].Strict = &strict
+		}
+	}
+	if request.ParallelToolCalls != nil {
+		parallel := *request.ParallelToolCalls
+		cloned.ParallelToolCalls = &parallel
+	}
+	if request.ProviderOptions != nil {
+		cloned.ProviderOptions = make(
+			modelinvoker.ProviderOptions,
+			len(request.ProviderOptions),
+		)
+		for provider, options := range request.ProviderOptions {
+			cloned.ProviderOptions[provider] = append([]byte(nil), options...)
+		}
+	}
+	return cloned
 }
 
 type sameCoordinateMaterialDriftSecretV3 struct {
