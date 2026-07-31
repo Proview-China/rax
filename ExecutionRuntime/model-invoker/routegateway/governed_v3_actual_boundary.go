@@ -310,6 +310,20 @@ func (g *Gateway) InvokeGovernedModelTurnActualBoundaryV3(
 			preparedProvider.lease,
 		)
 	}()
+	actualProviderInjectionDigest, err :=
+		modelinvoker.ComputeActualProviderInjectionDigestV1(
+			preparedProvider.request,
+		)
+	if err != nil ||
+		actualProviderInjectionDigest !=
+			prepared2.ActualProviderInjectionDigest {
+		return result, governedGatewayErrorV1(
+			modelinvoker.GovernedModelInvocationErrorConflict,
+			"turn_v3_provider_injection_shape",
+			"prepared Provider injection shape differs from the exact prepared invocation",
+			err,
+		)
+	}
 	actualRouteDigest, err :=
 		modelinvoker.DigestGovernedRouteSelectionV1(preparedProvider.resolution.Route)
 	if err != nil || actualRouteDigest != material2.RouteDigest ||
