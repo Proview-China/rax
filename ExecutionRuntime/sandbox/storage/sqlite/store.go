@@ -26,6 +26,9 @@ import (
 const schemaVersion = 19
 
 const (
+	workspaceReadCommandCurrentTableDDLV19 = `CREATE TABLE IF NOT EXISTS workspace_read_command_current (
+		command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL,
+		digest TEXT NOT NULL, body BLOB NOT NULL)`
 	workspaceReadCommandBodySealTableDDLV1 = `CREATE TABLE IF NOT EXISTS workspace_read_command_body_seal (
 		command_id TEXT NOT NULL PRIMARY KEY, revision INTEGER NOT NULL,
 		digest TEXT NOT NULL, canonical_body_digest TEXT NOT NULL)`
@@ -156,6 +159,9 @@ func (s *Store) initialize(ctx context.Context) error {
 		return fmt.Errorf("Sandbox SQLite schema version %d is unsupported", version)
 	}
 	if version == schemaVersion {
+		if err := verifyWorkspaceReadCommandCurrentSchemaV19(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command current schema drifted: %v", ports.ErrConflict, err)
+		}
 		if err := verifyWorkspaceReadCommandBodySealSchemaV1(ctx, tx); err != nil {
 			return fmt.Errorf("%w: v19 workspace read Command body-seal schema drifted: %v", ports.ErrConflict, err)
 		}
@@ -173,12 +179,20 @@ func (s *Store) initialize(ctx context.Context) error {
 	if err := preflightWorkspaceReadCommandPublicationMigrationV19(ctx, tx); err != nil {
 		return err
 	}
+	if version != 0 {
+		if err := verifyWorkspaceReadCommandCurrentSchemaV19(ctx, tx); err != nil {
+			return fmt.Errorf("%w: pre-v19 workspace read Command current schema drifted: %v", ports.ErrConflict, err)
+		}
+	}
 	for _, statement := range schemaStatements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
 			return fmt.Errorf("create Sandbox SQLite schema: %w", err)
 		}
 	}
 	if err := verifyWorkspaceReadCommandBodySealSchemaV1(ctx, tx); err != nil {
+		return err
+	}
+	if err := verifyWorkspaceReadCommandCurrentSchemaV19(ctx, tx); err != nil {
 		return err
 	}
 	if err := verifyWorkspaceReadRuntimeAttemptBindingSchemaV2(ctx, tx); err != nil {
@@ -353,8 +367,7 @@ var schemaStatements = []string{
 		PRIMARY KEY(change_set_id,revision,digest), UNIQUE(change_set_id,revision))`,
 	`CREATE TABLE IF NOT EXISTS workspace_change_set_current (
 		change_set_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
-	`CREATE TABLE IF NOT EXISTS workspace_read_command_current (
-		command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
+	workspaceReadCommandCurrentTableDDLV19,
 	workspaceReadCommandBodySealTableDDLV1,
 	`CREATE TABLE IF NOT EXISTS workspace_read_reservation (
 		stable_digest TEXT PRIMARY KEY, reservation_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL)`,
@@ -389,6 +402,99 @@ var schemaStatements = []string{
 		UNIQUE(tenant_id,scope_digest,request_id),
 		UNIQUE(tenant_id,scope_digest,idempotency_key),
 		UNIQUE(planned_change_set_id,planned_change_set_revision,planned_change_set_digest))`,
+}
+
+func verifyWorkspaceReadCommandCurrentSchemaV19(ctx context.Context, tx *sql.Tx) error {
+	if ctx == nil || tx == nil {
+		return errors.New("verify workspace read Command current schema requires context and transaction")
+	}
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT type,name,tbl_name FROM sqlite_master
+		  WHERE name='workspace_read_command_current'
+		     OR name LIKE 'workspace_read_command_current_%'
+		     OR tbl_name='workspace_read_command_current'
+		  ORDER BY type,name`,
+	)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Command current namespace: %w", err)
+	}
+	expected := map[string]struct{}{
+		"table:workspace_read_command_current:workspace_read_command_current":                    {},
+		"index:sqlite_autoindex_workspace_read_command_current_1:workspace_read_command_current": {},
+	}
+	found := make(map[string]struct{}, len(expected))
+	for rows.Next() {
+		var kind, name, table string
+		if err = rows.Scan(&kind, &name, &table); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("decode workspace read Command current namespace: %w", err)
+		}
+		object := kind + ":" + name + ":" + table
+		if _, ok := expected[object]; !ok {
+			_ = rows.Close()
+			return fmt.Errorf("workspace read Command current namespace contains unexpected object %q", object)
+		}
+		found[object] = struct{}{}
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("inspect workspace read Command current namespace rows: %w", err)
+	}
+	if err = rows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Command current namespace rows: %w", err)
+	}
+	if len(found) != len(expected) {
+		return errors.New("workspace read Command current namespace is incomplete")
+	}
+
+	var actualDDL sql.NullString
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='workspace_read_command_current'`,
+	).Scan(&actualDDL); err != nil {
+		return fmt.Errorf("inspect workspace read Command current DDL: %w", err)
+	}
+	if !actualDDL.Valid {
+		return errors.New("workspace read Command current DDL is missing")
+	}
+	actualTokens, err := canonicalSQLiteDDLTokensV2(actualDDL.String)
+	if err != nil {
+		return err
+	}
+	expectedTokens, err := canonicalSQLiteDDLTokensV2(workspaceReadCommandCurrentTableDDLV19)
+	if err != nil {
+		return err
+	}
+	if !equalSQLiteDDLTokensV2(actualTokens, expectedTokens) {
+		return errors.New("workspace read Command current DDL semantics drifted")
+	}
+	if err = verifyWorkspaceReadSchemaColumnsV19(
+		ctx,
+		tx,
+		"workspace_read_command_current",
+		[]workspaceReadSchemaColumnV19{
+			{name: "command_id", kind: "TEXT", notNull: 0, primaryKey: 1},
+			{name: "revision", kind: "INTEGER", notNull: 1},
+			{name: "digest", kind: "TEXT", notNull: 1},
+			{name: "body", kind: "BLOB", notNull: 1},
+		},
+	); err != nil {
+		return err
+	}
+	return verifyWorkspaceReadIndexSetV19(
+		ctx,
+		tx,
+		"workspace_read_command_current",
+		map[string]workspaceReadIndexExpectationV19{
+			"sqlite_autoindex_workspace_read_command_current_1": {
+				sequence: 0,
+				origin:   "pk",
+				columns:  []string{"command_id"},
+				cids:     []int{0},
+			},
+		},
+	)
 }
 
 func verifyWorkspaceReadCommandBodySealSchemaV1(ctx context.Context, tx *sql.Tx) error {

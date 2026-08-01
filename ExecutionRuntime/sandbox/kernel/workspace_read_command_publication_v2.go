@@ -39,6 +39,11 @@ type workspaceReadCommandOwnerRepositoryV2 interface {
 		context.Context,
 		contract.Ref,
 	) (contract.WorkspaceReadCommandOwnerCurrentV2, error)
+	InspectStoredWorkspaceReadCommandOwnerHistoryV2(
+		context.Context,
+		string,
+		contract.Ref,
+	) ([]contract.WorkspaceReadCommandOwnerCurrentV2, error)
 }
 
 type WorkspaceReadCommandOwnerV2 struct {
@@ -668,6 +673,19 @@ func (o *WorkspaceReadCommandOwnerV2) inspectFreshWorkspaceReadCommandCurrentV2(
 	if err = contract.ValidateWorkspaceReadCommandOwnerClosureV2(command, publication, current); err != nil {
 		return contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
 	}
+	history, err := o.repository.InspectStoredWorkspaceReadCommandOwnerHistoryV2(
+		ctx,
+		current.Meta.ID,
+		current.Command,
+	)
+	if err != nil || validateWorkspaceReadCommandOwnerHistoryV2(
+		command,
+		publication,
+		history,
+		pointer,
+	) != nil {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
+	}
 	inputs, err := o.readWorkspaceReadCommandInputsV2(ctx, current.SourceCommand)
 	if err != nil {
 		return contract.WorkspaceReadCommandOwnerCurrentV2{}, err
@@ -681,6 +699,19 @@ func (o *WorkspaceReadCommandOwnerV2) inspectFreshWorkspaceReadCommandCurrentV2(
 		finalPointer.Meta.Ref() != current.Meta.Ref() ||
 		finalPointer.Command != current.Command ||
 		finalPointer.Publication != current.Publication {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
+	}
+	finalHistory, err := o.repository.InspectStoredWorkspaceReadCommandOwnerHistoryV2(
+		ctx,
+		current.Meta.ID,
+		current.Command,
+	)
+	if err != nil || validateWorkspaceReadCommandOwnerHistoryV2(
+		command,
+		publication,
+		finalHistory,
+		finalPointer,
+	) != nil {
 		return contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
 	}
 	if err = contract.ValidateWorkspaceReadCommandOwnerFreshClosureV2(
@@ -697,7 +728,56 @@ func (o *WorkspaceReadCommandOwnerV2) inspectFreshWorkspaceReadCommandCurrentV2(
 		s3Pointer.Publication != current.Publication {
 		return contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
 	}
+	s3History, err := o.repository.InspectStoredWorkspaceReadCommandOwnerHistoryV2(
+		ctx,
+		current.Meta.ID,
+		current.Command,
+	)
+	if err != nil || validateWorkspaceReadCommandOwnerHistoryV2(
+		command,
+		publication,
+		s3History,
+		s3Pointer,
+	) != nil {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
+	}
 	return current, nil
+}
+
+func validateWorkspaceReadCommandOwnerHistoryV2(
+	command contract.WorkspaceReadCommandV1,
+	publication contract.WorkspaceReadCommandPublicationV2,
+	history []contract.WorkspaceReadCommandOwnerCurrentV2,
+	pointer contract.WorkspaceReadCommandOwnerCurrentV2,
+) error {
+	if len(history) == 0 {
+		return sandboxports.ErrConflict
+	}
+	for index, current := range history {
+		if current.Meta.Revision != uint64(index+1) ||
+			contract.ValidateWorkspaceReadCommandOwnerClosureV2(command, publication, current) != nil {
+			return sandboxports.ErrConflict
+		}
+		if index == 0 {
+			if current.Meta.CreatedUnixNano != current.CheckedUnixNano {
+				return sandboxports.ErrConflict
+			}
+			continue
+		}
+		expected, err := contract.SealNextWorkspaceReadCommandOwnerCurrentV2(
+			current,
+			history[index-1],
+			time.Unix(0, current.CheckedUnixNano),
+		)
+		if err != nil || !reflect.DeepEqual(expected, current) {
+			return sandboxports.ErrConflict
+		}
+	}
+	if pointer.Meta.Ref() != history[len(history)-1].Meta.Ref() ||
+		!reflect.DeepEqual(pointer, history[len(history)-1]) {
+		return sandboxports.ErrConflict
+	}
+	return nil
 }
 
 // InspectWorkspaceReadCommandCurrentV1 is the legacy compatibility shim. A

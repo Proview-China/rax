@@ -668,6 +668,34 @@ func (s *Store) InspectStoredWorkspaceReadCommandOwnerCurrentExactV2(
 	return inspectStoredWorkspaceReadCommandOwnerCurrentExactTxV2(ctx, s.db, exact)
 }
 
+func (s *Store) InspectStoredWorkspaceReadCommandOwnerHistoryV2(
+	ctx context.Context,
+	currentID string,
+	command contract.Ref,
+) ([]contract.WorkspaceReadCommandOwnerCurrentV2, error) {
+	if s == nil || s.db == nil || ctx == nil || currentID == "" {
+		return nil, ports.ErrConflict
+	}
+	if err := command.ValidateShape("workspace read Command"); err != nil {
+		return nil, err
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return nil, workspaceReadCommandPublicationStorageErrorV2(err)
+	}
+	defer tx.Rollback()
+	history, err := inspectStoredWorkspaceReadCommandOwnerHistoryTxV2(
+		ctx,
+		tx,
+		currentID,
+		command,
+	)
+	if err != nil {
+		return nil, workspaceReadCommandPublicationStorageErrorV2(err)
+	}
+	return history, nil
+}
+
 func inspectStoredWorkspaceReadCommandOwnerCurrentExactTxV2(
 	ctx context.Context,
 	source queryer,
