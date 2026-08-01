@@ -102,6 +102,7 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 			relative == filepath.Join("ports", "workspace_read_current_v1.go") ||
 			relative == filepath.Join("ports", "workspace_read_admission_attempt_binding_v2.go") ||
 			relative == filepath.Join("internal", "owner", "workspaceread", "authorized_reservation_v2.go") ||
+			relative == filepath.Join("internal", "owner", "workspaceread", "authorized_transition_v2.go") ||
 			// Command publication reads only Runtime public core/ports. Keep
 			// this allowlist exact; Runtime implementation/write packages
 			// remain rejected by the import check below.

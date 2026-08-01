@@ -117,8 +117,8 @@ func TestWorkspaceReadAdmissionHandoffReturnsOriginalAttemptAcrossConcurrencyRes
 		}
 	}
 
-	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "admission-handoff-unknown")); err != nil {
-		t.Fatal(err)
+	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "admission-handoff-unknown")); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("legacy Unknown advanced a reference attempt: %v", err)
 	}
 	if err = store.Close(); err != nil {
 		t.Fatal(err)
@@ -134,7 +134,7 @@ func TestWorkspaceReadAdmissionHandoffReturnsOriginalAttemptAcrossConcurrencyRes
 		t.Fatalf("expired historical handoff lost original attempt: %#v err=%v", recovered, err)
 	}
 	projection, err := reopened.InspectBoundedWorkspaceReadV1(ctx, recovered.Attempt)
-	if err != nil || projection.Attempt.State != contract.WorkspaceReadUnknownV1 {
+	if err != nil || projection.Attempt.State != contract.WorkspaceReadStartedV1 {
 		t.Fatalf("original attempt did not inspect latest current: %#v err=%v", projection, err)
 	}
 }
@@ -190,8 +190,8 @@ func TestWorkspaceReadExactReservationAndAttemptReadersSurviveRestartAndCurrentA
 	if got, inspectErr := store.InspectWorkspaceReadAttemptCurrentV1(ctx, originalAttempt); inspectErr != nil || got.State != contract.WorkspaceReadStartedV1 {
 		t.Fatalf("exact attempt current drifted: %#v err=%v", got, inspectErr)
 	}
-	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "exact-current-unknown")); err != nil {
-		t.Fatal(err)
+	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "exact-current-unknown")); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("legacy Unknown advanced the exact current: %v", err)
 	}
 	if err = store.Close(); err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestWorkspaceReadExactReservationAndAttemptReadersSurviveRestartAndCurrentA
 	if got, inspectErr := reopened.InspectWorkspaceReadReservationExactV1(ctx, reservation.Meta.Ref()); inspectErr != nil || got != reservation {
 		t.Fatalf("restart exact reservation drifted: %#v err=%v", got, inspectErr)
 	}
-	if got, inspectErr := reopened.InspectWorkspaceReadAttemptCurrentV1(ctx, originalAttempt); inspectErr != nil || got.State != contract.WorkspaceReadUnknownV1 {
+	if got, inspectErr := reopened.InspectWorkspaceReadAttemptCurrentV1(ctx, originalAttempt); inspectErr != nil || got.State != contract.WorkspaceReadStartedV1 {
 		t.Fatalf("restart exact attempt did not return latest current: %#v err=%v", got, inspectErr)
 	}
 	splicedReservation := reservation.Meta.Ref()
@@ -249,12 +249,12 @@ func TestWorkspaceReadOriginalAttemptRecoversLatestCurrent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), observation); err != nil {
-		t.Fatal(err)
+	if _, err = store.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), observation); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("legacy Complete accepted a caller-sealed observation: %v", err)
 	}
 
 	recovered, err := store.InspectBoundedWorkspaceReadV1(ctx, contract.WorkspaceReadAttemptRefV1{ID: attempt.Meta.ID, Revision: attempt.Meta.Revision, Digest: attempt.Meta.Digest})
-	if err != nil || recovered.Attempt.State != contract.WorkspaceReadObservedV1 || recovered.Observation == nil || recovered.Observation.Content != content || recovered.ProviderReceipt == nil || *recovered.ProviderReceipt != providerReceipt {
+	if err != nil || recovered.Attempt.State != contract.WorkspaceReadStartedV1 || recovered.Observation != nil || recovered.ProviderReceipt != nil {
 		t.Fatalf("recover latest via original ref: %#v err=%v", recovered, err)
 	}
 }
@@ -337,7 +337,11 @@ func TestWorkspaceReadConcurrentInspectCannotPoisonActiveCompletion(t *testing.T
 		defer group.Done()
 		<-start
 		_, completeErr := store.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), observation)
-		results <- completeErr
+		if !errors.Is(completeErr, ports.ErrConflict) {
+			results <- errors.New("legacy Complete did not fail closed")
+			return
+		}
+		results <- nil
 	}()
 	close(start)
 	group.Wait()
@@ -348,7 +352,7 @@ func TestWorkspaceReadConcurrentInspectCannotPoisonActiveCompletion(t *testing.T
 		}
 	}
 	final, err := store.InspectBoundedWorkspaceReadV1(ctx, original)
-	if err != nil || final.Attempt.State != contract.WorkspaceReadObservedV1 || final.Observation == nil || final.Observation.Meta.Ref() != observation.Meta.Ref() {
+	if err != nil || final.Attempt.State != contract.WorkspaceReadStartedV1 || final.Observation != nil {
 		t.Fatalf("active completion was poisoned by Inspect: %#v err=%v", final, err)
 	}
 }
@@ -388,13 +392,12 @@ func TestWorkspaceReadStartedRecoveryRequiresNewOwnerIncarnation(t *testing.T) {
 	if err != nil || stillStarted.Attempt.State != contract.WorkspaceReadStartedV1 {
 		t.Fatalf("restart Inspect must not mutate: %#v err=%v", stillStarted, err)
 	}
-	recovered, err := reopened.RecoverStartedWorkspaceReadAfterRestartV1(ctx, original)
-	if err != nil || recovered.Attempt.State != contract.WorkspaceReadUnknownV1 || recovered.Observation != nil {
-		t.Fatalf("explicit restart recovery: %#v err=%v", recovered, err)
+	if _, err = reopened.RecoverStartedWorkspaceReadAfterRestartV1(ctx, original); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("raw V1 restart recovery bypassed the Runtime-attempt V2 binding: %v", err)
 	}
-	again, err := reopened.RecoverStartedWorkspaceReadAfterRestartV1(ctx, original)
-	if err != nil || again.Attempt.Meta.Ref() != recovered.Attempt.Meta.Ref() {
-		t.Fatalf("restart recovery must be idempotent for the same incarnation: %#v err=%v", again, err)
+	after, err := reopened.InspectBoundedWorkspaceReadV1(ctx, original)
+	if err != nil || after.Attempt.State != contract.WorkspaceReadStartedV1 || after.Observation != nil {
+		t.Fatalf("rejected raw restart recovery mutated state: %#v err=%v", after, err)
 	}
 }
 

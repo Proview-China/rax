@@ -88,6 +88,10 @@ type workspaceReadAuthorizedOwnerStoreV2 interface {
 		context.Context,
 		ownerworkspaceread.AuthorizedReservationV2,
 	) (contract.WorkspaceReadExecutionProjectionV1, bool, error)
+	TransitionWorkspaceReadAuthorizedV2(
+		context.Context,
+		ownerworkspaceread.AuthorizedTransitionV2,
+	) (contract.WorkspaceReadExecutionProjectionV1, error)
 }
 
 type WorkspaceReadPhysicalExecutorV1 struct {
@@ -233,6 +237,12 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 			return receipt, runtimecore.NewError(runtimecore.ErrorInternal, runtimecore.ReasonInvalidReference, "workspace read projection state is invalid")
 		}
 	}
+	transitionAuthority, err := ownerworkspaceread.NewAuthorizedExecutionV2(
+		workspaceReadAttemptRefV1(projection.Attempt), authorization, s1,
+	)
+	if err != nil {
+		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
+	}
 	currentQuery, err := workspaceReadCurrentQueryV2(authorization, association, command, workspace, reservation, attempt, admissionBinding, runtimeCurrent, s1, expiresNano)
 	if err != nil {
 		failureDigest, digestErr := contract.Digest("workspace-read-failed", struct {
@@ -242,7 +252,7 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 		if digestErr != nil {
 			return receipt, digestErr
 		}
-		if _, failErr := e.store.FailWorkspaceReadV1(ctx, attempt.Meta.Ref(), failureDigest); failErr != nil {
+		if failErr := e.failWorkspaceReadAuthorizedV2(ctx, transitionAuthority, failureDigest); failErr != nil {
 			return receipt, failErr
 		}
 		return receipt, NewWorkspaceReadActualPointErrorV1(WorkspaceReadEffectNotStartedV1, err)
@@ -260,12 +270,12 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 			if digestErr != nil {
 				return receipt, digestErr
 			}
-			if _, failErr := e.store.FailWorkspaceReadV1(ctx, attempt.Meta.Ref(), failureDigest); failErr != nil {
+			if failErr := e.failWorkspaceReadAuthorizedV2(ctx, transitionAuthority, failureDigest); failErr != nil {
 				return receipt, failErr
 			}
 			return receipt, readErr
 		}
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), "actual-point", readErr)
+		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "actual-point", readErr)
 	}
 
 	// S2 is a full current re-read after Rust crossed the physical actual point.
@@ -274,20 +284,20 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 		if err == nil {
 			err = errors.New("workspace read current closure drifted at S2")
 		}
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), "s2-current", err)
+		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "s2-current", err)
 	}
 	runtimeCurrentS2, err := e.readRuntimeCurrentV1(ctx, authorization, s2)
 	if err != nil || runtimeCurrentS2.Digest != runtimeCurrent.Digest || runtimeCurrentS2.ExpiresUnixNano != runtimeCurrent.ExpiresUnixNano {
 		if err == nil {
 			err = runtimecore.NewError(runtimecore.ErrorConflict, runtimecore.ReasonBindingDrift, "workspace read Runtime current drifted at S2")
 		}
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), "s2-runtime-current", err)
+		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "s2-runtime-current", err)
 	}
 	if err = validateWorkspaceReadRuntimeLeaseV1(workspaceS2.Lease, runtimeCurrentS2); err != nil {
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), "s2-workspace-lease", err)
+		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "s2-workspace-lease", err)
 	}
 	if err = validateWorkspaceReadActualPointResultV1(result, reservation, command, workspace, s2); err != nil {
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), "provider-result", err)
+		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "provider-result", err)
 	}
 
 	observationExpiresNano := minWorkspaceReadExpiryV1(expiresNano, runtimeCurrentS2.ExpiresUnixNano, reservation.Meta.ExpiresUnixNano, attempt.Meta.ExpiresUnixNano, admissionBinding.ExpiresUnixNano, result.ProviderReceipt.ExpiresUnixNano)
@@ -299,9 +309,13 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 		AdmissionReceipt: admissionBinding, ProviderReceipt: result.ProviderReceipt,
 	}, "workspace-read-observation-"+trimRuntimeDigestV1(string(authorization.StableKeyDigest)), s2, time.Unix(0, observationExpiresNano))
 	if err != nil {
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), "observation-seal", err)
+		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "observation-seal", err)
 	}
-	if _, err = e.store.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), observation); err != nil {
+	transition, err := transitionAuthority.Observed(observation, s2)
+	if err != nil {
+		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "observation-authority", err)
+	}
+	if _, err = authorizedStore.TransitionWorkspaceReadAuthorizedV2(ctx, transition); err != nil {
 		return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read observation persistence requires exact Inspect")
 	}
 	return receipt, nil
@@ -489,12 +503,23 @@ func (e *WorkspaceReadPhysicalExecutorV1) readCurrentClosureV1(ctx context.Conte
 	return association, command, workspace, now, nil
 }
 
-func (e *WorkspaceReadPhysicalExecutorV1) markWorkspaceReadUnknownV1(ctx context.Context, attempt contract.Ref, stage string, cause error) error {
+func (e *WorkspaceReadPhysicalExecutorV1) markWorkspaceReadUnknownV1(ctx context.Context, authority ownerworkspaceread.AuthorizedExecutionV2, stage string, cause error) error {
 	digest, digestErr := contract.Digest("workspace-read-indeterminate", struct{ Stage, Cause string }{stage, cause.Error()})
 	if digestErr == nil {
-		_, _ = e.store.MarkWorkspaceReadUnknownV1(ctx, attempt, digest)
+		if transition, transitionErr := authority.Unknown(digest, e.clock()); transitionErr == nil {
+			_, _ = e.authorizedStore.TransitionWorkspaceReadAuthorizedV2(ctx, transition)
+		}
 	}
 	return runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read crossed its actual point; inspect the original attempt")
+}
+
+func (e *WorkspaceReadPhysicalExecutorV1) failWorkspaceReadAuthorizedV2(ctx context.Context, authority ownerworkspaceread.AuthorizedExecutionV2, failure string) error {
+	transition, err := authority.Failed(failure, e.clock())
+	if err != nil {
+		return err
+	}
+	_, err = e.authorizedStore.TransitionWorkspaceReadAuthorizedV2(ctx, transition)
+	return err
 }
 
 func validateWorkspaceReadCommandAuthorizationV1(c contract.WorkspaceReadCommandV1, p runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1, a runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) error {

@@ -457,13 +457,13 @@ func (s *Store) InspectWorkspaceReadAttemptForAdmissionV1(ctx context.Context, a
 }
 
 func (s *Store) CompleteWorkspaceReadV1(ctx context.Context, expected contract.Ref, observation contract.WorkspaceReadObservationV1) (contract.WorkspaceReadExecutionProjectionV1, error) {
-	return s.finishWorkspaceReadV1(ctx, expected, &observation, "", "")
+	return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
 }
 func (s *Store) MarkWorkspaceReadUnknownV1(ctx context.Context, expected contract.Ref, unknown string) (contract.WorkspaceReadExecutionProjectionV1, error) {
-	return s.finishWorkspaceReadV1(ctx, expected, nil, unknown, "")
+	return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
 }
 func (s *Store) FailWorkspaceReadV1(ctx context.Context, expected contract.Ref, failure string) (contract.WorkspaceReadExecutionProjectionV1, error) {
-	return s.finishWorkspaceReadV1(ctx, expected, nil, "", failure)
+	return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
 }
 
 // RecoverStartedWorkspaceReadAfterRestartV1 is an explicit Owner recovery
@@ -479,6 +479,12 @@ func (s *Store) RecoverStartedWorkspaceReadAfterRestartV1(ctx context.Context, e
 		return contract.WorkspaceReadExecutionProjectionV1{}, err
 	}
 	defer tx.Rollback()
+	if _, bindingErr := inspectWorkspaceReadAdmissionForWorkspaceAttemptTxV2(ctx, tx, exact); bindingErr != nil {
+		if errors.Is(bindingErr, ports.ErrNotFound) {
+			return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
+		}
+		return contract.WorkspaceReadExecutionProjectionV1{}, bindingErr
+	}
 	var stable, originalDigest, previousIncarnation string
 	var originalRevision uint64
 	if err = tx.QueryRowContext(ctx, `SELECT stable_digest,revision,digest FROM workspace_read_attempt_origin WHERE attempt_id=?`, exact.ID).Scan(&stable, &originalRevision, &originalDigest); err != nil {
@@ -560,7 +566,7 @@ func (s *Store) RecoverStartedWorkspaceReadAfterRestartV1(ctx context.Context, e
 	return s.inspectWorkspaceReadStableV1(ctx, stable)
 }
 
-func (s *Store) finishWorkspaceReadV1(ctx context.Context, expected contract.Ref, observation *contract.WorkspaceReadObservationV1, unknown, failure string) (contract.WorkspaceReadExecutionProjectionV1, error) {
+func (s *Store) finishWorkspaceReadAuthorizedV2(ctx context.Context, expected contract.Ref, observation *contract.WorkspaceReadObservationV1, unknown, failure string, authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) (contract.WorkspaceReadExecutionProjectionV1, error) {
 	if observation == nil && !contract.ValidDigest(unknown) && !contract.ValidDigest(failure) {
 		return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
 	}
@@ -584,6 +590,26 @@ func (s *Store) finishWorkspaceReadV1(ctx context.Context, expected contract.Ref
 		return contract.WorkspaceReadExecutionProjectionV1{}, err
 	}
 	now := s.clock()
+	if err = authorization.Validate(); err != nil {
+		return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
+	}
+	authorizationDigest, digestErr := authorization.DigestV3()
+	if digestErr != nil || authorizationDigest != authorization.AuthorizationDigest {
+		return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
+	}
+	bindingV2, bindingErr := inspectWorkspaceReadAdmissionForRuntimeAttemptTxV2(ctx, tx, authorization.Attempt)
+	if bindingErr != nil ||
+		bindingV2.Validate() != nil ||
+		bindingV2.WorkspaceReadAttempt.OwnerRef() != expected ||
+		bindingV2.AuthorizationDigest != authorization.AuthorizationDigest ||
+		bindingV2.Association != authorization.Association ||
+		bindingV2.DomainCommand != authorization.DomainCommand ||
+		bindingV2.AdmissionBinding.AdmissionReceipt.ID != current.AdmissionReceipt.ID ||
+		uint64(bindingV2.AdmissionBinding.AdmissionReceipt.Revision) != current.AdmissionReceipt.Revision ||
+		string(bindingV2.AdmissionBinding.AdmissionReceipt.Digest) != current.AdmissionReceipt.Digest ||
+		string(bindingV2.AdmissionBinding.AdmissionReceipt.StableKeyDigest) != current.AdmissionReceipt.StableKeyDigest {
+		return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
+	}
 	if err = current.ValidateCurrent(now); err != nil {
 		return contract.WorkspaceReadExecutionProjectionV1{}, err
 	}
@@ -599,6 +625,10 @@ func (s *Store) finishWorkspaceReadV1(ctx context.Context, expected contract.Ref
 		return contract.WorkspaceReadExecutionProjectionV1{}, err
 	}
 	if !contract.SameRef(current.Reservation, reservation.Meta.Ref()) || current.Meta.ExpiresUnixNano != minWorkspaceReadStoreExpiryV1(reservation.Meta.ExpiresUnixNano, current.AdmissionReceipt.ExpiresUnixNano) {
+		return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
+	}
+	if bindingV2.WorkspaceReadCommand.Meta.Ref() != reservation.Command ||
+		bindingV2.AdmissionBinding.Command != reservation.Command {
 		return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
 	}
 	if current.State != contract.WorkspaceReadStartedV1 {

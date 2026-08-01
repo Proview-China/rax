@@ -36,27 +36,28 @@ import (
 )
 
 type workspaceReadExecutorCaseV1 struct {
-	setup               func(*testing.T, string)
-	mutateWorkspace     func(*contract.WorkspaceView)
-	startByte           uint64
-	commandMetaAfter    time.Duration
-	commandRequestAfter time.Duration
-	runtimeUnifiedAfter time.Duration
-	expectedTTLAfter    time.Duration
-	singleExecution     bool
-	hiddenScopes        []string
-	expectedState       contract.WorkspaceReadStateV1
-	expectedContent     string
-	expectedAdapter     uint64
-	expectedPhysical    uint64
-	expectedBoundary    kernel.WorkspaceReadActualPointBoundaryV1
-	expectInspectError  bool
-	expectBeforeActual  bool
-	runtimeLeaseS2Drift bool
-	driftReservation    bool
-	driftAttempt        bool
-	useFakeActual       bool
-	verifyBindingV2     bool
+	setup                func(*testing.T, string)
+	mutateWorkspace      func(*contract.WorkspaceView)
+	startByte            uint64
+	commandMetaAfter     time.Duration
+	commandRequestAfter  time.Duration
+	runtimeUnifiedAfter  time.Duration
+	expectedTTLAfter     time.Duration
+	singleExecution      bool
+	hiddenScopes         []string
+	expectedState        contract.WorkspaceReadStateV1
+	expectedContent      string
+	expectedAdapter      uint64
+	expectedPhysical     uint64
+	expectedBoundary     kernel.WorkspaceReadActualPointBoundaryV1
+	expectInspectError   bool
+	expectBeforeActual   bool
+	runtimeLeaseS2Drift  bool
+	driftReservation     bool
+	driftAttempt         bool
+	useFakeActual        bool
+	verifyBindingV2      bool
+	attackLegacyComplete bool
 }
 
 type lockedBuffer struct {
@@ -85,6 +86,14 @@ func TestWorkspaceReadPublicExecutorCreatesRuntimeAttemptAdmissionBindingV2(t *t
 		startByte: 6, expectedState: contract.WorkspaceReadObservedV1,
 		expectedContent: "Praxis", expectedAdapter: 1, expectedPhysical: 1,
 		useFakeActual: true, verifyBindingV2: true,
+	})
+}
+
+func TestWorkspaceReadPublicExecutorRejectsLegacyCompleteWithValidV2AttemptV2(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		startByte: 6, expectedState: contract.WorkspaceReadObservedV1,
+		expectedContent: "Praxis", expectedAdapter: 1, expectedPhysical: 1,
+		useFakeActual: true, singleExecution: true, attackLegacyComplete: true,
 	})
 }
 
@@ -526,12 +535,16 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		if spec.driftReservation || spec.driftAttempt {
 			actualPoint = &driftingWorkspaceReadActualPointV1{
 				inner:            concrete,
-				store:            store,
 				databasePath:     databasePath,
 				driftReservation: spec.driftReservation,
 				driftAttempt:     spec.driftAttempt,
 			}
 		}
+	}
+	var legacyAttack *legacyCompletingWorkspaceReadActualPointV2
+	if spec.attackLegacyComplete {
+		legacyAttack = &legacyCompletingWorkspaceReadActualPointV2{inner: actualPoint, store: store, authorization: authorization}
+		actualPoint = legacyAttack
 	}
 	counted := &countingWorkspaceReadActualPointV1{inner: actualPoint}
 	enforcementReader := &sequencedWorkspaceReadEnforcementReaderV1{first: current, second: current}
@@ -583,6 +596,12 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		}
 		if counted.calls.Load() != spec.expectedAdapter {
 			t.Fatalf("actual-point adapter calls=%d, want %d", counted.calls.Load(), spec.expectedAdapter)
+		}
+		if legacyAttack != nil && !errors.Is(legacyAttack.err, sandboxports.ErrConflict) {
+			t.Fatalf("legacy Complete did not fail closed after a valid V2 reservation: %v", legacyAttack.err)
+		}
+		if legacyAttack != nil && (!errors.Is(legacyAttack.wrongAttemptErr, sandboxports.ErrConflict) || !errors.Is(legacyAttack.wrongAdmissionErr, sandboxports.ErrConflict)) {
+			t.Fatalf("authorized transition splice was accepted: attempt=%v admission=%v", legacyAttack.wrongAttemptErr, legacyAttack.wrongAdmissionErr)
 		}
 		inspectionDB, openErr := sql.Open("sqlite", databasePath)
 		if openErr != nil {
@@ -1092,6 +1111,91 @@ func (*successfulWorkspaceReadActualPointV2) ReadWorkspaceFileV1(
 	}, nil
 }
 
+// legacyCompletingWorkspaceReadActualPointV2 models an external caller that
+// has observed a valid Started attempt and a genuine provider result, but does
+// not hold the Sandbox-internal AuthorizedTransition capability. The public V1
+// completion surface must still write nothing; the kernel then uses the exact
+// capability issued before the actual point to persist the same result.
+type legacyCompletingWorkspaceReadActualPointV2 struct {
+	inner             kernel.WorkspaceReadActualPointV1
+	store             *sqlitestore.Store
+	authorization     runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3
+	err               error
+	wrongAttemptErr   error
+	wrongAdmissionErr error
+}
+
+func (a *legacyCompletingWorkspaceReadActualPointV2) ReadWorkspaceFileV1(
+	ctx context.Context,
+	request kernel.WorkspaceReadActualPointRequestV1,
+) (kernel.WorkspaceReadActualPointResultV1, error) {
+	result, err := a.inner.ReadWorkspaceFileV1(ctx, request)
+	if err != nil {
+		return result, err
+	}
+	checked := time.Unix(0, request.S1CheckedUnixNano).UTC()
+	expires := time.Unix(0, minWorkspaceReadExecutorExpiryV2(
+		request.ExpiresUnixNano,
+		request.Reservation.Meta.ExpiresUnixNano,
+		request.CurrentQuery.AdmissionReceipt.ExpiresUnixNano,
+		result.ProviderReceipt.ExpiresUnixNano,
+	))
+	observation, sealErr := contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
+		Reservation: request.Reservation.Meta.Ref(), Command: request.Command.Meta.Ref(), WorkspaceView: request.Workspace.Meta.Ref(), File: result.File,
+		RelativePath: request.Command.RelativePath, StartByte: result.StartByte, ReturnedBytes: result.ReturnedBytes, TotalBytes: result.TotalBytes,
+		Complete: result.Complete, Content: result.Content, ContentDigest: result.ContentDigest,
+		S1CheckedUnixNano: request.S1CheckedUnixNano, S2CheckedUnixNano: request.S1CheckedUnixNano,
+		AdmissionReceipt: request.CurrentQuery.AdmissionReceipt, ProviderReceipt: result.ProviderReceipt,
+	}, "workspace-read-observation-legacy-attack", checked, expires)
+	if sealErr != nil {
+		return result, sealErr
+	}
+	_, a.err = a.store.CompleteWorkspaceReadV1(ctx, request.CurrentQuery.Attempt.OwnerRef(), observation)
+
+	wrongAttempt := request.CurrentQuery.Attempt
+	wrongAttempt.ID += "-spliced"
+	wrongAttemptAuthority, authorityErr := ownerworkspaceread.NewAuthorizedExecutionV2(wrongAttempt, a.authorization, checked)
+	if authorityErr != nil {
+		return result, authorityErr
+	}
+	unknownDigest, digestErr := contract.Digest("legacy-completion-attack", "wrong-attempt")
+	if digestErr != nil {
+		return result, digestErr
+	}
+	wrongAttemptTransition, authorityErr := wrongAttemptAuthority.Unknown(unknownDigest, checked)
+	if authorityErr != nil {
+		return result, authorityErr
+	}
+	_, a.wrongAttemptErr = a.store.TransitionWorkspaceReadAuthorizedV2(ctx, wrongAttemptTransition)
+
+	wrongAdmission := observation
+	wrongAdmission.AdmissionReceipt.ID += "-spliced"
+	wrongAdmission, sealErr = contract.SealWorkspaceReadObservationV1(wrongAdmission, observation.Meta.ID+"-spliced", checked, expires)
+	if sealErr != nil {
+		return result, sealErr
+	}
+	correctAuthority, authorityErr := ownerworkspaceread.NewAuthorizedExecutionV2(request.CurrentQuery.Attempt, a.authorization, checked)
+	if authorityErr != nil {
+		return result, authorityErr
+	}
+	wrongAdmissionTransition, authorityErr := correctAuthority.Observed(wrongAdmission, checked)
+	if authorityErr != nil {
+		return result, authorityErr
+	}
+	_, a.wrongAdmissionErr = a.store.TransitionWorkspaceReadAuthorizedV2(ctx, wrongAdmissionTransition)
+	return result, nil
+}
+
+func minWorkspaceReadExecutorExpiryV2(values ...int64) int64 {
+	minimum := int64(0)
+	for _, value := range values {
+		if value > 0 && (minimum == 0 || value < minimum) {
+			minimum = value
+		}
+	}
+	return minimum
+}
+
 type countingWorkspaceReadCurrentReaderV2 struct {
 	inner sandboxports.WorkspaceReadCurrentProjectionReaderV2
 	calls atomic.Uint64
@@ -1195,7 +1299,6 @@ type countingWorkspaceReadActualPointV1 struct {
 
 type driftingWorkspaceReadActualPointV1 struct {
 	inner            kernel.WorkspaceReadActualPointV1
-	store            *sqlitestore.Store
 	databasePath     string
 	driftReservation bool
 	driftAttempt     bool
@@ -1238,7 +1341,41 @@ func (a *driftingWorkspaceReadActualPointV1) ReadWorkspaceFileV1(ctx context.Con
 				a.err = err
 				return
 			}
-			_, a.err = a.store.MarkWorkspaceReadUnknownV1(ctx, input.CurrentQuery.Attempt.OwnerRef(), unknown)
+			db, err := sql.Open("sqlite", a.databasePath)
+			if err != nil {
+				a.err = err
+				return
+			}
+			defer db.Close()
+			var body []byte
+			if err = db.QueryRowContext(ctx, `SELECT body FROM workspace_read_attempt_current WHERE attempt_id=?`, input.CurrentQuery.Attempt.ID).Scan(&body); err != nil {
+				a.err = err
+				return
+			}
+			var current contract.WorkspaceReadAttemptV1
+			if err = json.Unmarshal(body, &current); err != nil {
+				a.err = err
+				return
+			}
+			current.State = contract.WorkspaceReadUnknownV1
+			current.UnknownDigest = unknown
+			current.Observation = nil
+			current.FailureDigest = ""
+			current, err = contract.SealWorkspaceReadAttemptV1(
+				current, current.Meta.ID, current.Meta.Revision+1,
+				time.Unix(0, current.Meta.UpdatedUnixNano).Add(time.Nanosecond),
+				time.Unix(0, current.Meta.ExpiresUnixNano),
+			)
+			if err != nil {
+				a.err = err
+				return
+			}
+			body, err = json.Marshal(current)
+			if err != nil {
+				a.err = err
+				return
+			}
+			_, a.err = db.ExecContext(ctx, `UPDATE workspace_read_attempt_current SET revision=?,digest=?,body=? WHERE attempt_id=?`, current.Meta.Revision, current.Meta.Digest, body, current.Meta.ID)
 		}
 	})
 	if a.err != nil {

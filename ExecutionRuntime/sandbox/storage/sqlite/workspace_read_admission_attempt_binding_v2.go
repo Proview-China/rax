@@ -394,4 +394,41 @@ func inspectWorkspaceReadAdmissionForRuntimeAttemptTxV2(
 	return binding, nil
 }
 
+func inspectWorkspaceReadAdmissionForWorkspaceAttemptTxV2(
+	ctx context.Context,
+	source queryer,
+	exact contract.WorkspaceReadAttemptRefV1,
+) (ports.WorkspaceReadAdmissionAttemptBindingV2, error) {
+	if err := exact.Validate(); err != nil {
+		return ports.WorkspaceReadAdmissionAttemptBindingV2{}, err
+	}
+	var body []byte
+	if err := source.QueryRowContext(
+		ctx,
+		`SELECT body
+		   FROM workspace_read_runtime_attempt_admission_binding_v2
+		  WHERE workspace_attempt_id=? AND workspace_attempt_revision=? AND workspace_attempt_digest=?`,
+		exact.ID,
+		exact.Revision,
+		exact.Digest,
+	).Scan(&body); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ports.WorkspaceReadAdmissionAttemptBindingV2{}, ports.ErrNotFound
+		}
+		return ports.WorkspaceReadAdmissionAttemptBindingV2{}, err
+	}
+	var candidate ports.WorkspaceReadAdmissionAttemptBindingV2
+	if err := decode(body, &candidate); err != nil || candidate.Validate() != nil || candidate.WorkspaceReadAttempt != exact {
+		return ports.WorkspaceReadAdmissionAttemptBindingV2{}, ports.ErrConflict
+	}
+	winner, err := inspectWorkspaceReadAdmissionForRuntimeAttemptTxV2(ctx, source, candidate.RuntimeAttempt)
+	if err != nil || !reflect.DeepEqual(winner, candidate) {
+		if err != nil {
+			return ports.WorkspaceReadAdmissionAttemptBindingV2{}, err
+		}
+		return ports.WorkspaceReadAdmissionAttemptBindingV2{}, ports.ErrConflict
+	}
+	return winner, nil
+}
+
 var _ ports.WorkspaceReadRuntimeAttemptAdmissionReaderV2 = (*Store)(nil)

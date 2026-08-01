@@ -52,7 +52,11 @@ func TestWorkspaceReadAuthorizedReservationV2InternalImportBoundary(t *testing.T
 		t.Fatal(err)
 	}
 
-	// Public ports remain read-only: the writer name cannot be exported there.
+	// Public ports do not export either Sandbox-owner authorization capability.
+	forbidden := map[string]struct{}{
+		"ReserveWorkspaceReadAuthorizedV2":    {},
+		"TransitionWorkspaceReadAuthorizedV2": {},
+	}
 	portsDir := filepath.Join(executionRuntime, "sandbox", "ports")
 	err = filepath.WalkDir(portsDir, func(path string, entry os.DirEntry, walkErr error) error {
 		if walkErr != nil || entry.IsDir() || filepath.Ext(path) != ".go" {
@@ -63,7 +67,10 @@ func TestWorkspaceReadAuthorizedReservationV2InternalImportBoundary(t *testing.T
 			return parseErr
 		}
 		ast.Inspect(file, func(node ast.Node) bool {
-			if ident, ok := node.(*ast.Ident); ok && ident.Name == "ReserveWorkspaceReadAuthorizedV2" {
+			if ident, ok := node.(*ast.Ident); ok {
+				if _, blocked := forbidden[ident.Name]; !blocked {
+					return true
+				}
 				t.Errorf("public ports export owner-private writer in %s", path)
 			}
 			return true

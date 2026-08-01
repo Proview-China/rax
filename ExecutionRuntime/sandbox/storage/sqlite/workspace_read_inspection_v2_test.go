@@ -977,26 +977,61 @@ func seedWorkspaceReadInspectionTerminalV2(
 	t.Helper()
 	ctx := context.Background()
 	reservation, attempt := seedWorkspaceReadInspectionStartedV2(t, store, now, expires, name)
+	terminalNow := now
+	current := attempt
+	var observation *contract.WorkspaceReadObservationV1
 	switch state {
 	case contract.WorkspaceReadObservedV1:
-		observation := workspaceReadCompletionObservationFixtureV1(t, reservation, attempt, now, expires)
-		sealed, err := contract.SealWorkspaceReadObservationV1(observation, "inspection-observation-"+name, now, expires)
+		value := workspaceReadCompletionObservationFixtureV1(t, reservation, attempt, now, expires)
+		sealed, err := contract.SealWorkspaceReadObservationV1(value, "inspection-observation-"+name, terminalNow, expires)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err = store.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), sealed); err != nil {
-			t.Fatal(err)
-		}
+		observation = &sealed
+		current.State = contract.WorkspaceReadObservedV1
+		ref := sealed.Meta.Ref()
+		current.Observation = &ref
 	case contract.WorkspaceReadFailedV1:
-		if _, err := store.FailWorkspaceReadV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "failed-"+name)); err != nil {
-			t.Fatal(err)
-		}
+		current.State = contract.WorkspaceReadFailedV1
+		current.FailureDigest = mustWorkspaceReadDigest(t, "failed-"+name)
 	case contract.WorkspaceReadUnknownV1:
-		if _, err := store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "unknown-"+name)); err != nil {
-			t.Fatal(err)
-		}
+		current.State = contract.WorkspaceReadUnknownV1
+		current.UnknownDigest = mustWorkspaceReadDigest(t, "unknown-"+name)
 	default:
 		t.Fatalf("unsupported terminal fixture state %q", state)
+	}
+	sealedCurrent, err := contract.SealWorkspaceReadAttemptV1(current, current.Meta.ID, current.Meta.Revision+1, terminalNow, expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentBody, err := encode(sealedCurrent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := store.db.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback()
+	if observation != nil {
+		body, encodeErr := encode(*observation)
+		if encodeErr != nil {
+			t.Fatal(encodeErr)
+		}
+		if _, err = tx.ExecContext(ctx, `INSERT INTO workspace_read_observation(observation_id,stable_digest,body) VALUES(?,?,?)`, observation.Meta.ID, reservation.StableKeyDigest, body); err != nil {
+			t.Fatal(err)
+		}
+	}
+	result, err := tx.ExecContext(ctx, `UPDATE workspace_read_attempt_current SET revision=?,digest=?,body=? WHERE attempt_id=? AND revision=? AND digest=?`, sealedCurrent.Meta.Revision, sealedCurrent.Meta.Digest, currentBody, attempt.Meta.ID, attempt.Meta.Revision, attempt.Meta.Digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		t.Fatalf("seed terminal current rows=%d err=%v", rows, err)
+	}
+	if err = tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 	return reservation, attempt
 }

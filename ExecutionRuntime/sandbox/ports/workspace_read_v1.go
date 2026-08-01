@@ -100,6 +100,9 @@ type WorkspaceReadReservationExactReaderV1 interface {
 	InspectWorkspaceReadReservationExactV1(context.Context, contract.Ref) (contract.WorkspaceReadReservationV1, error)
 }
 
+// WorkspaceReadOwnerStoreV1 is retained for reference/test compatibility.
+// Its public terminal writers fail closed in the durable SQLite Owner; real
+// physical composition uses Sandbox-internal V2 authorization capabilities.
 type WorkspaceReadOwnerStoreV1 interface {
 	WorkspaceReadAdmissionAttemptReaderV1
 	ReserveWorkspaceReadV1(context.Context, contract.WorkspaceReadReservationV1, contract.WorkspaceReadAttemptV1, WorkspaceReadAdmissionAttemptBindingV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error)
