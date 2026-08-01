@@ -13,6 +13,7 @@ import (
 
 	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/testkit"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
 
@@ -213,7 +214,12 @@ func TestWorkspaceReadInspectionV2RejectsOriginAndLineageSplices(t *testing.T) {
 			}
 			command.RelativePath = "src/spliced.txt"
 			command.ExpectedFileRef = nil
-			spliced, err := contract.SealWorkspaceReadCommandV1(command, command.Meta.ID, now, expires)
+			spliced, err := contract.SealWorkspaceReadCommandV1(
+				command,
+				command.Meta.ID,
+				now,
+				time.Unix(0, command.Meta.ExpiresUnixNano),
+			)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -284,11 +290,11 @@ func TestWorkspaceReadInspectionV2RejectsOriginAndLineageSplices(t *testing.T) {
 	}
 
 	t.Run("workspace-file-scope", func(t *testing.T) {
-		store, _, attempt := openWorkspaceReadInspectionObservedFixtureV2(t, now, expires, "observed-workspace-scope")
+		store, reservation, attempt := openWorkspaceReadInspectionObservedFixtureV2(t, now, expires, "observed-workspace-scope")
 		var body []byte
 		if err := store.db.QueryRow(
 			`SELECT body FROM workspace_view_history WHERE view_id=?`,
-			"workspace",
+			reservation.WorkspaceView.ID,
 		).Scan(&body); err != nil {
 			t.Fatal(err)
 		}
@@ -342,8 +348,8 @@ func TestWorkspaceReadInspectionV2RejectsResealedObservedProjectionSplices(t *te
 			value.RelativePath = "src/other.txt"
 			value.File.ID = otherPathFileID
 		},
-		"file-digest": func(value *contract.WorkspaceReadObservationV1) {
-			value.File.Digest = mustWorkspaceReadDigest(t, "other-file")
+		"file-revision": func(value *contract.WorkspaceReadObservationV1) {
+			value.File.Revision++
 		},
 		"provider-checked-before-origin": func(value *contract.WorkspaceReadObservationV1) {
 			value.ProviderReceipt.CheckedUnixNano = now.Add(-time.Nanosecond).UnixNano()
@@ -916,9 +922,15 @@ func seedWorkspaceReadInspectionStartedV2(
 ) (contract.WorkspaceReadReservationV1, contract.WorkspaceReadAttemptV1) {
 	t.Helper()
 	ctx := context.Background()
+	closure := newWorkspaceReadPublicationClosureV2(
+		t,
+		testkit.WorkspaceReadCommandPublicationV2(now, "sqlite-completion"),
+		now,
+	)
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, name)
-	_, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
-	reservation.RequestDigest = command.Meta.Digest
+	reservation.RequestDigest = closure.command.Meta.Digest
+	reservation.PayloadDigest = closure.command.SourceToolPayloadDigest
+	reservation.AttemptID = closure.command.AttemptID
 	var err error
 	reservation, err = contract.SealWorkspaceReadReservationV1(
 		reservation,
@@ -930,10 +942,11 @@ func seedWorkspaceReadInspectionStartedV2(
 		t.Fatal(err)
 	}
 	attempt.RequestDigest = reservation.RequestDigest
+	attempt.PayloadDigest = reservation.PayloadDigest
 	attempt.Reservation = reservation.Meta.Ref()
 	attempt, err = contract.SealWorkspaceReadAttemptV1(
 		attempt,
-		attempt.Meta.ID,
+		closure.command.AttemptID,
 		attempt.Meta.Revision,
 		now,
 		expires,
@@ -941,7 +954,12 @@ func seedWorkspaceReadInspectionStartedV2(
 	if err != nil {
 		t.Fatal(err)
 	}
-	seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
+	if _, err = store.CreateWorkspaceViewV1(ctx, closure.fixture.Workspace); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.ApplyWorkspaceReadCommandPublicationV2(ctx, closure.capability); err != nil {
+		t.Fatal(err)
+	}
 	if _, created, err := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); err != nil || !created {
 		t.Fatalf("reserve inspection fixture: created=%v err=%v", created, err)
 	}

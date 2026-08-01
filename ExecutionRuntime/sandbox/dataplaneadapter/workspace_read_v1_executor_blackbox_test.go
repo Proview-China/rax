@@ -27,6 +27,7 @@ import (
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
 	dataplaneadapter "github.com/Proview-China/rax/ExecutionRuntime/sandbox/dataplaneadapter"
+	ownerworkspaceread "github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/owner/workspaceread"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/testkit"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/kernel"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
@@ -236,26 +237,35 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	workspaceExpires := time.Unix(0, 4_000_000_008_000_000_000)
 	workspaceDigest := "sha256:021c67f065e27e7e93918819bfbd85d62dc7c9a50a7599779b68bdc4a293f2ba"
 	fileScopeDigest := "sha256:a9e25d859be79d6716a9397eed2e1400d936a6b3233247f5664d1a06e42478a7"
-	providerPayload, err := dataplaneadapter.NewWorkspaceReadPayloadV1(dataplaneadapter.WorkspaceReadPayloadV1{
-		WorkspaceBindingID: "workspace-view", WorkspaceDigest: workspaceDigest,
-		Workspace: dataplaneadapter.ExactRefV1{
-			ID: "workspace-view", Revision: 1, Digest: workspaceDigest, ExpiresUnixNano: workspaceExpires.UnixNano(),
+	canonicalInline, err := json.Marshal(contract.WorkspaceReadCanonicalPayloadV2{
+		WorkspaceRoot: contract.WorkspaceReadSourceWorkspaceRefV2{
+			ID: "workspace-view", Revision: 1, Digest: runtimecore.Digest(workspaceDigest),
 		},
-		FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6, S1Checked: true,
+		RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6,
+		RequestedNotAfter: commandRequestedNotAfter.UnixNano(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerPayloadDigest, err := digestWorkspaceReadExecutorIPC("ProviderPayloadV1", providerPayload)
-	if err != nil {
-		t.Fatal(err)
+	runtimePayload := runtimeports.OpaquePayloadV2{
+		Schema: runtimeports.SchemaRefV2{
+			Namespace: "praxis.tool", Name: "workspace-read", Version: "1.0.0",
+			MediaType: "application/json", ContentDigest: runtimecore.DigestBytes([]byte("workspace-read-schema")),
+		},
+		ContentDigest: runtimecore.DigestBytes(canonicalInline),
+		Length:        uint64(len(canonicalInline)), Inline: canonicalInline,
+		LimitPolicy: runtimeports.OpaqueLimitPolicyRefV2{
+			Policy: "praxis.tool/workspace-read-limit",
+			Digest: runtimecore.DigestBytes([]byte("workspace-read-limit")),
+		},
 	}
-	current := buildWorkspaceReadRuntimeCurrentV4(t, now, providerPayloadDigest)
+	runtimeFixture := buildWorkspaceReadRuntimeFixtureV4(t, now, runtimePayload)
+	current := runtimeFixture.current
 	workspace := contract.WorkspaceView{
-		Meta:            contract.Meta{ContractVersion: contract.ContractFamily, ID: "workspace-view", Revision: 1, Digest: workspaceDigest, CreatedUnixNano: now.UnixNano(), UpdatedUnixNano: now.UnixNano(), ExpiresUnixNano: workspaceExpires.UnixNano()},
+		Meta:            contract.Meta{ContractVersion: contract.ContractFamily, ID: "workspace-view", Revision: 1, Digest: strings.TrimPrefix(workspaceDigest, "sha256:"), CreatedUnixNano: now.UnixNano(), UpdatedUnixNano: now.UnixNano(), ExpiresUnixNano: workspaceExpires.UnixNano()},
 		BaseArtifactRef: contract.Ref{ID: "base-artifact", Revision: 1, Digest: digestWorkspaceReadExecutorTest("base-artifact")}, BaseRevision: "main",
 		OverlayRef: contract.Ref{ID: "overlay", Revision: 1, Digest: digestWorkspaceReadExecutorTest("overlay")}, PolicyRef: contract.Ref{ID: "policy", Revision: 1, Digest: digestWorkspaceReadExecutorTest("policy")},
-		Lease:      contract.RuntimeLeaseBinding{TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), InstanceID: string(current.Sandbox.RuntimeLease.Instance.ID), InstanceEpoch: uint64(current.Sandbox.RuntimeLease.Instance.Epoch), LeaseID: string(current.Sandbox.RuntimeLease.Lease.ID), LeaseEpoch: uint64(current.Sandbox.RuntimeLease.Lease.Epoch), FenceEpoch: uint64(current.Sandbox.RuntimeLease.FenceEpoch), ScopeDigest: string(current.Sandbox.RuntimeLease.ScopeDigest), ObservedRevision: uint64(current.Sandbox.RuntimeLease.ObservedRevision), ExpiresUnixNano: current.Sandbox.RuntimeLease.Ref.ExpiresUnixNano},
+		Lease:      contract.RuntimeLeaseBinding{TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), InstanceID: string(current.Sandbox.RuntimeLease.Instance.ID), InstanceEpoch: uint64(current.Sandbox.RuntimeLease.Instance.Epoch), LeaseID: string(current.Sandbox.RuntimeLease.Lease.ID), LeaseEpoch: uint64(current.Sandbox.RuntimeLease.Lease.Epoch), FenceEpoch: uint64(current.Sandbox.RuntimeLease.FenceEpoch), ScopeDigest: strings.TrimPrefix(string(current.Sandbox.RuntimeLease.ScopeDigest), "sha256:"), ObservedRevision: uint64(current.Sandbox.RuntimeLease.ObservedRevision), ExpiresUnixNano: current.Sandbox.RuntimeLease.Ref.ExpiresUnixNano},
 		ReadScopes: []string{"src"}, WriteScopes: []string{"src"}, HiddenScopes: spec.hiddenScopes, FileScopeDigest: fileScopeDigest,
 	}
 	if spec.mutateWorkspace != nil {
@@ -266,13 +276,14 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := runtimeports.ExecutionDelegationRefV2{ID: "delegation-workspace-read", Revision: 1, Digest: runtimecore.DigestBytes([]byte("delegation-workspace-read"))}
-	preparedID, err := runtimeports.DerivePreparedProviderAttemptIDV2(delegation.ID, legacy.ID, legacy.AttemptID)
+	declaredDelegation := runtimeports.ExecutionDelegationRefV2{ID: "delegation-workspace-read", Revision: 1, Digest: runtimecore.DigestBytes([]byte("delegation-workspace-read-declared"))}
+	delegation := runtimeports.ExecutionDelegationRefV2{ID: declaredDelegation.ID, Revision: 2, Digest: runtimecore.DigestBytes([]byte("delegation-workspace-read-prepared"))}
+	preparedID, err := runtimeports.DerivePreparedProviderAttemptIDV2(declaredDelegation.ID, legacy.ID, legacy.AttemptID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	prepared, err := runtimeports.SealPreparedProviderAttemptRefV2(runtimeports.PreparedProviderAttemptRefV2{
-		ID: preparedID, Revision: 1, DeclaredDelegation: delegation, OperationDigest: current.Sandbox.OperationDigest,
+		ID: preparedID, Revision: 1, DeclaredDelegation: declaredDelegation, OperationDigest: current.Sandbox.OperationDigest,
 		IntentID: current.Sandbox.EffectID, IntentRevision: current.Sandbox.IntentRevision, IntentDigest: current.Sandbox.IntentDigest,
 		PermitID: legacy.ID, PermitRevision: legacy.Revision, PermitDigest: legacyDigest, AttemptID: current.Sandbox.AttemptID,
 		Provider: current.Sandbox.ProviderBinding, PayloadSchema: legacy.PayloadSchema, PayloadDigest: legacy.PayloadDigest, PayloadRevision: legacy.PayloadRevision,
@@ -285,30 +296,135 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if err = attempt.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	owner := runtimeports.EffectOwnerRefV2{Role: runtimeports.OwnerSettlement, ComponentID: current.Sandbox.ProviderBinding.ComponentID, ManifestDigest: current.Sandbox.ProviderBinding.ManifestDigest}
-	commandDraft := contract.WorkspaceReadCommandV1{
-		TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), SourceToolCommand: contract.Ref{ID: "tool-command", Revision: 1, Digest: digestWorkspaceReadExecutorTest("tool-command")},
-		SourceToolPayloadSchema: legacy.PayloadSchema.Key(), SourceToolPayloadDigest: string(legacy.PayloadDigest), SourceToolPayloadRevision: uint64(legacy.PayloadRevision),
-		WorkspaceView: workspace.Meta.Ref(), FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6, RequestedNotAfterUnixNano: commandRequestedNotAfter.UnixNano(),
-		OperationDigest: string(current.Sandbox.OperationDigest), EffectID: string(current.Sandbox.EffectID), IntentRevision: uint64(current.Sandbox.IntentRevision), IntentDigest: string(current.Sandbox.IntentDigest), AttemptID: current.Sandbox.AttemptID,
-		PreparedDigest: string(prepared.Digest), ProviderComponent: string(current.Sandbox.ProviderBinding.ComponentID), ProviderManifest: string(current.Sandbox.ProviderBinding.ManifestDigest),
-	}
-	if spec.verifyBindingV2 {
-		fileID, fileErr := contract.WorkspaceReadFileIDV1(workspace.Meta.ID, commandDraft.RelativePath)
-		if fileErr != nil {
-			t.Fatal(fileErr)
-		}
-		commandDraft.ExpectedFileRef = &contract.Ref{
-			ID: fileID, Revision: workspace.Meta.Revision,
-			Digest: digestWorkspaceReadExecutorTest("fake-whole-file"),
-		}
-	}
-	dispatchDigest, err := runtimecore.CanonicalJSONDigest("praxis.sandbox.workspace-read", "1.0.0", "OperationDispatchAttemptRefV3", attempt)
+	owner := runtimeFixture.intent.Owners[2]
+	intentDigest, err := runtimeFixture.intent.DigestV3()
 	if err != nil {
 		t.Fatal(err)
 	}
-	commandDraft.DispatchDigest = string(dispatchDigest)
-	command, err := contract.SealWorkspaceReadCommandV1(commandDraft, "workspace-read-command", now, commandMetaExpires)
+	effect, err := runtimeports.SealControlledOperationEffectCurrentProjectionV2(
+		runtimeports.ControlledOperationEffectCurrentProjectionV2{
+			Intent: runtimeFixture.intent, IntentDigest: intentDigest,
+			FactRevision: 2, State: contract.WorkspaceReadEffectDispatchIntentV2,
+			CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: runtimeUnifiedNotAfter.UnixNano(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted := runtimeports.PersistedOperationEnforcementRefV3{
+		PermitID: prepared.PermitID, PermitRevision: prepared.PermitRevision,
+		PermitDigest: prepared.PermitDigest, AttemptID: prepared.AttemptID,
+		OperationDigest: prepared.OperationDigest, Provider: prepared.Provider,
+		ReceiptDigest:    runtimecore.DigestBytes([]byte("workspace-read-enforcement-receipt")),
+		RecordedRevision: 1,
+	}
+	preparedSnapshot, err := runtimeports.SealControlledOperationPreparedSemanticSnapshotV2(
+		runtimeports.ControlledOperationPreparedSemanticSnapshotV2{
+			Prepared: prepared, Delegation: delegation, PersistedEnforcement: persisted,
+			OperationDigest: prepared.OperationDigest, EffectID: prepared.IntentID,
+			IntentRevision: prepared.IntentRevision, IntentDigest: prepared.IntentDigest,
+			Attempt: attempt, ProviderBinding: prepared.Provider,
+			PayloadSchema: prepared.PayloadSchema, PayloadDigest: prepared.PayloadDigest,
+			PayloadRevision: prepared.PayloadRevision,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedCurrent, err := runtimeports.SealControlledOperationPreparedCurrentProjectionV2(
+		runtimeports.ControlledOperationPreparedCurrentProjectionV2{
+			Snapshot: preparedSnapshot, CheckedUnixNano: now.UnixNano(),
+			ExpiresUnixNano: runtimeUnifiedNotAfter.UnixNano(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attemptDigest, err := contract.WorkspaceReadSourceRuntimeAttemptDigestV2(attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceNotAfter := commandMetaExpires
+	if sourceNotAfter.After(runtimeUnifiedNotAfter) {
+		sourceNotAfter = runtimeUnifiedNotAfter
+	}
+	sourceExpires := sourceNotAfter
+	if ceiling := now.Add(9 * time.Second); sourceExpires.After(ceiling) {
+		sourceExpires = ceiling
+	}
+	source, err := contract.SealWorkspaceReadSourceCurrentProjectionV2(
+		contract.WorkspaceReadSourceCurrentProjectionV2{
+			SourceCommand: contract.WorkspaceReadSourceCommandRefV2{
+				Owner: owner, Kind: contract.WorkspaceReadSourceCommandKindV2,
+				ID: "tool-command", Revision: 1,
+				Digest: strings.TrimPrefix(string(digestWorkspaceReadExecutorTest("tool-command")), "sha256:"),
+			},
+			Operation: current.Sandbox.Operation, OperationDigest: current.Sandbox.OperationDigest,
+			Prepared: prepared, PreparedSemanticDigest: preparedSnapshot.SemanticDigest,
+			RuntimeAttempt: attempt, RuntimeAttemptDigest: attemptDigest,
+			RuntimeEffectIntentDigest: intentDigest, RuntimeEffectFactRevision: effect.FactRevision,
+			RuntimeEffectState: contract.WorkspaceReadEffectDispatchIntentV2,
+			PayloadSchema:      runtimePayload.Schema, PayloadDigest: runtimePayload.ContentDigest,
+			PayloadRevision: 1, CanonicalInline: append([]byte(nil), canonicalInline...),
+			CanonicalInlineLength: uint64(len(canonicalInline)),
+			WorkspaceView:         workspace.Meta.Ref(), RelativePath: "src/main.txt",
+			StartByte: spec.startByte, MaxBytes: 6,
+			RequestedNotAfterUnixNano: commandRequestedNotAfter.UnixNano(),
+			SourceCreatedUnixNano:     now.UnixNano(), SourceNotAfterUnixNano: sourceNotAfter.UnixNano(),
+			CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: sourceExpires.UnixNano(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	semantic, err := contract.SealWorkspaceReadCommandPublicationSemanticV2(
+		source, effect, preparedCurrent, workspace, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := contract.SealWorkspaceReadPublishedCommandV2(semantic, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication, err := contract.SealWorkspaceReadCommandPublicationV2(
+		contract.WorkspaceReadCommandPublicationV2{Semantic: semantic},
+		command,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerCurrent, err := contract.SealInitialWorkspaceReadCommandOwnerCurrentV2(
+		contract.WorkspaceReadCommandOwnerCurrentV2{
+			Command: command.Meta.Ref(), Publication: publication.Meta.Ref(),
+			PublicationSemanticDigest:       publication.Semantic.Digest,
+			SourceCommand:                   publication.Semantic.SourceCommand,
+			SourceSemanticDigest:            publication.Semantic.SourceSemanticDigest,
+			SourceProjectionDigest:          source.ProjectionDigest,
+			SourceCheckedUnixNano:           source.CheckedUnixNano,
+			SourceExpiresUnixNano:           source.ExpiresUnixNano,
+			RuntimeEffectProjectionDigest:   effect.Digest,
+			RuntimeEffectCheckedUnixNano:    effect.CheckedUnixNano,
+			RuntimeEffectExpiresUnixNano:    effect.ExpiresUnixNano,
+			RuntimePreparedProjectionDigest: preparedCurrent.ProjectionDigest,
+			RuntimePreparedCheckedUnixNano:  preparedCurrent.CheckedUnixNano,
+			RuntimePreparedExpiresUnixNano:  preparedCurrent.ExpiresUnixNano,
+			WorkspaceView:                   workspace.Meta.Ref(),
+			WorkspaceSemanticDigest:         publication.Semantic.WorkspaceSemanticDigest,
+			WorkspaceCheckedUnixNano:        now.UnixNano(),
+			WorkspaceExpiresUnixNano:        workspace.Meta.ExpiresUnixNano,
+			WorkspaceLeaseExpiresUnixNano:   workspace.Lease.ExpiresUnixNano,
+			SemanticNotAfterUnixNano:        publication.Semantic.SemanticNotAfterUnixNano,
+		},
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicationCapability, err := ownerworkspaceread.NewInitialCommandPublicationV2(
+		command, publication, ownerCurrent, source, effect, preparedCurrent, workspace, now,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,7 +468,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if _, err = store.CreateWorkspaceViewV1(ctx, workspace); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+	if _, _, err = store.ApplyWorkspaceReadCommandPublicationV2(ctx, publicationCapability); err != nil {
 		t.Fatal(err)
 	}
 
@@ -361,7 +477,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	baseCurrent, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV1(
 		fixedWorkspaceReadEnforcementReaderV1{value: current},
 		fixedWorkspaceReadAssociationReaderV1{association},
-		store,
+		publishedWorkspaceReadCommandFixtureV2{command: command, clock: clock},
 		store,
 		clock,
 	)
@@ -430,7 +546,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			t.Fatal(err)
 		}
 	}
-	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(store, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, clock)
+	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(publishedWorkspaceReadCommandFixtureV2{command: command, clock: clock}, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -671,12 +787,11 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 				t.Fatal(readErr)
 			}
 		}
-		expectedBefore := *bindingV2.WorkspaceReadCommand.ExpectedFileRef
-		bindingV2.WorkspaceReadCommand.ExpectedFileRef.ID = "consumer-mutated"
+		expectedBefore := bindingV2.WorkspaceReadCommand.SourceToolCommand
+		bindingV2.WorkspaceReadCommand.SourceToolCommand.ID = "consumer-mutated"
 		unalias, inspectErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
-		if inspectErr != nil || unalias.WorkspaceReadCommand.ExpectedFileRef == nil ||
-			*unalias.WorkspaceReadCommand.ExpectedFileRef != expectedBefore {
-			t.Fatalf("V2 reader output alias leaked: %#v err=%v", unalias.WorkspaceReadCommand.ExpectedFileRef, inspectErr)
+		if inspectErr != nil || unalias.WorkspaceReadCommand.SourceToolCommand != expectedBefore {
+			t.Fatalf("V2 reader output alias leaked: %#v err=%v", unalias.WorkspaceReadCommand.SourceToolCommand, inspectErr)
 		}
 		storedSplices := []struct {
 			name    string
@@ -991,6 +1106,39 @@ type fixedWorkspaceReadAssociationReaderV1 struct {
 	value runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1
 }
 
+// publishedWorkspaceReadCommandFixtureV2 is a test-only V2 reader. The
+// physical constructor no longer accepts a raw Store/current reader.
+type publishedWorkspaceReadCommandFixtureV2 struct {
+	command contract.WorkspaceReadCommandV1
+	clock   func() time.Time
+}
+
+func (r publishedWorkspaceReadCommandFixtureV2) InspectWorkspaceReadCommandCurrentV1(
+	_ context.Context,
+	exact contract.Ref,
+) (contract.WorkspaceReadCommandV1, error) {
+	return r.inspect(exact)
+}
+
+func (r publishedWorkspaceReadCommandFixtureV2) InspectWorkspaceReadPublishedCommandCurrentV2(
+	_ context.Context,
+	exact contract.Ref,
+) (contract.WorkspaceReadCommandV1, error) {
+	return r.inspect(exact)
+}
+
+func (r publishedWorkspaceReadCommandFixtureV2) inspect(
+	exact contract.Ref,
+) (contract.WorkspaceReadCommandV1, error) {
+	if r.clock == nil || r.command.Meta.Ref() != exact || r.command.ValidateCurrent(r.clock()) != nil {
+		return contract.WorkspaceReadCommandV1{}, sandboxports.ErrConflict
+	}
+	return r.command, nil
+}
+
+var _ sandboxports.WorkspaceReadCommandCurrentReaderV1 = publishedWorkspaceReadCommandFixtureV2{}
+var _ sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2 = publishedWorkspaceReadCommandFixtureV2{}
+
 func (r fixedWorkspaceReadAssociationReaderV1) InspectCurrentPreparedDomainCommandAssociationV1(context.Context, runtimeports.PreparedDomainCommandAssociationRefV1) (runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1, error) {
 	return r.value, nil
 }
@@ -1234,7 +1382,38 @@ func (r workspaceReadRuntimeReviewReaderV4) InspectOperationReviewCurrentV4(cont
 	return r.value, nil
 }
 
-func buildWorkspaceReadRuntimeCurrentV4(t *testing.T, now time.Time, providerPayloadDigest string) runtimeports.CurrentOperationDispatchEnforcementV4 {
+type workspaceReadRuntimeFixtureV4 struct {
+	current runtimeports.CurrentOperationDispatchEnforcementV4
+	intent  runtimeports.OperationEffectIntentV3
+}
+
+func buildWorkspaceReadRuntimeCurrentV4(
+	t *testing.T,
+	now time.Time,
+	providerPayloadDigest string,
+) runtimeports.CurrentOperationDispatchEnforcementV4 {
+	t.Helper()
+	payload := runtimeports.OpaquePayloadV2{
+		Schema: runtimeports.SchemaRefV2{
+			Namespace: "praxis.tool", Name: "workspace-read", Version: "1.0.0",
+			MediaType:     "application/json",
+			ContentDigest: runtimecore.DigestBytes([]byte("workspace-read-schema")),
+		},
+		ContentDigest: runtimecore.Digest(providerPayloadDigest),
+		Length:        1, Ref: "workspace-read-provider-payload",
+		LimitPolicy: runtimeports.OpaqueLimitPolicyRefV2{
+			Policy: "praxis.tool/workspace-read-limit",
+			Digest: runtimecore.DigestBytes([]byte("workspace-read-limit")),
+		},
+	}
+	return buildWorkspaceReadRuntimeFixtureV4(t, now, payload).current
+}
+
+func buildWorkspaceReadRuntimeFixtureV4(
+	t *testing.T,
+	now time.Time,
+	payload runtimeports.OpaquePayloadV2,
+) workspaceReadRuntimeFixtureV4 {
 	t.Helper()
 	clock := func() time.Time { return now }
 	expires := now.Add(45 * time.Second).UnixNano()
@@ -1263,14 +1442,6 @@ func buildWorkspaceReadRuntimeCurrentV4(t *testing.T, now time.Time, providerPay
 		BindingSetID: "binding-workspace-read", BindingSetRevision: 1,
 		ComponentID: "praxis.sandbox/workspace-read", ManifestDigest: runtimecore.DigestBytes([]byte("manifest-workspace-read")),
 		ArtifactDigest: runtimecore.DigestBytes([]byte("artifact-workspace-read")), Capability: runtimeports.CapabilityNameV2(runtimeports.OperationScopeEvidenceActionEffectKindV3),
-	}
-	payload := runtimeports.OpaquePayloadV2{
-		Schema: runtimeports.SchemaRefV2{
-			Namespace: "praxis.tool", Name: "workspace-read", Version: "1.0.0", MediaType: "application/json",
-			ContentDigest: runtimecore.DigestBytes([]byte("workspace-read-schema")),
-		},
-		ContentDigest: runtimecore.Digest(providerPayloadDigest), Length: 1, Ref: "workspace-read-provider-payload",
-		LimitPolicy: runtimeports.OpaqueLimitPolicyRefV2{Policy: "praxis.tool/workspace-read-limit", Digest: runtimecore.DigestBytes([]byte("workspace-read-limit"))},
 	}
 	intent := runtimeports.OperationEffectIntentV3{
 		ContractVersion: runtimeports.OperationEffectContractVersionV3,
@@ -1469,7 +1640,7 @@ func buildWorkspaceReadRuntimeCurrentV4(t *testing.T, now time.Time, providerPay
 	if err != nil {
 		t.Fatal(err)
 	}
-	return executed
+	return workspaceReadRuntimeFixtureV4{current: executed, intent: intent}
 }
 
 func mustWorkspaceReadRuntimeOperationDigestV4(t *testing.T, subject runtimeports.OperationSubjectV3) runtimecore.Digest {

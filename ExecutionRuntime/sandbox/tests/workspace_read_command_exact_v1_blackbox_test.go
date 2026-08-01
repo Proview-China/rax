@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
+	ownerworkspaceread "github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/owner/workspaceread"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/testkit"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/storage/sqlite"
 )
@@ -22,8 +24,11 @@ func TestWorkspaceReadCommandExactReaderV1BlackboxExpiredRestartAndConcurrency(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	command := workspaceReadCommandExactBlackboxFixtureV1(t, created, expires)
-	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+	command := publishWorkspaceReadCommandExactBlackboxV2(t, ctx, store, created)
+	if command.Meta.ExpiresUnixNano >= expires.UnixNano() {
+		t.Fatalf("publication fixture no longer has a bounded lifetime: %#v", command.Meta)
+	}
+	if err != nil {
 		t.Fatal(err)
 	}
 	if err = store.Close(); err != nil {
@@ -36,8 +41,8 @@ func TestWorkspaceReadCommandExactReaderV1BlackboxExpiredRestartAndConcurrency(t
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = reopened.Close() })
-	if _, err = reopened.InspectWorkspaceReadCommandCurrentV1(ctx, command.Meta.Ref()); err == nil {
-		t.Fatal("expired Command remained readable through the current port")
+	if _, ok := any(reopened).(ports.WorkspaceReadCommandCurrentReaderV1); ok {
+		t.Fatal("Store structurally regained the public raw current port")
 	}
 	var reader ports.WorkspaceReadCommandExactReaderV1 = reopened
 
@@ -62,6 +67,82 @@ func TestWorkspaceReadCommandExactReaderV1BlackboxExpiredRestartAndConcurrency(t
 			t.Fatal(inspectErr)
 		}
 	}
+}
+
+func publishWorkspaceReadCommandExactBlackboxV2(
+	t *testing.T,
+	ctx context.Context,
+	store *sqlite.Store,
+	now time.Time,
+) contract.WorkspaceReadCommandV1 {
+	t.Helper()
+	fixture := testkit.WorkspaceReadCommandPublicationV2(now, "exact-blackbox")
+	semantic, err := contract.SealWorkspaceReadCommandPublicationSemanticV2(
+		fixture.Source,
+		fixture.Effect,
+		fixture.Prepared,
+		fixture.Workspace,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := contract.SealWorkspaceReadPublishedCommandV2(semantic, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication, err := contract.SealWorkspaceReadCommandPublicationV2(
+		contract.WorkspaceReadCommandPublicationV2{Semantic: semantic},
+		command,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	current, err := contract.SealInitialWorkspaceReadCommandOwnerCurrentV2(
+		contract.WorkspaceReadCommandOwnerCurrentV2{
+			Command: command.Meta.Ref(), Publication: publication.Meta.Ref(),
+			PublicationSemanticDigest:       publication.Semantic.Digest,
+			SourceCommand:                   publication.Semantic.SourceCommand,
+			SourceSemanticDigest:            publication.Semantic.SourceSemanticDigest,
+			SourceProjectionDigest:          fixture.Source.ProjectionDigest,
+			SourceCheckedUnixNano:           fixture.Source.CheckedUnixNano,
+			SourceExpiresUnixNano:           fixture.Source.ExpiresUnixNano,
+			RuntimeEffectProjectionDigest:   fixture.Effect.Digest,
+			RuntimeEffectCheckedUnixNano:    fixture.Effect.CheckedUnixNano,
+			RuntimeEffectExpiresUnixNano:    fixture.Effect.ExpiresUnixNano,
+			RuntimePreparedProjectionDigest: fixture.Prepared.ProjectionDigest,
+			RuntimePreparedCheckedUnixNano:  fixture.Prepared.CheckedUnixNano,
+			RuntimePreparedExpiresUnixNano:  fixture.Prepared.ExpiresUnixNano,
+			WorkspaceView:                   fixture.Workspace.Meta.Ref(),
+			WorkspaceSemanticDigest:         publication.Semantic.WorkspaceSemanticDigest,
+			WorkspaceCheckedUnixNano:        now.UnixNano(),
+			WorkspaceExpiresUnixNano:        fixture.Workspace.Meta.ExpiresUnixNano,
+			WorkspaceLeaseExpiresUnixNano:   fixture.Workspace.Lease.ExpiresUnixNano,
+			SemanticNotAfterUnixNano:        publication.Semantic.SemanticNotAfterUnixNano,
+		},
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	capability, err := ownerworkspaceread.NewInitialCommandPublicationV2(
+		command,
+		publication,
+		current,
+		fixture.Source,
+		fixture.Effect,
+		fixture.Prepared,
+		fixture.Workspace,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err = store.ApplyWorkspaceReadCommandPublicationV2(ctx, capability); err != nil {
+		t.Fatal(err)
+	}
+	return command
 }
 
 func TestWorkspaceReadCommandExactReaderV1PublicSurfaceIsReadOnly(t *testing.T) {

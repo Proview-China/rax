@@ -2,7 +2,6 @@ package kernel
 
 import (
 	"testing"
-	"time"
 
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
@@ -33,17 +32,11 @@ type noopWorkspaceReadEnforcementV4 struct {
 }
 
 func TestWorkspaceReadPhysicalExecutorV1RejectsV1OnlyOwnerStore(t *testing.T) {
-	_, err := NewWorkspaceReadPhysicalExecutorV1(
-		&noopWorkspaceReadCommandReaderV1{},
-		&noopWorkspaceReadAssociationReaderV1{},
-		&noopWorkspaceCurrentReaderV1{},
-		&noopWorkspaceReadSandboxReaderV1{},
-		&noopWorkspaceReadEnforcementV4{},
-		&v1OnlyWorkspaceReadStore{},
-		&countingWorkspaceReadActualPointV2{},
-		time.Now,
-	)
-	if err == nil {
-		t.Fatal("V1-only owner store exposed a physical execution bypass")
+	var rawOnly any = &noopWorkspaceReadCommandReaderV1{}
+	if _, ok := rawOnly.(sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2); ok {
+		t.Fatal("V1-only Command reader satisfied the published-current gate")
 	}
 }
+
+var _ sandboxports.WorkspaceReadOwnerStoreV1 = (*v1OnlyWorkspaceReadStore)(nil)
+var _ sandboxports.WorkspaceReadCommandCurrentReaderV1 = (*noopWorkspaceReadCommandReaderV1)(nil)

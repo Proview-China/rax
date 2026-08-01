@@ -91,7 +91,7 @@ type workspaceReadAuthorizedOwnerStoreV2 interface {
 }
 
 type WorkspaceReadPhysicalExecutorV1 struct {
-	commands        sandboxports.WorkspaceReadCommandCurrentReaderV1
+	commands        sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2
 	associations    runtimeports.PreparedDomainCommandAssociationCurrentReaderV1
 	workspaces      sandboxports.WorkspaceCurrentReaderV1
 	sandboxCurrent  runtimeports.OperationDispatchSandboxCurrentReaderV4
@@ -102,7 +102,7 @@ type WorkspaceReadPhysicalExecutorV1 struct {
 	clock           func() time.Time
 }
 
-func NewWorkspaceReadPhysicalExecutorV1(commands sandboxports.WorkspaceReadCommandCurrentReaderV1, associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1, workspaces sandboxports.WorkspaceCurrentReaderV1, sandboxCurrent runtimeports.OperationDispatchSandboxCurrentReaderV4, enforcement runtimeports.OperationDispatchEnforcementGovernancePortV4, store sandboxports.WorkspaceReadOwnerStoreV1, actualPoint WorkspaceReadActualPointV1, clock func() time.Time) (*WorkspaceReadPhysicalExecutorV1, error) {
+func NewWorkspaceReadPhysicalExecutorV1(commands sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2, associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1, workspaces sandboxports.WorkspaceCurrentReaderV1, sandboxCurrent runtimeports.OperationDispatchSandboxCurrentReaderV4, enforcement runtimeports.OperationDispatchEnforcementGovernancePortV4, store sandboxports.WorkspaceReadOwnerStoreV1, actualPoint WorkspaceReadActualPointV1, clock func() time.Time) (*WorkspaceReadPhysicalExecutorV1, error) {
 	if commands == nil || associations == nil || workspaces == nil || sandboxCurrent == nil || enforcement == nil || store == nil || actualPoint == nil || clock == nil {
 		return nil, runtimecore.NewError(runtimecore.ErrorInvalidArgument, runtimecore.ReasonInvalidReference, "workspace read physical executor dependencies are incomplete")
 	}
@@ -466,7 +466,7 @@ func (e *WorkspaceReadPhysicalExecutorV1) readCurrentClosureV1(ctx context.Conte
 		return runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1{}, contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, now, err
 	}
 	commandRef := contract.Ref{ID: authorization.DomainCommand.ID, Revision: uint64(authorization.DomainCommand.Revision), Digest: commandDigest}
-	command, err := e.commands.InspectWorkspaceReadCommandCurrentV1(ctx, commandRef)
+	command, err := e.commands.InspectWorkspaceReadPublishedCommandCurrentV2(ctx, commandRef)
 	if err != nil {
 		return association, command, contract.WorkspaceView{}, now, err
 	}
@@ -548,13 +548,17 @@ func validateWorkspaceReadActualPointResultV1(r WorkspaceReadActualPointResultV1
 
 func validateWorkspaceReadRuntimeLeaseV1(binding contract.RuntimeLeaseBinding, current runtimeports.CurrentOperationDispatchEnforcementV4) error {
 	runtimeLease := current.Sandbox.RuntimeLease
+	scopeDigest, err := runtimeWorkspaceReadDigestToSandboxV1(runtimeLease.ScopeDigest)
+	if err != nil {
+		return runtimecore.NewError(runtimecore.ErrorConflict, runtimecore.ReasonBindingDrift, "workspace read Runtime scope digest is invalid")
+	}
 	if binding.TenantID != string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID) ||
 		binding.InstanceID != string(runtimeLease.Instance.ID) ||
 		binding.InstanceEpoch != uint64(runtimeLease.Instance.Epoch) ||
 		binding.LeaseID != string(runtimeLease.Lease.ID) ||
 		binding.LeaseEpoch != uint64(runtimeLease.Lease.Epoch) ||
 		binding.FenceEpoch != uint64(runtimeLease.FenceEpoch) ||
-		binding.ScopeDigest != string(runtimeLease.ScopeDigest) ||
+		binding.ScopeDigest != scopeDigest ||
 		binding.ObservedRevision != uint64(runtimeLease.ObservedRevision) ||
 		binding.ExpiresUnixNano != runtimeLease.Ref.ExpiresUnixNano {
 		return runtimecore.NewError(runtimecore.ErrorConflict, runtimecore.ReasonBindingDrift, "workspace read WorkspaceView lease differs from Runtime current")

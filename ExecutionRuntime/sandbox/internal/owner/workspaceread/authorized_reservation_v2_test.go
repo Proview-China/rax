@@ -209,9 +209,6 @@ func newAuthorizedFixtureV2(
 	if _, err = store.CreateWorkspaceViewV1(context.Background(), workspace); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.CreateWorkspaceReadCommandV1(context.Background(), command); err != nil {
-		t.Fatal(err)
-	}
 	domainCommand := runtimeports.OperationDomainCommandRefV1{
 		Owner: runtimeports.EffectOwnerRefV2{
 			Role: runtimeports.OwnerSettlement, ComponentID: provider.ComponentID, ManifestDigest: provider.ManifestDigest,

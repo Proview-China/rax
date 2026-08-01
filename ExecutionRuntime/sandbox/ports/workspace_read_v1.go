@@ -72,6 +72,14 @@ type WorkspaceReadCommandCurrentReaderV1 interface {
 	InspectWorkspaceReadCommandCurrentV1(context.Context, contract.Ref) (contract.WorkspaceReadCommandV1, error)
 }
 
+// WorkspaceReadPublishedCommandCurrentReaderV2 is the only current Command
+// qualification accepted by the physical executor. Implementations must join
+// the immutable Command, V2 Publication, authoritative OwnerCurrent pointer,
+// and fresh upstream projections. A raw V1 row never satisfies this port.
+type WorkspaceReadPublishedCommandCurrentReaderV2 interface {
+	InspectWorkspaceReadPublishedCommandCurrentV2(context.Context, contract.Ref) (contract.WorkspaceReadCommandV1, error)
+}
+
 // WorkspaceReadCommandExactReaderV1 reads one immutable Sandbox-owned Command
 // by its complete exact Ref. It is a historical reader: implementations must
 // validate the stored shape and exact coordinate, but must not require the
@@ -93,9 +101,7 @@ type WorkspaceReadReservationExactReaderV1 interface {
 }
 
 type WorkspaceReadOwnerStoreV1 interface {
-	WorkspaceReadCommandCurrentReaderV1
 	WorkspaceReadAdmissionAttemptReaderV1
-	CreateWorkspaceReadCommandV1(context.Context, contract.WorkspaceReadCommandV1) (contract.WorkspaceReadCommandV1, error)
 	ReserveWorkspaceReadV1(context.Context, contract.WorkspaceReadReservationV1, contract.WorkspaceReadAttemptV1, WorkspaceReadAdmissionAttemptBindingV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error)
 	CompleteWorkspaceReadV1(context.Context, contract.Ref, contract.WorkspaceReadObservationV1) (contract.WorkspaceReadExecutionProjectionV1, error)
 	MarkWorkspaceReadUnknownV1(context.Context, contract.Ref, string) (contract.WorkspaceReadExecutionProjectionV1, error)

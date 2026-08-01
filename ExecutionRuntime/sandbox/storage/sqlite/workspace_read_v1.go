@@ -14,7 +14,7 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
 
-func (s *Store) CreateWorkspaceReadCommandV1(ctx context.Context, value contract.WorkspaceReadCommandV1) (contract.WorkspaceReadCommandV1, error) {
+func (s *Store) createWorkspaceReadCommandV1(ctx context.Context, value contract.WorkspaceReadCommandV1) (contract.WorkspaceReadCommandV1, error) {
 	if err := value.ValidateCurrent(s.clock()); err != nil {
 		return contract.WorkspaceReadCommandV1{}, err
 	}
@@ -74,7 +74,7 @@ func (s *Store) CreateWorkspaceReadCommandV1(ctx context.Context, value contract
 	return stored, stored.ValidateCurrent(s.clock())
 }
 
-func (s *Store) InspectWorkspaceReadCommandCurrentV1(ctx context.Context, exact contract.Ref) (contract.WorkspaceReadCommandV1, error) {
+func (s *Store) inspectWorkspaceReadCommandCurrentV1(ctx context.Context, exact contract.Ref) (contract.WorkspaceReadCommandV1, error) {
 	if err := exact.ValidateShape("workspace read command"); err != nil {
 		return contract.WorkspaceReadCommandV1{}, err
 	}
@@ -683,20 +683,49 @@ func (s *Store) finishWorkspaceReadV1(ctx context.Context, expected contract.Ref
 }
 
 func inspectWorkspaceReadCompletionInputsTxV1(ctx context.Context, tx *sql.Tx, reservation contract.WorkspaceReadReservationV1, now time.Time) (contract.WorkspaceReadCommandV1, contract.WorkspaceView, error) {
-	var commandRevision uint64
-	var commandDigest string
-	var commandBody []byte
-	if err := tx.QueryRowContext(ctx, `SELECT revision,digest,body FROM workspace_read_command_current WHERE command_id=?`, reservation.Command.ID).Scan(&commandRevision, &commandDigest, &commandBody); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, ports.ErrNotFound
-		}
+	current, err := inspectStoredWorkspaceReadCommandOwnerCurrentByCommandTxV2(
+		ctx,
+		tx,
+		reservation.Command,
+	)
+	if err != nil {
 		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, err
 	}
-	if commandRevision != reservation.Command.Revision || commandDigest != reservation.Command.Digest {
-		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, ports.ErrConflict
+	command, err := inspectWorkspaceReadCommandExactTxV1(ctx, tx, current.Command)
+	if err != nil {
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, referencedWorkspaceReadCommandStorageErrorV2(err)
 	}
-	var command contract.WorkspaceReadCommandV1
-	if decode(commandBody, &command) != nil || command.ValidateCurrent(now) != nil || !contract.SameRef(command.Meta.Ref(), reservation.Command) || !contract.SameRef(command.WorkspaceView, reservation.WorkspaceView) {
+	publication, err := inspectStoredWorkspaceReadCommandPublicationExactTxV2(
+		ctx,
+		tx,
+		current.Publication,
+	)
+	if err != nil {
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, referencedWorkspaceReadCommandStorageErrorV2(err)
+	}
+	history, err := inspectStoredWorkspaceReadCommandOwnerHistoryTxV2(
+		ctx,
+		tx,
+		current.Meta.ID,
+		current.Command,
+	)
+	if err != nil ||
+		validateStoredWorkspaceReadCommandOwnerHistoryV2(
+			command,
+			publication,
+			history,
+			current,
+		) != nil ||
+		contract.ValidateWorkspaceReadCommandOwnerClosureV2(
+			command,
+			publication,
+			current,
+		) != nil ||
+		current.ValidateCurrent(now) != nil ||
+		command.ValidateCurrent(now) != nil ||
+		current.Command != reservation.Command ||
+		command.Meta.Ref() != reservation.Command ||
+		command.WorkspaceView != reservation.WorkspaceView {
 		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, ports.ErrConflict
 	}
 
