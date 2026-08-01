@@ -678,7 +678,10 @@ func (o *WorkspaceReadCommandOwnerV2) inspectFreshWorkspaceReadCommandCurrentV2(
 		current.Meta.ID,
 		current.Command,
 	)
-	if err != nil || validateWorkspaceReadCommandOwnerHistoryV2(
+	if err != nil {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, referencedWorkspaceReadCommandErrorV2(err)
+	}
+	if validateWorkspaceReadCommandOwnerHistoryV2(
 		command,
 		publication,
 		history,
@@ -706,7 +709,10 @@ func (o *WorkspaceReadCommandOwnerV2) inspectFreshWorkspaceReadCommandCurrentV2(
 		current.Meta.ID,
 		current.Command,
 	)
-	if err != nil || validateWorkspaceReadCommandOwnerHistoryV2(
+	if err != nil {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, referencedWorkspaceReadCommandErrorV2(err)
+	}
+	if validateWorkspaceReadCommandOwnerHistoryV2(
 		command,
 		publication,
 		finalHistory,
@@ -733,7 +739,10 @@ func (o *WorkspaceReadCommandOwnerV2) inspectFreshWorkspaceReadCommandCurrentV2(
 		current.Meta.ID,
 		current.Command,
 	)
-	if err != nil || validateWorkspaceReadCommandOwnerHistoryV2(
+	if err != nil {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, referencedWorkspaceReadCommandErrorV2(err)
+	}
+	if validateWorkspaceReadCommandOwnerHistoryV2(
 		command,
 		publication,
 		s3History,

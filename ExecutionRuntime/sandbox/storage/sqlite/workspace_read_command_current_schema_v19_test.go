@@ -130,6 +130,67 @@ func TestWorkspaceReadCommandCurrentSchemaV19MigrationRejectsCoreDriftWithoutRep
 	}
 }
 
+func TestWorkspaceReadCommandCurrentSchemaV19MigratesRealV13Namespace(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "sandbox.db")
+	store, err := OpenWithClock(ctx, path, time.Now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Schema v13 predates every bounded workspace.read table. Starting from a
+	// fully verified database and removing precisely the v15-v19 namespaces
+	// retains the real legacy tables while avoiding a hand-written partial
+	// fixture that could accidentally bless an invalid migration.
+	if _, err = store.db.ExecContext(ctx, `
+		DROP TABLE workspace_read_observation;
+		DROP TABLE workspace_read_recovery_evidence;
+		DROP TABLE workspace_read_attempt_owner_incarnation;
+		DROP TABLE workspace_read_attempt_current;
+		DROP TABLE workspace_read_attempt_origin;
+		DROP TABLE workspace_read_admission_attempt_binding;
+		DROP TABLE workspace_read_reservation;
+		DROP TABLE workspace_read_runtime_attempt_admission_binding_v2;
+		DROP TABLE workspace_read_command_owner_current_pointer_v2;
+		DROP TABLE workspace_read_command_owner_current_history_v2;
+		DROP TABLE workspace_read_command_publication_v2;
+		DROP TABLE workspace_read_command_publication_schema_v19;
+		DROP TABLE workspace_read_command_body_seal;
+		DROP TABLE workspace_read_command_current;
+		PRAGMA user_version=13`); err != nil {
+		_ = store.Close()
+		t.Fatal(err)
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	reopened, err := OpenWithClock(ctx, path, time.Now)
+	if err != nil {
+		t.Fatalf("valid v13 namespace did not migrate: %v", err)
+	}
+	defer reopened.Close()
+	var version int
+	if err = reopened.db.QueryRowContext(ctx, `PRAGMA user_version`).Scan(&version); err != nil {
+		t.Fatal(err)
+	}
+	if version != schemaVersion {
+		t.Fatalf("migrated schema version=%d want=%d", version, schemaVersion)
+	}
+	if err = verifyWorkspaceReadCommandCurrentSchemaV19(ctx, mustWorkspaceReadReadOnlyTxV19(t, ctx, reopened.db)); err != nil {
+		t.Fatalf("migrated workspace read Command current schema: %v", err)
+	}
+}
+
+func mustWorkspaceReadReadOnlyTxV19(t *testing.T, ctx context.Context, db *sql.DB) *sql.Tx {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	return tx
+}
+
 func workspaceReadCommandCurrentSchemaSnapshotV19(
 	t *testing.T,
 	ctx context.Context,

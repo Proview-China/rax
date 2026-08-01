@@ -179,7 +179,10 @@ func (s *Store) initialize(ctx context.Context) error {
 	if err := preflightWorkspaceReadCommandPublicationMigrationV19(ctx, tx); err != nil {
 		return err
 	}
-	if version != 0 {
+	// workspace_read_command_current was introduced with schema v15. Older
+	// valid databases do not have that namespace yet and must be allowed to
+	// create it transactionally before the strict post-create verification.
+	if version >= 15 {
 		if err := verifyWorkspaceReadCommandCurrentSchemaV19(ctx, tx); err != nil {
 			return fmt.Errorf("%w: pre-v19 workspace read Command current schema drifted: %v", ports.ErrConflict, err)
 		}
