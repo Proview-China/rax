@@ -19,6 +19,34 @@ import (
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
 
+func TestWorkspaceReadLegacyReserveV1FailsClosedWithoutFacts(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_900_000_000, 0)
+	expires := now.Add(time.Hour)
+	store, err := OpenWithClock(ctx, filepath.Join(t.TempDir(), "sandbox.db"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "legacy-reserve")
+	binding := workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt)
+	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt, binding); !errors.Is(reserveErr, ports.ErrConflict) || created {
+		t.Fatalf("legacy Reserve did not fail closed: created=%v err=%v", created, reserveErr)
+	}
+	for _, table := range []string{
+		"workspace_read_reservation",
+		"workspace_read_attempt_origin",
+		"workspace_read_attempt_current",
+		"workspace_read_admission_attempt_binding",
+		"workspace_read_runtime_attempt_admission_binding_v2",
+	} {
+		var rows int
+		if err = store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("legacy Reserve wrote %s rows=%d err=%v", table, rows, err)
+		}
+	}
+}
+
 func TestWorkspaceReadReserveAcrossHandlesCreatesOnce(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
@@ -85,7 +113,7 @@ func TestWorkspaceReadAdmissionHandoffReturnsOriginalAttemptAcrossConcurrencyRes
 	}
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "admission-handoff")
 	binding := workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt)
-	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt, binding); reserveErr != nil || !created {
+	if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); reserveErr != nil || !created {
 		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
 	}
 
@@ -151,7 +179,7 @@ func TestWorkspaceReadAdmissionHandoffRejectsEveryReceiptSplice(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "admission-splice")
 	binding := workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt)
-	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt, binding); reserveErr != nil || !created {
+	if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); reserveErr != nil || !created {
 		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
 	}
 
@@ -827,7 +855,7 @@ func workspaceReadReservationFixture(t *testing.T, now, expires time.Time, reque
 
 func reserveWorkspaceReadFixtureV1(t *testing.T, store *Store, ctx context.Context, reservation contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
 	t.Helper()
-	return store.ReserveWorkspaceReadV1(ctx, reservation, attempt, workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt))
+	return store.reserveWorkspaceReadV1(ctx, reservation, attempt, workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt), nil)
 }
 
 func workspaceReadAdmissionAttemptBindingFixtureV1(t *testing.T, reservation contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1) ports.WorkspaceReadAdmissionAttemptBindingV1 {

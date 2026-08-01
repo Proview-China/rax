@@ -199,7 +199,7 @@ func workspaceReadCommandCanonicalBodySealV1(
 }
 
 func (s *Store) ReserveWorkspaceReadV1(ctx context.Context, res contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1, binding ports.WorkspaceReadAdmissionAttemptBindingV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
-	return s.reserveWorkspaceReadV1(ctx, res, attempt, binding, nil)
+	return contract.WorkspaceReadExecutionProjectionV1{}, false, ports.ErrConflict
 }
 
 func (s *Store) reserveWorkspaceReadV1(ctx context.Context, res contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1, binding ports.WorkspaceReadAdmissionAttemptBindingV1, authorization *runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
@@ -597,7 +597,7 @@ func (s *Store) finishWorkspaceReadAuthorizedV2(ctx context.Context, expected co
 	if digestErr != nil || authorizationDigest != authorization.AuthorizationDigest {
 		return contract.WorkspaceReadExecutionProjectionV1{}, ports.ErrConflict
 	}
-	bindingV2, bindingErr := inspectWorkspaceReadAdmissionForRuntimeAttemptTxV2(ctx, tx, authorization.Attempt)
+	bindingV2, bindingErr := inspectWorkspaceReadAdmissionClosureForRuntimeAttemptTxV2(ctx, tx, authorization.Attempt)
 	if bindingErr != nil ||
 		bindingV2.Validate() != nil ||
 		bindingV2.WorkspaceReadAttempt.OwnerRef() != expected ||
