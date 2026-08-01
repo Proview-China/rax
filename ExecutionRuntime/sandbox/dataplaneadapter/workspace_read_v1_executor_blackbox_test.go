@@ -36,28 +36,31 @@ import (
 )
 
 type workspaceReadExecutorCaseV1 struct {
-	setup                func(*testing.T, string)
-	mutateWorkspace      func(*contract.WorkspaceView)
-	startByte            uint64
-	commandMetaAfter     time.Duration
-	commandRequestAfter  time.Duration
-	runtimeUnifiedAfter  time.Duration
-	expectedTTLAfter     time.Duration
-	singleExecution      bool
-	hiddenScopes         []string
-	expectedState        contract.WorkspaceReadStateV1
-	expectedContent      string
-	expectedAdapter      uint64
-	expectedPhysical     uint64
-	expectedBoundary     kernel.WorkspaceReadActualPointBoundaryV1
-	expectInspectError   bool
-	expectBeforeActual   bool
-	runtimeLeaseS2Drift  bool
-	driftReservation     bool
-	driftAttempt         bool
-	useFakeActual        bool
-	verifyBindingV2      bool
-	attackLegacyComplete bool
+	setup                 func(*testing.T, string)
+	mutateWorkspace       func(*contract.WorkspaceView)
+	startByte             uint64
+	commandMetaAfter      time.Duration
+	commandRequestAfter   time.Duration
+	runtimeUnifiedAfter   time.Duration
+	sourceCurrentAfter    time.Duration
+	expectedTTLAfter      time.Duration
+	singleExecution       bool
+	hiddenScopes          []string
+	expectedState         contract.WorkspaceReadStateV1
+	expectedContent       string
+	expectedAdapter       uint64
+	expectedPhysical      uint64
+	expectedBoundary      kernel.WorkspaceReadActualPointBoundaryV1
+	expectInspectError    bool
+	expectBeforeActual    bool
+	runtimeLeaseS2Drift   bool
+	ownerCurrentS2Drift   bool
+	ownerCurrentTTLOnRead bool
+	driftReservation      bool
+	driftAttempt          bool
+	useFakeActual         bool
+	verifyBindingV2       bool
+	attackLegacyComplete  bool
 }
 
 type lockedBuffer struct {
@@ -109,6 +112,42 @@ func TestWorkspaceReadPublicExecutorUsesShorterCommandMetaTTLWithinCallerAuthori
 		expectedPhysical:    1,
 		useFakeActual:       true,
 		singleExecution:     true,
+	})
+}
+
+func TestWorkspaceReadPublicExecutorUsesPublishedOwnerCurrentTTL(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		commandMetaAfter:    30 * time.Second,
+		commandRequestAfter: 30 * time.Second,
+		runtimeUnifiedAfter: 30 * time.Second,
+		sourceCurrentAfter:  5 * time.Second,
+		expectedTTLAfter:    5 * time.Second,
+		expectedState:       contract.WorkspaceReadObservedV1,
+		expectedContent:     "Praxis",
+		expectedAdapter:     1,
+		expectedPhysical:    1,
+		useFakeActual:       true,
+		singleExecution:     true,
+	})
+}
+
+func TestWorkspaceReadPublicExecutorRejectsPublishedOwnerCurrentS2Drift(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		expectedState:       contract.WorkspaceReadUnknownV1,
+		expectedAdapter:     1,
+		expectedPhysical:    1,
+		useFakeActual:       true,
+		ownerCurrentS2Drift: true,
+	})
+}
+
+func TestWorkspaceReadPublicExecutorRejectsOwnerCurrentExpiryCrossedInsideReader(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		expectedAdapter:       0,
+		expectedPhysical:      0,
+		expectBeforeActual:    true,
+		useFakeActual:         true,
+		ownerCurrentTTLOnRead: true,
 	})
 }
 
@@ -205,7 +244,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	}
 	clock := time.Now
 	var controlledClock atomic.Int64
-	if spec.verifyBindingV2 || spec.expectedTTLAfter != 0 {
+	if spec.verifyBindingV2 || spec.expectedTTLAfter != 0 || spec.ownerCurrentTTLOnRead {
 		controlledClock.Store(time.Now().UTC().UnixNano())
 		clock = func() time.Time {
 			return time.Unix(0, controlledClock.Load()).UTC()
@@ -358,7 +397,11 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		sourceNotAfter = runtimeUnifiedNotAfter
 	}
 	sourceExpires := sourceNotAfter
-	if ceiling := now.Add(9 * time.Second); sourceExpires.After(ceiling) {
+	sourceCurrentAfter := spec.sourceCurrentAfter
+	if sourceCurrentAfter == 0 {
+		sourceCurrentAfter = 9 * time.Second
+	}
+	if ceiling := now.Add(sourceCurrentAfter); sourceExpires.After(ceiling) {
 		sourceExpires = ceiling
 	}
 	source, err := contract.SealWorkspaceReadSourceCurrentProjectionV2(
@@ -480,13 +523,41 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if _, _, err = store.ApplyWorkspaceReadCommandPublicationV2(ctx, publicationCapability); err != nil {
 		t.Fatal(err)
 	}
+	var sourceReader sandboxports.WorkspaceReadSourceCurrentReaderV2 = fixedWorkspaceReadSourceReaderV2{value: source}
+	if spec.ownerCurrentTTLOnRead {
+		sourceReader = &expiringWorkspaceReadSourceReaderV2{
+			value:  source,
+			expire: func() { controlledClock.Store(source.ExpiresUnixNano) },
+		}
+	}
+	if spec.ownerCurrentS2Drift {
+		driftedSource := source
+		driftedSource.CheckedUnixNano++
+		driftedSource.ProjectionDigest = ""
+		driftedSource, err = contract.SealWorkspaceReadSourceCurrentProjectionV2(driftedSource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sourceReader = &sequencedWorkspaceReadSourceReaderV2{first: source, second: driftedSource, switchAfter: 6}
+	}
+	commandOwner, err := kernel.NewWorkspaceReadCommandOwnerV2(
+		sourceReader,
+		fixedWorkspaceReadEffectReaderV2{value: effect},
+		fixedWorkspaceReadPreparedReaderV2{value: preparedCurrent},
+		store,
+		store,
+		clock,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	dispatchSocket := filepath.Join(root, "dispatch.sock")
 	currentSocket := filepath.Join(root, "current.sock")
-	baseCurrent, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV1(
+	baseCurrent, err := runtimeadapter.NewWorkspaceReadPublishedCurrentAdapterV2(
 		fixedWorkspaceReadEnforcementReaderV1{value: current},
 		fixedWorkspaceReadAssociationReaderV1{association},
-		publishedWorkspaceReadCommandFixtureV2{command: command, clock: clock},
+		commandOwner,
 		store,
 		clock,
 	)
@@ -497,7 +568,6 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if err != nil {
 		t.Fatal(err)
 	}
-	countedCurrent := &countingWorkspaceReadCurrentReaderV2{inner: exactCurrent}
 	var output lockedBuffer
 	var actualPoint kernel.WorkspaceReadActualPointV1
 	if spec.useFakeActual {
@@ -506,7 +576,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		currentServer := dataplaneadapter.CurrentServer{
 			SocketPath: currentSocket, SocketMode: 0o660, AllowedUID: uint32(os.Getuid()),
 			Governance: fixedWorkspaceReadEnforcementReaderV1{value: current},
-			Sandbox:    testkit.NewMemoryStore(), WorkspaceReadCurrentV2: countedCurrent, Now: clock,
+			Sandbox:    testkit.NewMemoryStore(), WorkspaceReadCurrentV2: exactCurrent, Now: clock,
 		}
 		listener, listenErr := currentServer.Listen()
 		if listenErr != nil {
@@ -559,7 +629,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			t.Fatal(err)
 		}
 	}
-	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(publishedWorkspaceReadCommandFixtureV2{command: command, clock: clock}, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, clock)
+	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(commandOwner, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -663,9 +733,6 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			t.Fatalf("EOF result drifted: %#v", projection.Observation)
 		}
 		verifyExpectedTTL(projection)
-		if spec.expectedAdapter != 0 && !spec.useFakeActual && countedCurrent.calls.Load() == 0 {
-			t.Fatal("public CurrentServer never inspected workspace read current v2")
-		}
 		return
 	}
 
@@ -731,9 +798,6 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		t.Fatalf("unexpected exact Inspect: %#v", projection)
 	}
 	verifyExpectedTTL(projection)
-	if !spec.useFakeActual && countedCurrent.calls.Load() == 0 {
-		t.Fatal("public CurrentServer never inspected workspace read current v2")
-	}
 	if spec.verifyBindingV2 {
 		bindingV2, inspectErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
 		if inspectErr != nil {
@@ -1210,38 +1274,79 @@ type fixedWorkspaceReadAssociationReaderV1 struct {
 	value runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1
 }
 
-// publishedWorkspaceReadCommandFixtureV2 is a test-only V2 reader. The
-// physical constructor no longer accepts a raw Store/current reader.
-type publishedWorkspaceReadCommandFixtureV2 struct {
-	command contract.WorkspaceReadCommandV1
-	clock   func() time.Time
+type fixedWorkspaceReadSourceReaderV2 struct {
+	value contract.WorkspaceReadSourceCurrentProjectionV2
 }
 
-func (r publishedWorkspaceReadCommandFixtureV2) InspectWorkspaceReadCommandCurrentV1(
+type sequencedWorkspaceReadSourceReaderV2 struct {
+	first       contract.WorkspaceReadSourceCurrentProjectionV2
+	second      contract.WorkspaceReadSourceCurrentProjectionV2
+	switchAfter uint64
+	calls       atomic.Uint64
+}
+
+type expiringWorkspaceReadSourceReaderV2 struct {
+	value  contract.WorkspaceReadSourceCurrentProjectionV2
+	expire func()
+	once   sync.Once
+}
+
+func (r *expiringWorkspaceReadSourceReaderV2) InspectWorkspaceReadSourceCurrentV2(
 	_ context.Context,
-	exact contract.Ref,
-) (contract.WorkspaceReadCommandV1, error) {
-	return r.inspect(exact)
-}
-
-func (r publishedWorkspaceReadCommandFixtureV2) InspectWorkspaceReadPublishedCommandCurrentV2(
-	_ context.Context,
-	exact contract.Ref,
-) (contract.WorkspaceReadCommandV1, error) {
-	return r.inspect(exact)
-}
-
-func (r publishedWorkspaceReadCommandFixtureV2) inspect(
-	exact contract.Ref,
-) (contract.WorkspaceReadCommandV1, error) {
-	if r.clock == nil || r.command.Meta.Ref() != exact || r.command.ValidateCurrent(r.clock()) != nil {
-		return contract.WorkspaceReadCommandV1{}, sandboxports.ErrConflict
+	exact contract.WorkspaceReadSourceCommandRefV2,
+) (contract.WorkspaceReadSourceCurrentProjectionV2, error) {
+	if r == nil || r.value.SourceCommand != exact {
+		return contract.WorkspaceReadSourceCurrentProjectionV2{}, sandboxports.ErrConflict
 	}
-	return r.command, nil
+	r.once.Do(r.expire)
+	return r.value, nil
 }
 
-var _ sandboxports.WorkspaceReadCommandCurrentReaderV1 = publishedWorkspaceReadCommandFixtureV2{}
-var _ sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2 = publishedWorkspaceReadCommandFixtureV2{}
+func (r *sequencedWorkspaceReadSourceReaderV2) InspectWorkspaceReadSourceCurrentV2(
+	_ context.Context,
+	exact contract.WorkspaceReadSourceCommandRefV2,
+) (contract.WorkspaceReadSourceCurrentProjectionV2, error) {
+	if r == nil || r.first.SourceCommand != exact || r.second.SourceCommand != exact {
+		return contract.WorkspaceReadSourceCurrentProjectionV2{}, sandboxports.ErrConflict
+	}
+	if r.calls.Add(1) > r.switchAfter {
+		return r.second, nil
+	}
+	return r.first, nil
+}
+
+func (r fixedWorkspaceReadSourceReaderV2) InspectWorkspaceReadSourceCurrentV2(
+	_ context.Context,
+	exact contract.WorkspaceReadSourceCommandRefV2,
+) (contract.WorkspaceReadSourceCurrentProjectionV2, error) {
+	if r.value.SourceCommand != exact {
+		return contract.WorkspaceReadSourceCurrentProjectionV2{}, sandboxports.ErrConflict
+	}
+	return r.value, nil
+}
+
+type fixedWorkspaceReadEffectReaderV2 struct {
+	value runtimeports.ControlledOperationEffectCurrentProjectionV2
+}
+
+func (r fixedWorkspaceReadEffectReaderV2) InspectCurrentControlledOperationEffectV2(
+	_ context.Context,
+	_ runtimeports.OperationSubjectV3,
+	_ runtimecore.EffectIntentID,
+) (runtimeports.ControlledOperationEffectCurrentProjectionV2, error) {
+	return r.value, nil
+}
+
+type fixedWorkspaceReadPreparedReaderV2 struct {
+	value runtimeports.ControlledOperationPreparedCurrentProjectionV2
+}
+
+func (r fixedWorkspaceReadPreparedReaderV2) InspectCurrentControlledOperationPreparedV2(
+	_ context.Context,
+	_ runtimeports.PreparedProviderAttemptRefV2,
+) (runtimeports.ControlledOperationPreparedCurrentProjectionV2, error) {
+	return r.value, nil
+}
 
 func (r fixedWorkspaceReadAssociationReaderV1) InspectCurrentPreparedDomainCommandAssociationV1(context.Context, runtimeports.PreparedDomainCommandAssociationRefV1) (runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1, error) {
 	return r.value, nil

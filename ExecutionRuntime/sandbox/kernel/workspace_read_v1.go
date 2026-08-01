@@ -94,8 +94,15 @@ type workspaceReadAuthorizedOwnerStoreV2 interface {
 	) (contract.WorkspaceReadExecutionProjectionV1, error)
 }
 
+type workspaceReadPublishedCommandCurrentReaderV2 interface {
+	inspectWorkspaceReadPublishedCommandCurrentV2(
+		context.Context,
+		contract.Ref,
+	) (contract.WorkspaceReadCommandV1, contract.WorkspaceReadCommandOwnerCurrentV2, error)
+}
+
 type WorkspaceReadPhysicalExecutorV1 struct {
-	commands        sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2
+	commands        workspaceReadPublishedCommandCurrentReaderV2
 	associations    runtimeports.PreparedDomainCommandAssociationCurrentReaderV1
 	workspaces      sandboxports.WorkspaceCurrentReaderV1
 	sandboxCurrent  runtimeports.OperationDispatchSandboxCurrentReaderV4
@@ -106,8 +113,8 @@ type WorkspaceReadPhysicalExecutorV1 struct {
 	clock           func() time.Time
 }
 
-func NewWorkspaceReadPhysicalExecutorV1(commands sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2, associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1, workspaces sandboxports.WorkspaceCurrentReaderV1, sandboxCurrent runtimeports.OperationDispatchSandboxCurrentReaderV4, enforcement runtimeports.OperationDispatchEnforcementGovernancePortV4, store sandboxports.WorkspaceReadOwnerStoreV1, actualPoint WorkspaceReadActualPointV1, clock func() time.Time) (*WorkspaceReadPhysicalExecutorV1, error) {
-	if commands == nil || associations == nil || workspaces == nil || sandboxCurrent == nil || enforcement == nil || store == nil || actualPoint == nil || clock == nil {
+func NewWorkspaceReadPhysicalExecutorV1(commands workspaceReadPublishedCommandCurrentReaderV2, associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1, workspaces sandboxports.WorkspaceCurrentReaderV1, sandboxCurrent runtimeports.OperationDispatchSandboxCurrentReaderV4, enforcement runtimeports.OperationDispatchEnforcementGovernancePortV4, store sandboxports.WorkspaceReadOwnerStoreV1, actualPoint WorkspaceReadActualPointV1, clock func() time.Time) (*WorkspaceReadPhysicalExecutorV1, error) {
+	if nilLikeWorkspaceReadInspectionV2(commands) || associations == nil || workspaces == nil || sandboxCurrent == nil || enforcement == nil || store == nil || actualPoint == nil || clock == nil {
 		return nil, runtimecore.NewError(runtimecore.ErrorInvalidArgument, runtimecore.ReasonInvalidReference, "workspace read physical executor dependencies are incomplete")
 	}
 	authorizedStore, ok := store.(workspaceReadAuthorizedOwnerStoreV2)
@@ -128,7 +135,7 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, runtimecore.NewError(runtimecore.ErrorForbidden, runtimecore.ReasonUnknownGovernanceCategory, "workspace read executor accepts only exact workspace.read commands")
 	}
 
-	association, command, workspace, s1, err := e.readCurrentClosureV1(ctx, authorization)
+	association, command, commandCurrent, workspace, s1, err := e.readCurrentClosureV1(ctx, authorization)
 	if err != nil {
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
@@ -145,6 +152,7 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 		association.ExpiresUnixNano,
 		command.RequestedNotAfterUnixNano,
 		command.Meta.ExpiresUnixNano,
+		commandCurrent.Meta.ExpiresUnixNano,
 		workspace.Meta.ExpiresUnixNano,
 		workspace.Lease.ExpiresUnixNano,
 	)
@@ -161,13 +169,14 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 		StableKeyDigest: string(receipt.StableKeyDigest), CheckedUnixNano: factTime.UnixNano(), ExpiresUnixNano: expiresNano,
 	}
 	ttlClosure, err := contract.SealWorkspaceReadTTLClosureV1(contract.WorkspaceReadTTLClosureV1{
-		UnifiedNotAfterUnixNano:       authorization.UnifiedNotAfterUnixNano,
-		RuntimeEnforcementExpiresNano: runtimeCurrent.ExpiresUnixNano,
-		AssociationExpiresUnixNano:    association.ExpiresUnixNano,
-		CommandRequestedNotAfterNano:  command.RequestedNotAfterUnixNano,
-		CommandExpiresUnixNano:        command.Meta.ExpiresUnixNano,
-		WorkspaceViewExpiresUnixNano:  workspace.Meta.ExpiresUnixNano,
-		WorkspaceLeaseExpiresUnixNano: workspace.Lease.ExpiresUnixNano,
+		UnifiedNotAfterUnixNano:                authorization.UnifiedNotAfterUnixNano,
+		RuntimeEnforcementExpiresNano:          runtimeCurrent.ExpiresUnixNano,
+		AssociationExpiresUnixNano:             association.ExpiresUnixNano,
+		CommandRequestedNotAfterNano:           command.RequestedNotAfterUnixNano,
+		CommandExpiresUnixNano:                 command.Meta.ExpiresUnixNano,
+		PublishedCommandCurrentExpiresUnixNano: commandCurrent.Meta.ExpiresUnixNano,
+		WorkspaceViewExpiresUnixNano:           workspace.Meta.ExpiresUnixNano,
+		WorkspaceLeaseExpiresUnixNano:          workspace.Lease.ExpiresUnixNano,
 	})
 	if err != nil {
 		return receipt, err
@@ -243,7 +252,7 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 	if err != nil {
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
-	currentQuery, err := workspaceReadCurrentQueryV2(authorization, association, command, workspace, reservation, attempt, admissionBinding, runtimeCurrent, s1, expiresNano)
+	currentQuery, err := workspaceReadCurrentQueryV2(authorization, association, command, commandCurrent, workspace, reservation, attempt, admissionBinding, runtimeCurrent, s1, expiresNano)
 	if err != nil {
 		failureDigest, digestErr := contract.Digest("workspace-read-failed", struct {
 			Stage string
@@ -279,8 +288,8 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 	}
 
 	// S2 is a full current re-read after Rust crossed the physical actual point.
-	_, commandS2, workspaceS2, s2, err := e.readCurrentClosureV1(ctx, authorization)
-	if err != nil || !contract.SameRef(commandS2.Meta.Ref(), command.Meta.Ref()) || !contract.SameRef(workspaceS2.Meta.Ref(), workspace.Meta.Ref()) {
+	_, commandS2, commandCurrentS2, workspaceS2, s2, err := e.readCurrentClosureV1(ctx, authorization)
+	if err != nil || !contract.SameRef(commandS2.Meta.Ref(), command.Meta.Ref()) || commandCurrentS2.Meta.Ref() != commandCurrent.Meta.Ref() || !contract.SameRef(workspaceS2.Meta.Ref(), workspace.Meta.Ref()) {
 		if err == nil {
 			err = errors.New("workspace read current closure drifted at S2")
 		}
@@ -325,6 +334,7 @@ func workspaceReadCurrentQueryV2(
 	authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3,
 	association runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1,
 	command contract.WorkspaceReadCommandV1,
+	commandCurrent contract.WorkspaceReadCommandOwnerCurrentV2,
 	workspace contract.WorkspaceView,
 	reservation contract.WorkspaceReadReservationV1,
 	attempt contract.WorkspaceReadAttemptV1,
@@ -350,17 +360,18 @@ func workspaceReadCurrentQueryV2(
 			SandboxAttempt:          current.Phase.SandboxAttempt,
 			SandboxProjectionDigest: current.Sandbox.ProjectionDigest,
 		},
-		Authorization:       authorization,
-		StableKeyDigest:     authorization.StableKeyDigest,
-		AuthorizationDigest: authorization.AuthorizationDigest,
-		Association:         association.Ref,
-		DomainCommand:       association.DomainCommand,
-		Command:             command.Meta.Ref(),
-		WorkspaceView:       workspace.Meta.Ref(),
-		FileScopeDigest:     command.FileScopeDigest,
-		RelativePath:        command.RelativePath,
-		CheckedUnixNano:     checked.UnixNano(),
-		ExpiresUnixNano:     expiresUnixNano,
+		Authorization:           authorization,
+		StableKeyDigest:         authorization.StableKeyDigest,
+		AuthorizationDigest:     authorization.AuthorizationDigest,
+		Association:             association.Ref,
+		DomainCommand:           association.DomainCommand,
+		Command:                 command.Meta.Ref(),
+		PublishedCommandCurrent: func() *contract.Ref { ref := commandCurrent.Meta.Ref(); return &ref }(),
+		WorkspaceView:           workspace.Meta.Ref(),
+		FileScopeDigest:         command.FileScopeDigest,
+		RelativePath:            command.RelativePath,
+		CheckedUnixNano:         checked.UnixNano(),
+		ExpiresUnixNano:         expiresUnixNano,
 	})
 	if err != nil {
 		return sandboxports.WorkspaceReadCurrentQueryV2{}, err
@@ -460,47 +471,81 @@ func (e *WorkspaceReadPhysicalExecutorV1) InspectWorkspaceReadAdmissionForRuntim
 	return reader.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, attempt)
 }
 
-func (e *WorkspaceReadPhysicalExecutorV1) readCurrentClosureV1(ctx context.Context, authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) (runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1, contract.WorkspaceReadCommandV1, contract.WorkspaceView, time.Time, error) {
+func (e *WorkspaceReadPhysicalExecutorV1) readCurrentClosureV1(ctx context.Context, authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) (runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1, contract.WorkspaceReadCommandV1, contract.WorkspaceReadCommandOwnerCurrentV2, contract.WorkspaceView, time.Time, error) {
 	now := e.clock()
 	if err := authorization.ValidateCurrent(now); err != nil {
-		return runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1{}, contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, now, err
+		return runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1{}, contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, contract.WorkspaceView{}, now, err
 	}
 	association, err := e.associations.InspectCurrentPreparedDomainCommandAssociationV1(ctx, authorization.Association)
 	if err != nil || association.ValidateCurrent(authorization.Association, now) != nil {
 		if err == nil {
 			err = association.ValidateCurrent(authorization.Association, now)
 		}
-		return association, contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, now, err
+		return association, contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, contract.WorkspaceView{}, now, err
 	}
 	if association.DomainCommand != authorization.DomainCommand || association.Operation != authorization.Operation || association.Prepared != authorization.Prepared || association.Attempt != authorization.Attempt || association.Provider != authorization.Provider {
-		return association, contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, now, runtimecore.NewError(runtimecore.ErrorConflict, runtimecore.ReasonBindingDrift, "workspace read Association drifted from authorization")
+		return association, contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, contract.WorkspaceView{}, now, runtimecore.NewError(runtimecore.ErrorConflict, runtimecore.ReasonBindingDrift, "workspace read Association drifted from authorization")
 	}
 	commandDigest, err := runtimeWorkspaceReadDigestToSandboxV1(authorization.DomainCommand.Digest)
 	if err != nil {
-		return runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1{}, contract.WorkspaceReadCommandV1{}, contract.WorkspaceView{}, now, err
+		return runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1{}, contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, contract.WorkspaceView{}, now, err
 	}
 	commandRef := contract.Ref{ID: authorization.DomainCommand.ID, Revision: uint64(authorization.DomainCommand.Revision), Digest: commandDigest}
-	command, err := e.commands.InspectWorkspaceReadPublishedCommandCurrentV2(ctx, commandRef)
+	command, commandCurrent, err := e.commands.inspectWorkspaceReadPublishedCommandCurrentV2(ctx, commandRef)
 	if err != nil {
-		return association, command, contract.WorkspaceView{}, now, err
+		return association, command, commandCurrent, contract.WorkspaceView{}, now, err
 	}
-	if err = validateWorkspaceReadCommandAuthorizationV1(command, association, authorization); err != nil || command.ValidateCurrent(now) != nil {
+	if err = validateWorkspaceReadCommandAuthorizationV1(command, association, authorization); err != nil || command.ValidateCurrent(now) != nil || commandCurrent.ValidateCurrent(now) != nil || commandCurrent.Command != commandRef {
 		if err == nil {
 			err = command.ValidateCurrent(now)
+			if err == nil {
+				err = commandCurrent.ValidateCurrent(now)
+			}
+			if err == nil && commandCurrent.Command != commandRef {
+				err = sandboxports.ErrConflict
+			}
 		}
-		return association, command, contract.WorkspaceView{}, now, err
+		return association, command, commandCurrent, contract.WorkspaceView{}, now, err
 	}
 	workspace, err := e.workspaces.InspectWorkspaceViewCurrentV1(ctx, command.WorkspaceView)
 	if err != nil || workspace.ValidateCurrent(now) != nil {
 		if err == nil {
 			err = workspace.ValidateCurrent(now)
 		}
-		return association, command, workspace, now, err
+		return association, command, commandCurrent, workspace, now, err
 	}
 	if !contract.SameRef(workspace.Meta.Ref(), command.WorkspaceView) || workspace.FileScopeDigest != command.FileScopeDigest || !workspaceReadAllowedV1(workspace, command.RelativePath) {
-		return association, command, workspace, now, runtimecore.NewError(runtimecore.ErrorForbidden, runtimecore.ReasonEvidenceScopeConflict, "workspace read path is outside the exact read scope")
+		return association, command, commandCurrent, workspace, now, runtimecore.NewError(runtimecore.ErrorForbidden, runtimecore.ReasonEvidenceScopeConflict, "workspace read path is outside the exact read scope")
 	}
-	return association, command, workspace, now, nil
+	finalCommand, finalCommandCurrent, err := e.commands.inspectWorkspaceReadPublishedCommandCurrentV2(ctx, commandRef)
+	if err != nil {
+		return association, command, commandCurrent, workspace, now, err
+	}
+	if !reflect.DeepEqual(finalCommand, command) || finalCommandCurrent.Meta.Ref() != commandCurrent.Meta.Ref() {
+		return association, command, commandCurrent, workspace, now, sandboxports.ErrConflict
+	}
+	command = finalCommand
+	commandCurrent = finalCommandCurrent
+	finalNow := e.clock()
+	if finalNow.IsZero() || finalNow.Before(now) {
+		return association, command, commandCurrent, workspace, finalNow, sandboxports.ErrConflict
+	}
+	if err = authorization.ValidateCurrent(finalNow); err != nil {
+		return association, command, commandCurrent, workspace, finalNow, err
+	}
+	if err = association.ValidateCurrent(authorization.Association, finalNow); err != nil {
+		return association, command, commandCurrent, workspace, finalNow, err
+	}
+	if err = command.ValidateCurrent(finalNow); err != nil {
+		return association, command, commandCurrent, workspace, finalNow, err
+	}
+	if err = commandCurrent.ValidateCurrent(finalNow); err != nil {
+		return association, command, commandCurrent, workspace, finalNow, err
+	}
+	if err = workspace.ValidateCurrent(finalNow); err != nil {
+		return association, command, commandCurrent, workspace, finalNow, err
+	}
+	return association, command, commandCurrent, workspace, finalNow, nil
 }
 
 func (e *WorkspaceReadPhysicalExecutorV1) markWorkspaceReadUnknownV1(ctx context.Context, authority ownerworkspaceread.AuthorizedExecutionV2, stage string, cause error) error {

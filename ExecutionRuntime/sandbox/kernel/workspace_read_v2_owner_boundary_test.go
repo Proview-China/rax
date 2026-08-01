@@ -1,9 +1,11 @@
 package kernel
 
 import (
+	"context"
 	"testing"
 
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
 
@@ -13,6 +15,22 @@ type v1OnlyWorkspaceReadStore struct {
 
 type noopWorkspaceReadCommandReaderV1 struct {
 	sandboxports.WorkspaceReadCommandCurrentReaderV1
+}
+
+type externalStylePublishedCommandWrapperV2 struct{}
+
+func (externalStylePublishedCommandWrapperV2) InspectWorkspaceReadCommandCurrentV1(
+	context.Context,
+	contract.Ref,
+) (contract.WorkspaceReadCommandV1, error) {
+	return contract.WorkspaceReadCommandV1{}, nil
+}
+
+func (externalStylePublishedCommandWrapperV2) InspectWorkspaceReadPublishedCommandCurrentV2(
+	context.Context,
+	contract.Ref,
+) (contract.WorkspaceReadCommandV1, error) {
+	return contract.WorkspaceReadCommandV1{}, nil
 }
 
 type noopWorkspaceCurrentReaderV1 struct {
@@ -33,8 +51,12 @@ type noopWorkspaceReadEnforcementV4 struct {
 
 func TestWorkspaceReadPhysicalExecutorV1RejectsV1OnlyOwnerStore(t *testing.T) {
 	var rawOnly any = &noopWorkspaceReadCommandReaderV1{}
-	if _, ok := rawOnly.(sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2); ok {
+	if _, ok := rawOnly.(workspaceReadPublishedCommandCurrentReaderV2); ok {
 		t.Fatal("V1-only Command reader satisfied the published-current gate")
+	}
+	var namedWrapper any = externalStylePublishedCommandWrapperV2{}
+	if _, ok := namedWrapper.(workspaceReadPublishedCommandCurrentReaderV2); ok {
+		t.Fatal("external-style PublishedCurrent wrapper satisfied the private physical gate")
 	}
 }
 

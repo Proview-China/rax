@@ -796,41 +796,53 @@ func (o *WorkspaceReadCommandOwnerV2) InspectWorkspaceReadCommandCurrentV1(
 	ctx context.Context,
 	exact contract.Ref,
 ) (contract.WorkspaceReadCommandV1, error) {
+	command, _, err := o.inspectWorkspaceReadPublishedCommandCurrentV2(ctx, exact)
+	return command, err
+}
+
+// inspectWorkspaceReadPublishedCommandCurrentV2 returns one final, fully
+// revalidated snapshot. Both physical execution and the Runtime current
+// adapter consume this same closure; neither may join a Command from one read
+// with an OwnerCurrent pointer from another.
+func (o *WorkspaceReadCommandOwnerV2) inspectWorkspaceReadPublishedCommandCurrentV2(
+	ctx context.Context,
+	exact contract.Ref,
+) (contract.WorkspaceReadCommandV1, contract.WorkspaceReadCommandOwnerCurrentV2, error) {
 	if o == nil || ctx == nil {
-		return contract.WorkspaceReadCommandV1{}, sandboxports.ErrConflict
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
 	}
 	current, err := o.InspectWorkspaceReadCommandOwnerCurrentByCommandV2(ctx, exact)
 	if err != nil {
-		return contract.WorkspaceReadCommandV1{}, err
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, err
 	}
 	if current.Command != exact {
-		return contract.WorkspaceReadCommandV1{}, sandboxports.ErrConflict
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
 	}
 	command, err := o.repository.InspectStoredWorkspaceReadCommandExactV1(ctx, current.Command)
 	if err != nil {
-		return contract.WorkspaceReadCommandV1{}, referencedWorkspaceReadCommandErrorV2(err)
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, referencedWorkspaceReadCommandErrorV2(err)
 	}
 	if command.Meta.Ref() != exact || command.Meta.Ref() != current.Command {
-		return contract.WorkspaceReadCommandV1{}, sandboxports.ErrConflict
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
 	}
 	finalCurrent, err := o.inspectFreshWorkspaceReadCommandCurrentV2(ctx, current)
 	if err != nil {
-		return contract.WorkspaceReadCommandV1{}, err
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, err
 	}
 	if finalCurrent.Meta.Ref() != current.Meta.Ref() {
-		return contract.WorkspaceReadCommandV1{}, sandboxports.ErrConflict
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
 	}
 	finalCommand, err := o.repository.InspectStoredWorkspaceReadCommandExactV1(ctx, exact)
 	if err != nil {
-		return contract.WorkspaceReadCommandV1{}, referencedWorkspaceReadCommandErrorV2(err)
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, referencedWorkspaceReadCommandErrorV2(err)
 	}
 	finalInputs, err := o.readWorkspaceReadCommandInputsV2(ctx, finalCurrent.SourceCommand)
 	if err != nil {
-		return contract.WorkspaceReadCommandV1{}, err
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, err
 	}
 	pointer, err := o.repository.InspectStoredWorkspaceReadCommandOwnerCurrentByCommandV2(ctx, exact)
 	if err != nil {
-		return contract.WorkspaceReadCommandV1{}, referencedWorkspaceReadCommandErrorV2(err)
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, referencedWorkspaceReadCommandErrorV2(err)
 	}
 	finalNow := o.clock()
 	if finalNow.IsZero() ||
@@ -838,7 +850,7 @@ func (o *WorkspaceReadCommandOwnerV2) InspectWorkspaceReadCommandCurrentV1(
 		finalCommand.Meta.Ref() != exact ||
 		finalCommand.Meta.Ref() != finalCurrent.Command ||
 		pointer.Meta.Ref() != finalCurrent.Meta.Ref() {
-		return contract.WorkspaceReadCommandV1{}, sandboxports.ErrConflict
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, sandboxports.ErrConflict
 	}
 	if err = contract.ValidateWorkspaceReadCommandOwnerFreshClosureV2(
 		finalCurrent,
@@ -848,12 +860,15 @@ func (o *WorkspaceReadCommandOwnerV2) InspectWorkspaceReadCommandCurrentV1(
 		finalInputs.workspace,
 		finalNow,
 	); err != nil {
-		return contract.WorkspaceReadCommandV1{}, err
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, err
 	}
 	if err = finalCommand.ValidateCurrent(finalNow); err != nil {
-		return contract.WorkspaceReadCommandV1{}, err
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, err
 	}
-	return finalCommand, nil
+	if err = finalCurrent.ValidateCurrent(finalNow); err != nil {
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, err
+	}
+	return finalCommand, finalCurrent, nil
 }
 
 func (o *WorkspaceReadCommandOwnerV2) InspectWorkspaceReadPublishedCommandCurrentV2(
@@ -861,6 +876,17 @@ func (o *WorkspaceReadCommandOwnerV2) InspectWorkspaceReadPublishedCommandCurren
 	exact contract.Ref,
 ) (contract.WorkspaceReadCommandV1, error) {
 	return o.InspectWorkspaceReadCommandCurrentV1(ctx, exact)
+}
+
+// InspectWorkspaceReadCommandPhysicalCurrentV2 returns the immutable Command
+// together with the authoritative, freshly revalidated Publication current
+// that qualified it. Runtime adapters must keep the pair intact so the current
+// expiry cannot be discarded before the physical boundary.
+func (o *WorkspaceReadCommandOwnerV2) InspectWorkspaceReadCommandPhysicalCurrentV2(
+	ctx context.Context,
+	exact contract.Ref,
+) (contract.WorkspaceReadCommandV1, contract.WorkspaceReadCommandOwnerCurrentV2, error) {
+	return o.inspectWorkspaceReadPublishedCommandCurrentV2(ctx, exact)
 }
 
 func referencedWorkspaceReadCommandErrorV2(err error) error {

@@ -72,10 +72,11 @@ type WorkspaceReadCommandCurrentReaderV1 interface {
 	InspectWorkspaceReadCommandCurrentV1(context.Context, contract.Ref) (contract.WorkspaceReadCommandV1, error)
 }
 
-// WorkspaceReadPublishedCommandCurrentReaderV2 is the only current Command
-// qualification accepted by the physical executor. Implementations must join
-// the immutable Command, V2 Publication, authoritative OwnerCurrent pointer,
-// and fresh upstream projections. A raw V1 row never satisfies this port.
+// WorkspaceReadPublishedCommandCurrentReaderV2 is a legacy/read-only
+// compatibility view. It is not a physical qualification and cannot be
+// promoted to WorkspaceReadCurrentAdapterV2. Physical composition requires
+// the concrete Sandbox Command Owner so an external wrapper cannot discard or
+// forge Publication/OwnerCurrent freshness.
 type WorkspaceReadPublishedCommandCurrentReaderV2 interface {
 	InspectWorkspaceReadPublishedCommandCurrentV2(context.Context, contract.Ref) (contract.WorkspaceReadCommandV1, error)
 }

@@ -11,6 +11,7 @@ import (
 
 	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/runtimeadapter"
 )
 
 func TestDispatchRequestCanonicalSealAndDrift(t *testing.T) {
@@ -22,6 +23,17 @@ func TestDispatchRequestCanonicalSealAndDrift(t *testing.T) {
 	request.ExecutionBinding.FenceEpoch++
 	if err := request.ValidateCurrent(now); err == nil {
 		t.Fatal("fence drift retained the old request digest")
+	}
+}
+
+func TestCurrentServerRejectsReferenceV2AdapterAtPhysicalBoundary(t *testing.T) {
+	now := time.Unix(1_800_000_000, 0)
+	server := CurrentServer{
+		WorkspaceReadCurrentV2: &runtimeadapter.WorkspaceReadCurrentAdapterV2{},
+		Now:                    func() time.Time { return now },
+	}
+	if _, err := server.inspectWorkspaceReadV2(context.Background(), DispatchRequestV1{}, now); err == nil || !strings.Contains(err.Error(), "unavailable") {
+		t.Fatalf("reference V2 adapter reached Rust current authorization: %v", err)
 	}
 }
 

@@ -38,9 +38,12 @@ V2资格。
 当前已落下public nominal contract、窄ports、kernel owner factory、internal
 capability、owner-current initial/next seal、stored三事实与fresh四Reader join、
 SQLite v19三事实/body-seal/history/pointer、8-handle create/refresh、restart与
-lost-reply门禁。public raw Command writer已移除；physical executor与completion
-都只能消费Publication+OwnerCurrent fresh资格，V1/raw-only Store不能再组成执行
-旁路。ordinary、race、vet、schema/import/no-bypass与diff门禁已通过。
+lost-reply门禁。public raw Command writer已移除；physical executor使用kernel私有
+资格并同时携带Command+OwnerCurrent，Rust current V2只能由真实Sandbox Owner构造
+的runtimeadapter私有marker升级；兼容Published reader不再是physical资格。
+OwnerCurrent expiry进入reservation/attempt自然最小TTL，V1/raw-only Store或外包
+wrapper不能再组成执行旁路。ordinary、race、vet、schema/import/no-bypass与diff门禁
+需在本次加固后重新验收。
 
 这里的factory ready仅指Sandbox owner-local Command Publication闭包。Tool neutral
 adapter、cross-owner production composition、Provider、CorePack Executable与

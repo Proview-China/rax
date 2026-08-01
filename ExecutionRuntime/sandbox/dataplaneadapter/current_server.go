@@ -15,6 +15,7 @@ import (
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/runtimeadapter"
 )
 
 type CurrentReadResponseV1 struct {
@@ -30,7 +31,7 @@ type CurrentServer struct {
 	CheckpointGovernance   runtimeports.CheckpointRestoreDispatchEnforcementGovernancePortV1
 	Sandbox                sandboxports.ExactCurrentStore
 	WorkspaceReadCurrent   sandboxports.WorkspaceReadCurrentProjectionReaderV1
-	WorkspaceReadCurrentV2 sandboxports.WorkspaceReadCurrentProjectionReaderV2
+	WorkspaceReadCurrentV2 *runtimeadapter.WorkspaceReadCurrentAdapterV2
 	Now                    func() time.Time
 }
 
@@ -195,7 +196,7 @@ func workspaceReadCurrentQueryV2(raw json.RawMessage) bool {
 }
 
 func (s CurrentServer) inspectWorkspaceReadV2(ctx context.Context, request DispatchRequestV1, now time.Time) (CurrentAuthorizationV1, error) {
-	if s.WorkspaceReadCurrentV2 == nil {
+	if s.WorkspaceReadCurrentV2 == nil || !s.WorkspaceReadCurrentV2.PhysicalQualifiedV2() {
 		return CurrentAuthorizationV1{}, errors.New("workspace read exact current v2 reader is unavailable")
 	}
 	var query sandboxports.WorkspaceReadCurrentQueryV2

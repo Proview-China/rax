@@ -182,8 +182,8 @@ func TestWorkspaceReadCommandPublicationV2HasNoPhysicalOrRuntimeWriteBypass(t *t
 	root := filepath.Dir(filepath.Dir(currentFile))
 
 	// The raw State Plane may expose immutable/history inspection and its
-	// authorized local repository. It must not itself satisfy either the legacy
-	// raw-current port or the nominal PublishedCurrent port used by physical I/O.
+	// authorized local repository. It must not itself satisfy the legacy raw
+	// current port or the kernel-private physical qualification.
 	forbiddenStoreMethods := map[string]bool{
 		"CreateWorkspaceReadCommandV1":                  true,
 		"InspectWorkspaceReadCommandCurrentV1":          true,
@@ -239,24 +239,18 @@ func TestWorkspaceReadCommandPublicationV2HasNoPhysicalOrRuntimeWriteBypass(t *t
 			t.Errorf("WorkspaceReadOwnerStoreV1 regained forbidden Command surface %q", forbidden)
 		}
 	}
-	for _, required := range []string{
-		"type WorkspaceReadPublishedCommandCurrentReaderV2 interface {",
-		"InspectWorkspaceReadPublishedCommandCurrentV2(context.Context, contract.Ref) (contract.WorkspaceReadCommandV1, error)",
-	} {
-		if strings.Count(portsBody, required) != 1 {
-			t.Errorf("PublishedCurrent nominal port requirement %q is missing or duplicated", required)
-		}
-	}
-
 	physicalBody := mustReadProductionFile(t, filepath.Join(root, "kernel", "workspace_read_v1.go"))
 	for _, required := range []string{
-		"commands        sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2",
-		"func NewWorkspaceReadPhysicalExecutorV1(commands sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2,",
-		"e.commands.InspectWorkspaceReadPublishedCommandCurrentV2(ctx, commandRef)",
+		"type workspaceReadPublishedCommandCurrentReaderV2 interface {",
+		"commands        workspaceReadPublishedCommandCurrentReaderV2",
+		"func NewWorkspaceReadPhysicalExecutorV1(commands workspaceReadPublishedCommandCurrentReaderV2,",
 	} {
 		if strings.Count(physicalBody, required) != 1 {
-			t.Errorf("physical executor nominal-reader requirement %q is missing or duplicated", required)
+			t.Errorf("physical executor private Owner-current requirement %q is missing or duplicated", required)
 		}
+	}
+	if strings.Count(physicalBody, "e.commands.inspectWorkspaceReadPublishedCommandCurrentV2(ctx, commandRef)") != 2 {
+		t.Error("physical executor must read the private Command+OwnerCurrent closure at entry and final qualification")
 	}
 	if strings.Contains(physicalBody, "e.commands.InspectWorkspaceReadCommandCurrentV1(") {
 		t.Error("physical executor regained the legacy raw-current Command read")
@@ -268,10 +262,30 @@ func TestWorkspaceReadCommandPublicationV2HasNoPhysicalOrRuntimeWriteBypass(t *t
 		"prepared   runtimeports.ControlledOperationPreparedCurrentReaderV2",
 		"o.effects.InspectCurrentControlledOperationEffectV2(",
 		"o.prepared.InspectCurrentControlledOperationPreparedV2(ctx, source.Prepared)",
-		"var _ sandboxports.WorkspaceReadPublishedCommandCurrentReaderV2 = (*WorkspaceReadCommandOwnerV2)(nil)",
+		"func (o *WorkspaceReadCommandOwnerV2) inspectWorkspaceReadPublishedCommandCurrentV2(",
 	} {
 		if strings.Count(publisherBody, required) != 1 {
 			t.Errorf("Command publisher read-only/nominal requirement %q is missing or duplicated", required)
+		}
+	}
+
+	currentV2Body := mustReadProductionFile(t, filepath.Join(root, "runtimeadapter", "workspace_read_current_v2.go"))
+	for _, required := range []string{
+		"type workspaceReadPublishedCurrentProjectionReaderV2 interface {",
+		"workspaceReadPublishedCurrentV2() bool",
+		"physicalQualified: physicalQualified",
+	} {
+		if strings.Count(currentV2Body, required) != 1 {
+			t.Errorf("Rust current V2 private promotion gate %q is missing or duplicated", required)
+		}
+	}
+	serverBody := mustReadProductionFile(t, filepath.Join(root, "dataplaneadapter", "current_server.go"))
+	for _, required := range []string{
+		"WorkspaceReadCurrentV2 *runtimeadapter.WorkspaceReadCurrentAdapterV2",
+		"!s.WorkspaceReadCurrentV2.PhysicalQualifiedV2()",
+	} {
+		if strings.Count(serverBody, required) != 1 {
+			t.Errorf("CurrentServer physical-qualified V2 gate %q is missing or duplicated", required)
 		}
 	}
 	for _, forbidden := range []string{
