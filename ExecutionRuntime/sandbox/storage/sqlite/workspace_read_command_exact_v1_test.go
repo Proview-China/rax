@@ -42,7 +42,7 @@ func TestWorkspaceReadCommandExactReaderV1RejectsCanonicalTimestampSpliceAfterRe
 				t.Fatal(err)
 			}
 			_, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
-			if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+			if _, err = store.createWorkspaceReadCommandV1(ctx, command); err != nil {
 				t.Fatal(err)
 			}
 			exact := command.Meta.Ref()
@@ -92,13 +92,20 @@ func TestWorkspaceReadCommandExactReaderV1V17MigrationDoesNotSelfSealLegacyBody(
 		t.Fatal(err)
 	}
 	_, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
-	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+	if _, err = store.createWorkspaceReadCommandV1(ctx, command); err != nil {
 		t.Fatal(err)
 	}
 	if _, err = store.db.ExecContext(
 		ctx,
-		`DROP TABLE workspace_read_command_body_seal;
-		 DROP TABLE workspace_read_runtime_attempt_admission_binding_v2`,
+		`DROP TABLE workspace_read_terminal_history_v2;
+		 DROP TABLE workspace_read_execution_qualification_history_v2;
+		 DROP TABLE workspace_read_post_actual_schema_v20;
+		 DROP TABLE workspace_read_command_body_seal;
+		 DROP TABLE workspace_read_runtime_attempt_admission_binding_v2;
+		 DROP TABLE workspace_read_command_owner_current_pointer_v2;
+		 DROP TABLE workspace_read_command_owner_current_history_v2;
+		 DROP TABLE workspace_read_command_publication_v2;
+		 DROP TABLE workspace_read_command_publication_schema_v19`,
 	); err != nil {
 		t.Fatal(err)
 	}
@@ -120,7 +127,7 @@ func TestWorkspaceReadCommandExactReaderV1V17MigrationDoesNotSelfSealLegacyBody(
 	); !errors.Is(err, ports.ErrConflict) {
 		t.Fatalf("legacy Command without proof error=%v", err)
 	}
-	if _, err = reopened.CreateWorkspaceReadCommandV1(
+	if _, err = reopened.createWorkspaceReadCommandV1(
 		ctx,
 		command,
 	); !errors.Is(err, ports.ErrConflict) {
@@ -170,7 +177,7 @@ func TestWorkspaceReadCommandExactReaderV1CommandAndSealCreateAreAtomic(t *testi
 		t.Fatal(err)
 	}
 	_, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
-	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err == nil {
+	if _, err = store.createWorkspaceReadCommandV1(ctx, command); err == nil {
 		t.Fatal("Command creation succeeded after body seal failure")
 	}
 	for _, table := range []string{
@@ -194,6 +201,7 @@ func TestWorkspaceReadCommandExactReaderV1RejectsIncompatibleBodySealSchema(t *t
 	for _, test := range []struct {
 		name    string
 		columns string
+		after   string
 	}{
 		{
 			name: "extra normal column",
@@ -240,6 +248,64 @@ func TestWorkspaceReadCommandExactReaderV1RejectsIncompatibleBodySealSchema(t *t
 				canonical_body_digest TEXT NOT NULL,
 				PRIMARY KEY(command_id,revision)`,
 		},
+		{
+			name: "extra check constraint",
+			columns: `command_id TEXT NOT NULL PRIMARY KEY,
+				revision INTEGER NOT NULL CHECK(revision > 0),
+				digest TEXT NOT NULL,
+				canonical_body_digest TEXT NOT NULL`,
+		},
+		{
+			name: "extra foreign key",
+			columns: `command_id TEXT NOT NULL PRIMARY KEY
+				REFERENCES workspace_read_command_current(command_id),
+				revision INTEGER NOT NULL,
+				digest TEXT NOT NULL,
+				canonical_body_digest TEXT NOT NULL`,
+		},
+		{
+			name: "primary key NOCASE",
+			columns: `command_id TEXT NOT NULL COLLATE NOCASE PRIMARY KEY,
+				revision INTEGER NOT NULL,
+				digest TEXT NOT NULL,
+				canonical_body_digest TEXT NOT NULL`,
+		},
+		{
+			name: "descending primary key",
+			columns: `command_id TEXT NOT NULL,
+				revision INTEGER NOT NULL,
+				digest TEXT NOT NULL,
+				canonical_body_digest TEXT NOT NULL,
+				PRIMARY KEY(command_id DESC)`,
+		},
+		{
+			name: "extra index",
+			columns: `command_id TEXT NOT NULL PRIMARY KEY,
+				revision INTEGER NOT NULL,
+				digest TEXT NOT NULL,
+				canonical_body_digest TEXT NOT NULL`,
+			after: `CREATE INDEX workspace_read_command_body_seal_revision
+				ON workspace_read_command_body_seal(revision)`,
+		},
+		{
+			name: "extra trigger",
+			columns: `command_id TEXT NOT NULL PRIMARY KEY,
+				revision INTEGER NOT NULL,
+				digest TEXT NOT NULL,
+				canonical_body_digest TEXT NOT NULL`,
+			after: `CREATE TRIGGER workspace_read_command_body_seal_trigger
+				BEFORE INSERT ON workspace_read_command_body_seal
+				BEGIN SELECT 1; END`,
+		},
+		{
+			name: "extra view",
+			columns: `command_id TEXT NOT NULL PRIMARY KEY,
+				revision INTEGER NOT NULL,
+				digest TEXT NOT NULL,
+				canonical_body_digest TEXT NOT NULL`,
+			after: `CREATE VIEW workspace_read_command_body_seal_view AS
+				SELECT command_id FROM workspace_read_command_body_seal`,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctx := context.Background()
@@ -254,6 +320,12 @@ func TestWorkspaceReadCommandExactReaderV1RejectsIncompatibleBodySealSchema(t *t
 			); err != nil {
 				_ = raw.Close()
 				t.Fatal(err)
+			}
+			if test.after != "" {
+				if _, err = raw.ExecContext(ctx, test.after); err != nil {
+					_ = raw.Close()
+					t.Fatal(err)
+				}
 			}
 			if _, err = raw.ExecContext(ctx, `PRAGMA user_version=16`); err != nil {
 				_ = raw.Close()
@@ -281,12 +353,12 @@ func TestWorkspaceReadCommandExactReaderV1ReadsExpiredFactAcrossRestart(t *testi
 		t.Fatal(err)
 	}
 	_, command := workspaceReadCompletionInputFixtureV1(t, created, expires)
-	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+	if _, err = store.createWorkspaceReadCommandV1(ctx, command); err != nil {
 		t.Fatal(err)
 	}
 
 	current = expires
-	if _, err = store.InspectWorkspaceReadCommandCurrentV1(ctx, command.Meta.Ref()); err == nil {
+	if _, err = store.inspectWorkspaceReadCommandCurrentV1(ctx, command.Meta.Ref()); err == nil {
 		t.Fatal("expired workspace.read Command remained current")
 	}
 	store.db.SetMaxOpenConns(1)
@@ -363,17 +435,17 @@ func TestWorkspaceReadCommandExactReaderV1PersistsShorterMetaTTLWithoutRenewal(t
 			command.RequestedNotAfterUnixNano,
 		)
 	}
-	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+	if _, err = store.createWorkspaceReadCommandV1(ctx, command); err != nil {
 		t.Fatal(err)
 	}
 
 	current = metaExpires.Add(-time.Nanosecond)
-	got, err := store.InspectWorkspaceReadCommandCurrentV1(ctx, command.Meta.Ref())
+	got, err := store.inspectWorkspaceReadCommandCurrentV1(ctx, command.Meta.Ref())
 	if err != nil || !reflect.DeepEqual(got, command) {
 		t.Fatalf("shorter Meta TTL was not current before expiry: got=%#v err=%v", got, err)
 	}
 	current = metaExpires
-	if _, err = store.InspectWorkspaceReadCommandCurrentV1(ctx, command.Meta.Ref()); err == nil {
+	if _, err = store.inspectWorkspaceReadCommandCurrentV1(ctx, command.Meta.Ref()); err == nil {
 		t.Fatal("shorter Meta TTL remained current at exact expiry")
 	}
 	got, err = store.InspectWorkspaceReadCommandExactV1(ctx, command.Meta.Ref())
@@ -469,13 +541,13 @@ func TestWorkspaceReadCommandExactReaderV1RejectsUnsafeHistoricalTTLWithoutRepai
 	); !errors.Is(err, ports.ErrConflict) {
 		t.Fatalf("unsafe historical Command error=%v", err)
 	}
-	if _, err = reopened.InspectWorkspaceReadCommandCurrentV1(
+	if _, err = reopened.inspectWorkspaceReadCommandCurrentV1(
 		ctx,
 		command.Meta.Ref(),
 	); err == nil {
 		t.Fatal("unsafe historical Command remained current")
 	}
-	if _, err = reopened.CreateWorkspaceReadCommandV1(ctx, command); err == nil {
+	if _, err = reopened.createWorkspaceReadCommandV1(ctx, command); err == nil {
 		t.Fatal("unsafe historical Command retry silently repaired the stored fact")
 	}
 
@@ -523,7 +595,7 @@ func TestWorkspaceReadCommandExactReaderV1SixtyFourConcurrentReadsAreImmutableAn
 	// Creation requires a current clock. Temporarily use the creation time,
 	// then move beyond expiry before every historical read.
 	store.clock = func() time.Time { return now }
-	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+	if _, err = store.createWorkspaceReadCommandV1(ctx, command); err != nil {
 		t.Fatal(err)
 	}
 	store.clock = func() time.Time { return expires.Add(time.Hour) }
@@ -736,7 +808,7 @@ func TestWorkspaceReadCommandExactReaderV1RejectsCoordinateAndBodySplice(t *test
 			}
 			t.Cleanup(func() { _ = store.Close() })
 			_, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
-			if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+			if _, err = store.createWorkspaceReadCommandV1(ctx, command); err != nil {
 				t.Fatal(err)
 			}
 			test.mutate(t, store, command)
@@ -787,7 +859,7 @@ func TestWorkspaceReadCommandExactReaderV1RejectsNonCanonicalAndDuplicateJSONAft
 				t.Fatal(err)
 			}
 			_, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
-			if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+			if _, err = store.createWorkspaceReadCommandV1(ctx, command); err != nil {
 				t.Fatal(err)
 			}
 			var body []byte
@@ -829,7 +901,7 @@ func TestWorkspaceReadCommandExactReaderV1MissingAndCoordinateMismatch(t *testin
 	}
 	t.Cleanup(func() { _ = store.Close() })
 	_, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
-	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+	if _, err = store.createWorkspaceReadCommandV1(ctx, command); err != nil {
 		t.Fatal(err)
 	}
 	missing := command.Meta.Ref()

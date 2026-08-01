@@ -1,4 +1,4 @@
-package dataplaneadapter_test
+package kernel_test
 
 import (
 	"bytes"
@@ -27,35 +27,48 @@ import (
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
 	dataplaneadapter "github.com/Proview-China/rax/ExecutionRuntime/sandbox/dataplaneadapter"
+	ownerworkspaceread "github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/owner/workspaceread"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/testkit"
-	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/kernel"
+	. "github.com/Proview-China/rax/ExecutionRuntime/sandbox/kernel"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/runtimeadapter"
 	sqlitestore "github.com/Proview-China/rax/ExecutionRuntime/sandbox/storage/sqlite"
 )
 
 type workspaceReadExecutorCaseV1 struct {
-	setup               func(*testing.T, string)
-	mutateWorkspace     func(*contract.WorkspaceView)
-	startByte           uint64
-	commandMetaAfter    time.Duration
-	commandRequestAfter time.Duration
-	runtimeUnifiedAfter time.Duration
-	expectedTTLAfter    time.Duration
-	singleExecution     bool
-	hiddenScopes        []string
-	expectedState       contract.WorkspaceReadStateV1
-	expectedContent     string
-	expectedAdapter     uint64
-	expectedPhysical    uint64
-	expectedBoundary    kernel.WorkspaceReadActualPointBoundaryV1
-	expectInspectError  bool
-	expectBeforeActual  bool
-	runtimeLeaseS2Drift bool
-	driftReservation    bool
-	driftAttempt        bool
-	useFakeActual       bool
-	verifyBindingV2     bool
+	setup                    func(*testing.T, string)
+	mutateWorkspace          func(*contract.WorkspaceView)
+	startByte                uint64
+	commandMetaAfter         time.Duration
+	commandRequestAfter      time.Duration
+	runtimeUnifiedAfter      time.Duration
+	sourceCurrentAfter       time.Duration
+	expectedTTLAfter         time.Duration
+	singleExecution          bool
+	hiddenScopes             []string
+	expectedState            contract.WorkspaceReadStateV1
+	expectedContent          string
+	expectedAdapter          uint64
+	expectedPhysical         uint64
+	expectedBoundary         WorkspaceReadActualPointBoundaryV1
+	expectInspectError       bool
+	expectBeforeActual       bool
+	runtimeLeaseS2Drift      bool
+	ownerCurrentS2Drift      bool
+	ownerCurrentTTLOnRead    bool
+	driftReservation         bool
+	driftAttempt             bool
+	useFakeActual            bool
+	verifyBindingV2          bool
+	attackLegacyComplete     bool
+	prepareFails             bool
+	expectedPrepare          uint64
+	expectNoQualification    bool
+	expireAfterQualification bool
+	postActualCrashRecovery  bool
+	qualificationLostReply   bool
+	startedCrashRecovery     bool
+	legacyCompletedRecovery  bool
 }
 
 type lockedBuffer struct {
@@ -87,6 +100,14 @@ func TestWorkspaceReadPublicExecutorCreatesRuntimeAttemptAdmissionBindingV2(t *t
 	})
 }
 
+func TestWorkspaceReadPublicExecutorRejectsLegacyCompleteWithValidV2AttemptV2(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		startByte: 6, expectedState: contract.WorkspaceReadObservedV1,
+		expectedContent: "Praxis", expectedAdapter: 1, expectedPhysical: 1,
+		useFakeActual: true, singleExecution: true, attackLegacyComplete: true,
+	})
+}
+
 func TestWorkspaceReadPublicExecutorUsesShorterCommandMetaTTLWithinCallerAuthority(t *testing.T) {
 	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
 		commandMetaAfter:    5 * time.Second,
@@ -102,6 +123,42 @@ func TestWorkspaceReadPublicExecutorUsesShorterCommandMetaTTLWithinCallerAuthori
 	})
 }
 
+func TestWorkspaceReadPublicExecutorUsesPublishedOwnerCurrentTTL(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		commandMetaAfter:    30 * time.Second,
+		commandRequestAfter: 30 * time.Second,
+		runtimeUnifiedAfter: 30 * time.Second,
+		sourceCurrentAfter:  5 * time.Second,
+		expectedTTLAfter:    5 * time.Second,
+		expectedState:       contract.WorkspaceReadObservedV1,
+		expectedContent:     "Praxis",
+		expectedAdapter:     1,
+		expectedPhysical:    1,
+		useFakeActual:       true,
+		singleExecution:     true,
+	})
+}
+
+func TestWorkspaceReadPublicExecutorRejectsPublishedOwnerCurrentS2Drift(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		expectedState:       contract.WorkspaceReadUnknownV1,
+		expectedAdapter:     1,
+		expectedPhysical:    1,
+		useFakeActual:       true,
+		ownerCurrentS2Drift: true,
+	})
+}
+
+func TestWorkspaceReadPublicExecutorRejectsOwnerCurrentExpiryCrossedInsideReader(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		expectedAdapter:       0,
+		expectedPhysical:      0,
+		expectBeforeActual:    true,
+		useFakeActual:         true,
+		ownerCurrentTTLOnRead: true,
+	})
+}
+
 func TestWorkspaceReadPublicExecutorRejectsCallerBoundBeyondRuntimeAuthority(t *testing.T) {
 	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
 		commandMetaAfter:    40 * time.Second,
@@ -111,6 +168,46 @@ func TestWorkspaceReadPublicExecutorRejectsCallerBoundBeyondRuntimeAuthority(t *
 		expectedPhysical:    0,
 		expectBeforeActual:  true,
 		useFakeActual:       true,
+	})
+}
+
+func TestWorkspaceReadReserveWithoutQualificationNeverReachesPhysicalPointOnReplay(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		expectedState: contract.WorkspaceReadFailedV1, useFakeActual: true,
+		singleExecution: true, prepareFails: true, expectedPrepare: 1,
+		expectedAdapter: 0, expectedPhysical: 0, expectNoQualification: true,
+	})
+}
+
+func TestWorkspaceReadQualificationCommitCrossingExpiryNeverDispatches(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		expectedState: contract.WorkspaceReadStartedV1, useFakeActual: true,
+		singleExecution: true, expireAfterQualification: true, expectedPrepare: 1,
+		expectedAdapter: 0, expectedPhysical: 0,
+	})
+}
+
+func TestWorkspaceReadCompletedPhysicalCrashThenExpiredRestartPersistsIndeterminateWithoutReread(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		useFakeActual: true, postActualCrashRecovery: true,
+	})
+}
+
+func TestWorkspaceReadQualificationCommitLostReplyRestartDispatchesOnce(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		useFakeActual: true, qualificationLostReply: true,
+	})
+}
+
+func TestWorkspaceReadStartedJournalRestartPersistsIndeterminateWithoutReread(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		useFakeActual: true, startedCrashRecovery: true,
+	})
+}
+
+func TestWorkspaceReadLegacyCompletedWithoutSealedRequestRestartIsIndeterminate(t *testing.T) {
+	runWorkspaceReadPublicExecutorV1(t, workspaceReadExecutorCaseV1{
+		useFakeActual: true, legacyCompletedRecovery: true,
 	})
 }
 
@@ -129,7 +226,7 @@ func TestWorkspaceReadPublicExecutorClassifiesPhysicalBoundariesThroughRustIPC(t
 					t.Fatal(err)
 				}
 			},
-			expectedState: contract.WorkspaceReadFailedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1,
+			expectedState: contract.WorkspaceReadFailedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: WorkspaceReadEffectNotStartedV1,
 		}},
 		{name: "special-directory", spec: workspaceReadExecutorCaseV1{
 			setup: func(t *testing.T, root string) {
@@ -137,7 +234,7 @@ func TestWorkspaceReadPublicExecutorClassifiesPhysicalBoundariesThroughRustIPC(t
 					t.Fatal(err)
 				}
 			},
-			expectedState: contract.WorkspaceReadFailedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1,
+			expectedState: contract.WorkspaceReadFailedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: WorkspaceReadEffectNotStartedV1,
 		}},
 		{name: "oversized", spec: workspaceReadExecutorCaseV1{
 			setup: func(t *testing.T, root string) {
@@ -145,7 +242,7 @@ func TestWorkspaceReadPublicExecutorClassifiesPhysicalBoundariesThroughRustIPC(t
 					t.Fatal(err)
 				}
 			},
-			expectedState: contract.WorkspaceReadFailedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1,
+			expectedState: contract.WorkspaceReadFailedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: WorkspaceReadEffectNotStartedV1,
 		}},
 		{name: "hidden-scope", spec: workspaceReadExecutorCaseV1{
 			hiddenScopes: []string{"src"}, expectedAdapter: 0, expectedPhysical: 0, expectBeforeActual: true,
@@ -158,10 +255,10 @@ func TestWorkspaceReadPublicExecutorClassifiesPhysicalBoundariesThroughRustIPC(t
 			expectedState: contract.WorkspaceReadUnknownV1, expectedAdapter: 1, expectedPhysical: 1, runtimeLeaseS2Drift: true,
 		}},
 		{name: "sandbox-reservation-drift", spec: workspaceReadExecutorCaseV1{
-			expectedState: contract.WorkspaceReadStartedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1, expectInspectError: true, driftReservation: true,
+			expectedState: contract.WorkspaceReadStartedV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: WorkspaceReadEffectNotStartedV1, expectInspectError: true, driftReservation: true,
 		}},
 		{name: "sandbox-attempt-drift", spec: workspaceReadExecutorCaseV1{
-			expectedState: contract.WorkspaceReadUnknownV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: kernel.WorkspaceReadEffectNotStartedV1, driftAttempt: true,
+			expectedState: contract.WorkspaceReadUnknownV1, expectedAdapter: 1, expectedPhysical: 0, expectedBoundary: WorkspaceReadEffectNotStartedV1, driftAttempt: true,
 		}},
 		{name: "non-utf8", spec: workspaceReadExecutorCaseV1{
 			setup: func(t *testing.T, root string) {
@@ -169,7 +266,7 @@ func TestWorkspaceReadPublicExecutorClassifiesPhysicalBoundariesThroughRustIPC(t
 					t.Fatal(err)
 				}
 			},
-			expectedState: contract.WorkspaceReadUnknownV1, expectedAdapter: 1, expectedPhysical: 1, expectedBoundary: kernel.WorkspaceReadEffectStartedUnknownV1,
+			expectedState: contract.WorkspaceReadUnknownV1, expectedAdapter: 1, expectedPhysical: 1, expectedBoundary: WorkspaceReadEffectStartedUnknownV1,
 		}},
 		{name: "eof-empty-success", spec: workspaceReadExecutorCaseV1{
 			setup: func(t *testing.T, root string) {
@@ -195,7 +292,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	}
 	clock := time.Now
 	var controlledClock atomic.Int64
-	if spec.verifyBindingV2 || spec.expectedTTLAfter != 0 {
+	if spec.verifyBindingV2 || spec.expectedTTLAfter != 0 || spec.ownerCurrentTTLOnRead || spec.expireAfterQualification || spec.postActualCrashRecovery || spec.qualificationLostReply || spec.startedCrashRecovery || spec.legacyCompletedRecovery {
 		controlledClock.Store(time.Now().UTC().UnixNano())
 		clock = func() time.Time {
 			return time.Unix(0, controlledClock.Load()).UTC()
@@ -236,26 +333,35 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	workspaceExpires := time.Unix(0, 4_000_000_008_000_000_000)
 	workspaceDigest := "sha256:021c67f065e27e7e93918819bfbd85d62dc7c9a50a7599779b68bdc4a293f2ba"
 	fileScopeDigest := "sha256:a9e25d859be79d6716a9397eed2e1400d936a6b3233247f5664d1a06e42478a7"
-	providerPayload, err := dataplaneadapter.NewWorkspaceReadPayloadV1(dataplaneadapter.WorkspaceReadPayloadV1{
-		WorkspaceBindingID: "workspace-view", WorkspaceDigest: workspaceDigest,
-		Workspace: dataplaneadapter.ExactRefV1{
-			ID: "workspace-view", Revision: 1, Digest: workspaceDigest, ExpiresUnixNano: workspaceExpires.UnixNano(),
+	canonicalInline, err := json.Marshal(contract.WorkspaceReadCanonicalPayloadV2{
+		WorkspaceRoot: contract.WorkspaceReadSourceWorkspaceRefV2{
+			ID: "workspace-view", Revision: 1, Digest: runtimecore.Digest(workspaceDigest),
 		},
-		FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6, S1Checked: true,
+		RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6,
+		RequestedNotAfter: commandRequestedNotAfter.UnixNano(),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	providerPayloadDigest, err := digestWorkspaceReadExecutorIPC("ProviderPayloadV1", providerPayload)
-	if err != nil {
-		t.Fatal(err)
+	runtimePayload := runtimeports.OpaquePayloadV2{
+		Schema: runtimeports.SchemaRefV2{
+			Namespace: "praxis.tool", Name: "workspace-read", Version: "1.0.0",
+			MediaType: "application/json", ContentDigest: runtimecore.DigestBytes([]byte("workspace-read-schema")),
+		},
+		ContentDigest: runtimecore.DigestBytes(canonicalInline),
+		Length:        uint64(len(canonicalInline)), Inline: canonicalInline,
+		LimitPolicy: runtimeports.OpaqueLimitPolicyRefV2{
+			Policy: "praxis.tool/workspace-read-limit",
+			Digest: runtimecore.DigestBytes([]byte("workspace-read-limit")),
+		},
 	}
-	current := buildWorkspaceReadRuntimeCurrentV4(t, now, providerPayloadDigest)
+	runtimeFixture := buildWorkspaceReadRuntimeFixtureV4(t, now, runtimePayload)
+	current := runtimeFixture.current
 	workspace := contract.WorkspaceView{
-		Meta:            contract.Meta{ContractVersion: contract.ContractFamily, ID: "workspace-view", Revision: 1, Digest: workspaceDigest, CreatedUnixNano: now.UnixNano(), UpdatedUnixNano: now.UnixNano(), ExpiresUnixNano: workspaceExpires.UnixNano()},
+		Meta:            contract.Meta{ContractVersion: contract.ContractFamily, ID: "workspace-view", Revision: 1, Digest: strings.TrimPrefix(workspaceDigest, "sha256:"), CreatedUnixNano: now.UnixNano(), UpdatedUnixNano: now.UnixNano(), ExpiresUnixNano: workspaceExpires.UnixNano()},
 		BaseArtifactRef: contract.Ref{ID: "base-artifact", Revision: 1, Digest: digestWorkspaceReadExecutorTest("base-artifact")}, BaseRevision: "main",
 		OverlayRef: contract.Ref{ID: "overlay", Revision: 1, Digest: digestWorkspaceReadExecutorTest("overlay")}, PolicyRef: contract.Ref{ID: "policy", Revision: 1, Digest: digestWorkspaceReadExecutorTest("policy")},
-		Lease:      contract.RuntimeLeaseBinding{TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), InstanceID: string(current.Sandbox.RuntimeLease.Instance.ID), InstanceEpoch: uint64(current.Sandbox.RuntimeLease.Instance.Epoch), LeaseID: string(current.Sandbox.RuntimeLease.Lease.ID), LeaseEpoch: uint64(current.Sandbox.RuntimeLease.Lease.Epoch), FenceEpoch: uint64(current.Sandbox.RuntimeLease.FenceEpoch), ScopeDigest: string(current.Sandbox.RuntimeLease.ScopeDigest), ObservedRevision: uint64(current.Sandbox.RuntimeLease.ObservedRevision), ExpiresUnixNano: current.Sandbox.RuntimeLease.Ref.ExpiresUnixNano},
+		Lease:      contract.RuntimeLeaseBinding{TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), InstanceID: string(current.Sandbox.RuntimeLease.Instance.ID), InstanceEpoch: uint64(current.Sandbox.RuntimeLease.Instance.Epoch), LeaseID: string(current.Sandbox.RuntimeLease.Lease.ID), LeaseEpoch: uint64(current.Sandbox.RuntimeLease.Lease.Epoch), FenceEpoch: uint64(current.Sandbox.RuntimeLease.FenceEpoch), ScopeDigest: strings.TrimPrefix(string(current.Sandbox.RuntimeLease.ScopeDigest), "sha256:"), ObservedRevision: uint64(current.Sandbox.RuntimeLease.ObservedRevision), ExpiresUnixNano: current.Sandbox.RuntimeLease.Ref.ExpiresUnixNano},
 		ReadScopes: []string{"src"}, WriteScopes: []string{"src"}, HiddenScopes: spec.hiddenScopes, FileScopeDigest: fileScopeDigest,
 	}
 	if spec.mutateWorkspace != nil {
@@ -266,13 +372,14 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if err != nil {
 		t.Fatal(err)
 	}
-	delegation := runtimeports.ExecutionDelegationRefV2{ID: "delegation-workspace-read", Revision: 1, Digest: runtimecore.DigestBytes([]byte("delegation-workspace-read"))}
-	preparedID, err := runtimeports.DerivePreparedProviderAttemptIDV2(delegation.ID, legacy.ID, legacy.AttemptID)
+	declaredDelegation := runtimeports.ExecutionDelegationRefV2{ID: "delegation-workspace-read", Revision: 1, Digest: runtimecore.DigestBytes([]byte("delegation-workspace-read-declared"))}
+	delegation := runtimeports.ExecutionDelegationRefV2{ID: declaredDelegation.ID, Revision: 2, Digest: runtimecore.DigestBytes([]byte("delegation-workspace-read-prepared"))}
+	preparedID, err := runtimeports.DerivePreparedProviderAttemptIDV2(declaredDelegation.ID, legacy.ID, legacy.AttemptID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	prepared, err := runtimeports.SealPreparedProviderAttemptRefV2(runtimeports.PreparedProviderAttemptRefV2{
-		ID: preparedID, Revision: 1, DeclaredDelegation: delegation, OperationDigest: current.Sandbox.OperationDigest,
+		ID: preparedID, Revision: 1, DeclaredDelegation: declaredDelegation, OperationDigest: current.Sandbox.OperationDigest,
 		IntentID: current.Sandbox.EffectID, IntentRevision: current.Sandbox.IntentRevision, IntentDigest: current.Sandbox.IntentDigest,
 		PermitID: legacy.ID, PermitRevision: legacy.Revision, PermitDigest: legacyDigest, AttemptID: current.Sandbox.AttemptID,
 		Provider: current.Sandbox.ProviderBinding, PayloadSchema: legacy.PayloadSchema, PayloadDigest: legacy.PayloadDigest, PayloadRevision: legacy.PayloadRevision,
@@ -285,30 +392,139 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if err = attempt.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	owner := runtimeports.EffectOwnerRefV2{Role: runtimeports.OwnerSettlement, ComponentID: current.Sandbox.ProviderBinding.ComponentID, ManifestDigest: current.Sandbox.ProviderBinding.ManifestDigest}
-	commandDraft := contract.WorkspaceReadCommandV1{
-		TenantID: string(current.Sandbox.Operation.ExecutionScope.Identity.TenantID), SourceToolCommand: contract.Ref{ID: "tool-command", Revision: 1, Digest: digestWorkspaceReadExecutorTest("tool-command")},
-		SourceToolPayloadSchema: legacy.PayloadSchema.Key(), SourceToolPayloadDigest: string(legacy.PayloadDigest), SourceToolPayloadRevision: uint64(legacy.PayloadRevision),
-		WorkspaceView: workspace.Meta.Ref(), FileScopeDigest: fileScopeDigest, RelativePath: "src/main.txt", StartByte: spec.startByte, MaxBytes: 6, RequestedNotAfterUnixNano: commandRequestedNotAfter.UnixNano(),
-		OperationDigest: string(current.Sandbox.OperationDigest), EffectID: string(current.Sandbox.EffectID), IntentRevision: uint64(current.Sandbox.IntentRevision), IntentDigest: string(current.Sandbox.IntentDigest), AttemptID: current.Sandbox.AttemptID,
-		PreparedDigest: string(prepared.Digest), ProviderComponent: string(current.Sandbox.ProviderBinding.ComponentID), ProviderManifest: string(current.Sandbox.ProviderBinding.ManifestDigest),
-	}
-	if spec.verifyBindingV2 {
-		fileID, fileErr := contract.WorkspaceReadFileIDV1(workspace.Meta.ID, commandDraft.RelativePath)
-		if fileErr != nil {
-			t.Fatal(fileErr)
-		}
-		commandDraft.ExpectedFileRef = &contract.Ref{
-			ID: fileID, Revision: workspace.Meta.Revision,
-			Digest: digestWorkspaceReadExecutorTest("fake-whole-file"),
-		}
-	}
-	dispatchDigest, err := runtimecore.CanonicalJSONDigest("praxis.sandbox.workspace-read", "1.0.0", "OperationDispatchAttemptRefV3", attempt)
+	owner := runtimeFixture.intent.Owners[2]
+	intentDigest, err := runtimeFixture.intent.DigestV3()
 	if err != nil {
 		t.Fatal(err)
 	}
-	commandDraft.DispatchDigest = string(dispatchDigest)
-	command, err := contract.SealWorkspaceReadCommandV1(commandDraft, "workspace-read-command", now, commandMetaExpires)
+	effect, err := runtimeports.SealControlledOperationEffectCurrentProjectionV2(
+		runtimeports.ControlledOperationEffectCurrentProjectionV2{
+			Intent: runtimeFixture.intent, IntentDigest: intentDigest,
+			FactRevision: 2, State: contract.WorkspaceReadEffectDispatchIntentV2,
+			CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: runtimeUnifiedNotAfter.UnixNano(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	persisted := runtimeports.PersistedOperationEnforcementRefV3{
+		PermitID: prepared.PermitID, PermitRevision: prepared.PermitRevision,
+		PermitDigest: prepared.PermitDigest, AttemptID: prepared.AttemptID,
+		OperationDigest: prepared.OperationDigest, Provider: prepared.Provider,
+		ReceiptDigest:    runtimecore.DigestBytes([]byte("workspace-read-enforcement-receipt")),
+		RecordedRevision: 1,
+	}
+	preparedSnapshot, err := runtimeports.SealControlledOperationPreparedSemanticSnapshotV2(
+		runtimeports.ControlledOperationPreparedSemanticSnapshotV2{
+			Prepared: prepared, Delegation: delegation, PersistedEnforcement: persisted,
+			OperationDigest: prepared.OperationDigest, EffectID: prepared.IntentID,
+			IntentRevision: prepared.IntentRevision, IntentDigest: prepared.IntentDigest,
+			Attempt: attempt, ProviderBinding: prepared.Provider,
+			PayloadSchema: prepared.PayloadSchema, PayloadDigest: prepared.PayloadDigest,
+			PayloadRevision: prepared.PayloadRevision,
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	preparedCurrent, err := runtimeports.SealControlledOperationPreparedCurrentProjectionV2(
+		runtimeports.ControlledOperationPreparedCurrentProjectionV2{
+			Snapshot: preparedSnapshot, CheckedUnixNano: now.UnixNano(),
+			ExpiresUnixNano: runtimeUnifiedNotAfter.UnixNano(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attemptDigest, err := contract.WorkspaceReadSourceRuntimeAttemptDigestV2(attempt)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sourceNotAfter := commandMetaExpires
+	if sourceNotAfter.After(runtimeUnifiedNotAfter) {
+		sourceNotAfter = runtimeUnifiedNotAfter
+	}
+	sourceExpires := sourceNotAfter
+	sourceCurrentAfter := spec.sourceCurrentAfter
+	if sourceCurrentAfter == 0 {
+		sourceCurrentAfter = 9 * time.Second
+	}
+	if ceiling := now.Add(sourceCurrentAfter); sourceExpires.After(ceiling) {
+		sourceExpires = ceiling
+	}
+	source, err := contract.SealWorkspaceReadSourceCurrentProjectionV2(
+		contract.WorkspaceReadSourceCurrentProjectionV2{
+			SourceCommand: contract.WorkspaceReadSourceCommandRefV2{
+				Owner: owner, Kind: contract.WorkspaceReadSourceCommandKindV2,
+				ID: "tool-command", Revision: 1,
+				Digest: strings.TrimPrefix(string(digestWorkspaceReadExecutorTest("tool-command")), "sha256:"),
+			},
+			Operation: current.Sandbox.Operation, OperationDigest: current.Sandbox.OperationDigest,
+			Prepared: prepared, PreparedSemanticDigest: preparedSnapshot.SemanticDigest,
+			RuntimeAttempt: attempt, RuntimeAttemptDigest: attemptDigest,
+			RuntimeEffectIntentDigest: intentDigest, RuntimeEffectFactRevision: effect.FactRevision,
+			RuntimeEffectState: contract.WorkspaceReadEffectDispatchIntentV2,
+			PayloadSchema:      runtimePayload.Schema, PayloadDigest: runtimePayload.ContentDigest,
+			PayloadRevision: 1, CanonicalInline: append([]byte(nil), canonicalInline...),
+			CanonicalInlineLength: uint64(len(canonicalInline)),
+			WorkspaceView:         workspace.Meta.Ref(), RelativePath: "src/main.txt",
+			StartByte: spec.startByte, MaxBytes: 6,
+			RequestedNotAfterUnixNano: commandRequestedNotAfter.UnixNano(),
+			SourceCreatedUnixNano:     now.UnixNano(), SourceNotAfterUnixNano: sourceNotAfter.UnixNano(),
+			CheckedUnixNano: now.UnixNano(), ExpiresUnixNano: sourceExpires.UnixNano(),
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	semantic, err := contract.SealWorkspaceReadCommandPublicationSemanticV2(
+		source, effect, preparedCurrent, workspace, now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	command, err := contract.SealWorkspaceReadPublishedCommandV2(semantic, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publication, err := contract.SealWorkspaceReadCommandPublicationV2(
+		contract.WorkspaceReadCommandPublicationV2{Semantic: semantic},
+		command,
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ownerCurrent, err := contract.SealInitialWorkspaceReadCommandOwnerCurrentV2(
+		contract.WorkspaceReadCommandOwnerCurrentV2{
+			Command: command.Meta.Ref(), Publication: publication.Meta.Ref(),
+			PublicationSemanticDigest:       publication.Semantic.Digest,
+			SourceCommand:                   publication.Semantic.SourceCommand,
+			SourceSemanticDigest:            publication.Semantic.SourceSemanticDigest,
+			SourceProjectionDigest:          source.ProjectionDigest,
+			SourceCheckedUnixNano:           source.CheckedUnixNano,
+			SourceExpiresUnixNano:           source.ExpiresUnixNano,
+			RuntimeEffectProjectionDigest:   effect.Digest,
+			RuntimeEffectCheckedUnixNano:    effect.CheckedUnixNano,
+			RuntimeEffectExpiresUnixNano:    effect.ExpiresUnixNano,
+			RuntimePreparedProjectionDigest: preparedCurrent.ProjectionDigest,
+			RuntimePreparedCheckedUnixNano:  preparedCurrent.CheckedUnixNano,
+			RuntimePreparedExpiresUnixNano:  preparedCurrent.ExpiresUnixNano,
+			WorkspaceView:                   workspace.Meta.Ref(),
+			WorkspaceSemanticDigest:         publication.Semantic.WorkspaceSemanticDigest,
+			WorkspaceCheckedUnixNano:        now.UnixNano(),
+			WorkspaceExpiresUnixNano:        workspace.Meta.ExpiresUnixNano,
+			WorkspaceLeaseExpiresUnixNano:   workspace.Lease.ExpiresUnixNano,
+			SemanticNotAfterUnixNano:        publication.Semantic.SemanticNotAfterUnixNano,
+		},
+		now,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicationCapability, err := ownerworkspaceread.NewInitialCommandPublicationV2(
+		command, publication, ownerCurrent, source, effect, preparedCurrent, workspace, now,
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,16 +568,44 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if _, err = store.CreateWorkspaceViewV1(ctx, workspace); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.CreateWorkspaceReadCommandV1(ctx, command); err != nil {
+	if _, _, err = store.ApplyWorkspaceReadCommandPublicationV2(ctx, publicationCapability); err != nil {
+		t.Fatal(err)
+	}
+	var sourceReader sandboxports.WorkspaceReadSourceCurrentReaderV2 = fixedWorkspaceReadSourceReaderV2{value: source}
+	if spec.ownerCurrentTTLOnRead {
+		sourceReader = &expiringWorkspaceReadSourceReaderV2{
+			value:  source,
+			expire: func() { controlledClock.Store(source.ExpiresUnixNano) },
+		}
+	}
+	if spec.ownerCurrentS2Drift {
+		driftedSource := source
+		driftedSource.CheckedUnixNano++
+		driftedSource.ProjectionDigest = ""
+		driftedSource, err = contract.SealWorkspaceReadSourceCurrentProjectionV2(driftedSource)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sourceReader = &sequencedWorkspaceReadSourceReaderV2{first: source, second: driftedSource, switchAfter: 6}
+	}
+	commandOwner, err := NewWorkspaceReadCommandOwnerV2(
+		sourceReader,
+		fixedWorkspaceReadEffectReaderV2{value: effect},
+		fixedWorkspaceReadPreparedReaderV2{value: preparedCurrent},
+		store,
+		store,
+		clock,
+	)
+	if err != nil {
 		t.Fatal(err)
 	}
 
 	dispatchSocket := filepath.Join(root, "dispatch.sock")
 	currentSocket := filepath.Join(root, "current.sock")
-	baseCurrent, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV1(
+	baseCurrent, err := runtimeadapter.NewWorkspaceReadPublishedCurrentAdapterV2(
 		fixedWorkspaceReadEnforcementReaderV1{value: current},
 		fixedWorkspaceReadAssociationReaderV1{association},
-		store,
+		commandOwner,
 		store,
 		clock,
 	)
@@ -372,16 +616,15 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 	if err != nil {
 		t.Fatal(err)
 	}
-	countedCurrent := &countingWorkspaceReadCurrentReaderV2{inner: exactCurrent}
 	var output lockedBuffer
-	var actualPoint kernel.WorkspaceReadActualPointV1
+	var actualPoint WorkspaceReadActualPointV1
 	if spec.useFakeActual {
 		actualPoint = &successfulWorkspaceReadActualPointV2{}
 	} else {
 		currentServer := dataplaneadapter.CurrentServer{
 			SocketPath: currentSocket, SocketMode: 0o660, AllowedUID: uint32(os.Getuid()),
 			Governance: fixedWorkspaceReadEnforcementReaderV1{value: current},
-			Sandbox:    testkit.NewMemoryStore(), WorkspaceReadCurrentV2: countedCurrent, Now: clock,
+			Sandbox:    testkit.NewMemoryStore(), WorkspaceReadCurrentV2: exactCurrent, Now: clock,
 		}
 		listener, listenErr := currentServer.Listen()
 		if listenErr != nil {
@@ -402,7 +645,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		}
 		defer func() { cancel(); _ = process.Wait() }()
 		waitForWorkspaceReadExecutorSocket(t, dispatchSocket, &output)
-		concrete, concreteErr := dataplaneadapter.NewWorkspaceReadActualPointAdapterV1(dataplaneadapter.Client{SocketPath: dispatchSocket, AllowedUID: uint32(os.Getuid())})
+		concrete, concreteErr := NewWorkspaceReadActualPointAdapterForTestV2(dataplaneadapter.Client{SocketPath: dispatchSocket, AllowedUID: uint32(os.Getuid())})
 		if concreteErr != nil {
 			t.Fatal(concreteErr)
 		}
@@ -410,14 +653,27 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		if spec.driftReservation || spec.driftAttempt {
 			actualPoint = &driftingWorkspaceReadActualPointV1{
 				inner:            concrete,
-				store:            store,
 				databasePath:     databasePath,
 				driftReservation: spec.driftReservation,
 				driftAttempt:     spec.driftAttempt,
 			}
 		}
 	}
+	var legacyAttack *legacyCompletingWorkspaceReadActualPointV2
+	if spec.attackLegacyComplete {
+		legacyAttack = &legacyCompletingWorkspaceReadActualPointV2{inner: actualPoint, store: store, authorization: authorization}
+		actualPoint = legacyAttack
+	}
 	counted := &countingWorkspaceReadActualPointV1{inner: actualPoint}
+	if spec.postActualCrashRecovery || spec.startedCrashRecovery || spec.legacyCompletedRecovery {
+		counted.loseDispatchReply.Store(true)
+		counted.inspectFailures.Store(1)
+	}
+	counted.startedOnly = spec.startedCrashRecovery
+	counted.legacyCompletedEvidenceOnly = spec.legacyCompletedRecovery
+	if spec.prepareFails {
+		counted.prepareErr = errors.New("injected reversible prepare failure")
+	}
 	enforcementReader := &sequencedWorkspaceReadEnforcementReaderV1{first: current, second: current}
 	if spec.runtimeLeaseS2Drift {
 		enforcementReader.second.Sandbox.RuntimeLease.FenceEpoch++
@@ -430,7 +686,19 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			t.Fatal(err)
 		}
 	}
-	executor, err := kernel.NewWorkspaceReadPhysicalExecutorV1(store, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, store, counted, clock)
+	var executorStore sandboxports.WorkspaceReadOwnerStoreV1 = store
+	if spec.expireAfterQualification {
+		executorStore = &expiringWorkspaceReadPostActualStoreV2{
+			Store: store,
+			after: func(qualification contract.WorkspaceReadExecutionQualificationV2) {
+				controlledClock.Store(qualification.ExpiresUnixNano)
+			},
+		}
+	}
+	if spec.qualificationLostReply {
+		executorStore = &lostReplyWorkspaceReadPostActualStoreV2{Store: store}
+	}
+	executor, err := NewWorkspaceReadPhysicalExecutorForTestV1(commandOwner, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, executorStore, counted, clock)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -454,12 +722,98 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			)
 		}
 		controlledClock.Store(expectedExpiry)
-		if _, executeErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); executeErr == nil {
-			t.Fatal("exact Command Meta expiry restored execution eligibility")
+		if _, executeErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); executeErr != nil {
+			t.Fatalf("expired Observed terminal lost idempotent no-effect replay: %v", executeErr)
 		}
 		if counted.calls.Load() != 1 {
 			t.Fatalf("exact Command Meta expiry re-entered physical read: %d", counted.calls.Load())
 		}
+	}
+	if spec.qualificationLostReply {
+		if _, firstErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); firstErr == nil {
+			t.Fatal("Qualification commit lost reply unexpectedly succeeded")
+		}
+		if counted.calls.Load() != 0 {
+			t.Fatalf("Qualification lost reply crossed physical point: %d", counted.calls.Load())
+		}
+		executor, err = NewWorkspaceReadPhysicalExecutorForTestV1(commandOwner, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, executorStore, counted, clock)
+		if err != nil {
+			t.Fatalf("restart executor: %v", err)
+		}
+		if _, replayErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); replayErr != nil {
+			t.Fatalf("Qualification restart recovery: %v", replayErr)
+		}
+		if counted.calls.Load() != 1 {
+			t.Fatalf("Qualification restart physical reads=%d, want 1", counted.calls.Load())
+		}
+		return
+	}
+	if spec.startedCrashRecovery || spec.legacyCompletedRecovery {
+		if _, firstErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); firstErr == nil || !runtimecore.HasReason(firstErr, runtimecore.ReasonEffectUnknownOutcome) {
+			t.Fatalf("post-actual first outcome=%v, want indeterminate", firstErr)
+		}
+		expectedPhysical := uint64(0)
+		if spec.legacyCompletedRecovery {
+			expectedPhysical = 1
+		}
+		if counted.calls.Load() != expectedPhysical {
+			t.Fatalf("first physical reads=%d, want %d", counted.calls.Load(), expectedPhysical)
+		}
+		executor, err = NewWorkspaceReadPhysicalExecutorForTestV1(commandOwner, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, executorStore, counted, clock)
+		if err != nil {
+			t.Fatalf("restart executor: %v", err)
+		}
+		if _, replayErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); replayErr == nil || !runtimecore.HasReason(replayErr, runtimecore.ReasonEffectUnknownOutcome) {
+			t.Fatalf("historical journal restart outcome=%v, want indeterminate", replayErr)
+		}
+		if counted.calls.Load() != expectedPhysical {
+			t.Fatalf("historical journal restart reread: physical=%d want=%d", counted.calls.Load(), expectedPhysical)
+		}
+		return
+	}
+	if spec.postActualCrashRecovery {
+		if _, firstErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); firstErr == nil || !runtimecore.HasReason(firstErr, runtimecore.ReasonEffectUnknownOutcome) {
+			t.Fatalf("post-actual lost reply was not indeterminate: %v", firstErr)
+		}
+		if counted.calls.Load() != 1 || counted.prepareCalls.Load() != 1 {
+			t.Fatalf("first attempt counts: prepare=%d physical=%d", counted.prepareCalls.Load(), counted.calls.Load())
+		}
+		preReplayDB, openErr := sql.Open("sqlite", databasePath)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		var preReplayTerminals int
+		if queryErr := preReplayDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_read_terminal_history_v2`).Scan(&preReplayTerminals); queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		_ = preReplayDB.Close()
+		if preReplayTerminals != 0 {
+			t.Fatalf("lost reply unexpectedly created %d terminal rows before replay", preReplayTerminals)
+		}
+		executor, err = NewWorkspaceReadPhysicalExecutorForTestV1(commandOwner, fixedWorkspaceReadAssociationReaderV1{association}, store, fixedWorkspaceReadSandboxReaderV1{current.Sandbox}, enforcementReader, executorStore, counted, clock)
+		if err != nil {
+			t.Fatalf("restart executor: %v", err)
+		}
+		controlledClock.Store(runtimeUnifiedNotAfter.UnixNano())
+		if _, replayErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); replayErr == nil || !runtimecore.HasReason(replayErr, runtimecore.ReasonEffectUnknownOutcome) {
+			t.Fatalf("expired historical journal replay was not indeterminate: %v", replayErr)
+		}
+		if counted.calls.Load() != 1 || counted.prepareCalls.Load() != 1 {
+			t.Fatalf("expired recovery re-entered prepare/physical: prepare=%d physical=%d", counted.prepareCalls.Load(), counted.calls.Load())
+		}
+		inspectionDB, openErr := sql.Open("sqlite", databasePath)
+		if openErr != nil {
+			t.Fatal(openErr)
+		}
+		defer inspectionDB.Close()
+		var outcome string
+		if queryErr := inspectionDB.QueryRowContext(ctx, `SELECT outcome FROM workspace_read_terminal_history_v2 LIMIT 1`).Scan(&outcome); queryErr != nil {
+			t.Fatal(queryErr)
+		}
+		if outcome != string(contract.WorkspaceReadTerminalIndeterminateV2) {
+			t.Fatalf("post-actual crash terminal=%q, want indeterminate", outcome)
+		}
+		return
 	}
 	if spec.expectBeforeActual {
 		if _, err = executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); err == nil {
@@ -467,6 +821,15 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		}
 		if counted.calls.Load() != spec.expectedAdapter {
 			t.Fatalf("actual-point adapter calls=%d, want %d", counted.calls.Load(), spec.expectedAdapter)
+		}
+		if counted.prepareCalls.Load() != spec.expectedPrepare && spec.expectedPrepare != 0 {
+			t.Fatalf("actual-point prepare calls=%d, want %d", counted.prepareCalls.Load(), spec.expectedPrepare)
+		}
+		if legacyAttack != nil && !errors.Is(legacyAttack.err, sandboxports.ErrConflict) {
+			t.Fatalf("legacy Complete did not fail closed after a valid V2 reservation: %v", legacyAttack.err)
+		}
+		if legacyAttack != nil && (!errors.Is(legacyAttack.wrongAttemptErr, sandboxports.ErrConflict) || !errors.Is(legacyAttack.wrongAdmissionErr, sandboxports.ErrConflict)) {
+			t.Fatalf("authorized transition splice was accepted: attempt=%v admission=%v", legacyAttack.wrongAttemptErr, legacyAttack.wrongAdmissionErr)
 		}
 		inspectionDB, openErr := sql.Open("sqlite", databasePath)
 		if openErr != nil {
@@ -492,7 +855,7 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			t.Fatalf("actual-point adapter calls=%d, want %d", counted.calls.Load(), spec.expectedAdapter)
 		}
 		if spec.expectedBoundary != "" {
-			var boundary *kernel.WorkspaceReadActualPointErrorV1
+			var boundary *WorkspaceReadActualPointErrorV1
 			if !errors.As(counted.lastError(), &boundary) || boundary.Boundary != spec.expectedBoundary {
 				t.Fatalf("actual-point boundary=%v, want %q; err=%v", boundary, spec.expectedBoundary, counted.lastError())
 			}
@@ -524,13 +887,22 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		if inspectErr != nil || projection.Attempt.State != spec.expectedState {
 			t.Fatalf("exact Inspect state=%q, want %q err=%v", projection.Attempt.State, spec.expectedState, inspectErr)
 		}
+		if spec.expectNoQualification {
+			var qualificationRows int
+			if queryErr := inspectionDB.QueryRowContext(ctx, `SELECT COUNT(*) FROM workspace_read_execution_qualification_history_v2`).Scan(&qualificationRows); queryErr != nil || qualificationRows != 0 {
+				t.Fatalf("reserve-only failure created Qualification rows=%d err=%v", qualificationRows, queryErr)
+			}
+			if _, replayErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); replayErr == nil {
+				t.Fatal("reserve-only replay unexpectedly succeeded")
+			}
+			if counted.prepareCalls.Load() != spec.expectedPrepare || counted.calls.Load() != 0 {
+				t.Fatalf("reserve-only replay re-entered prepare/physical: prepare=%d physical=%d", counted.prepareCalls.Load(), counted.calls.Load())
+			}
+		}
 		if spec.expectedState == contract.WorkspaceReadObservedV1 && (projection.Observation == nil || projection.Observation.Content != spec.expectedContent || !projection.Observation.Complete) {
 			t.Fatalf("EOF result drifted: %#v", projection.Observation)
 		}
 		verifyExpectedTTL(projection)
-		if spec.expectedAdapter != 0 && !spec.useFakeActual && countedCurrent.calls.Load() == 0 {
-			t.Fatal("public CurrentServer never inspected workspace read current v2")
-		}
 		return
 	}
 
@@ -554,7 +926,14 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		if callErr == nil {
 			successful++
 		} else if !runtimecore.HasReason(callErr, runtimecore.ReasonEffectUnknownOutcome) {
-			t.Fatalf("unexpected concurrent result: %v; actual-point=%v; rust=%s", callErr, counted.lastError(), output.String())
+			var storedOriginID, storedOriginDigest string
+			var storedOriginRevision uint64
+			diagnosticDB, _ := sql.Open("sqlite", databasePath)
+			if diagnosticDB != nil {
+				_ = diagnosticDB.QueryRowContext(ctx, `SELECT origin_attempt_id,origin_attempt_revision,origin_attempt_digest FROM workspace_read_execution_qualification_history_v2 LIMIT 1`).Scan(&storedOriginID, &storedOriginRevision, &storedOriginDigest)
+				_ = diagnosticDB.Close()
+			}
+			t.Fatalf("unexpected concurrent result: %v; qualification-origin=%s/%d/%s; actual-point=%v; rust=%s", callErr, storedOriginID, storedOriginRevision, storedOriginDigest, counted.lastError(), output.String())
 		} else if firstIndeterminate == nil {
 			firstIndeterminate = callErr
 		}
@@ -596,9 +975,6 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 		t.Fatalf("unexpected exact Inspect: %#v", projection)
 	}
 	verifyExpectedTTL(projection)
-	if !spec.useFakeActual && countedCurrent.calls.Load() == 0 {
-		t.Fatal("public CurrentServer never inspected workspace read current v2")
-	}
 	if spec.verifyBindingV2 {
 		bindingV2, inspectErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
 		if inspectErr != nil {
@@ -671,12 +1047,11 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 				t.Fatal(readErr)
 			}
 		}
-		expectedBefore := *bindingV2.WorkspaceReadCommand.ExpectedFileRef
-		bindingV2.WorkspaceReadCommand.ExpectedFileRef.ID = "consumer-mutated"
+		expectedBefore := bindingV2.WorkspaceReadCommand.SourceToolCommand
+		bindingV2.WorkspaceReadCommand.SourceToolCommand.ID = "consumer-mutated"
 		unalias, inspectErr := executor.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
-		if inspectErr != nil || unalias.WorkspaceReadCommand.ExpectedFileRef == nil ||
-			*unalias.WorkspaceReadCommand.ExpectedFileRef != expectedBefore {
-			t.Fatalf("V2 reader output alias leaked: %#v err=%v", unalias.WorkspaceReadCommand.ExpectedFileRef, inspectErr)
+		if inspectErr != nil || unalias.WorkspaceReadCommand.SourceToolCommand != expectedBefore {
+			t.Fatalf("V2 reader output alias leaked: %#v err=%v", unalias.WorkspaceReadCommand.SourceToolCommand, inspectErr)
 		}
 		storedSplices := []struct {
 			name    string
@@ -898,9 +1273,9 @@ func runWorkspaceReadPublicExecutorV1(t *testing.T, spec workspaceReadExecutorCa
 			expiredBinding.WorkspaceReadAttempt.OwnerRef() != origin.Meta.Ref() {
 			t.Fatalf("expired V2 historical exact Inspect failed: %#v err=%v", expiredBinding, expiredInspectErr)
 		}
-		if _, executeErr := executor.ExecuteControlledOperationPhysicalV3(ctx, authorization); executeErr == nil {
-			t.Fatal("expired V2 historical binding restored execution eligibility")
-		}
+		// A durable Observed terminal may be replayed after current expiry because
+		// it performs no effect and grants no new execution eligibility.
+		_, _ = executor.ExecuteControlledOperationPhysicalV3(ctx, authorization)
 		if counted.calls.Load() != 1 {
 			t.Fatalf("expired historical Inspect or execute re-entered physical read: %d", counted.calls.Load())
 		}
@@ -947,12 +1322,12 @@ type successfulWorkspaceReadActualPointV2 struct{}
 
 func (*successfulWorkspaceReadActualPointV2) ReadWorkspaceFileV1(
 	_ context.Context,
-	request kernel.WorkspaceReadActualPointRequestV1,
-) (kernel.WorkspaceReadActualPointResultV1, error) {
+	request WorkspaceReadActualPointRequestV1,
+) (WorkspaceReadActualPointResultV1, error) {
 	content := "Praxis"
 	fileID, err := contract.WorkspaceReadFileIDV1(request.Workspace.Meta.ID, request.Command.RelativePath)
 	if err != nil {
-		return kernel.WorkspaceReadActualPointResultV1{}, err
+		return WorkspaceReadActualPointResultV1{}, err
 	}
 	file := contract.Ref{
 		ID: fileID, Revision: request.Workspace.Meta.Revision,
@@ -961,7 +1336,7 @@ func (*successfulWorkspaceReadActualPointV2) ReadWorkspaceFileV1(
 	if request.Command.ExpectedFileRef != nil {
 		file = *request.Command.ExpectedFileRef
 	}
-	return kernel.WorkspaceReadActualPointResultV1{
+	return WorkspaceReadActualPointResultV1{
 		File: file, Content: content,
 		ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), request.Command.StartByte, request.Command.StartByte+uint64(len(content)), true),
 		StartByte:     request.Command.StartByte, ReturnedBytes: uint64(len(content)),
@@ -977,6 +1352,91 @@ func (*successfulWorkspaceReadActualPointV2) ReadWorkspaceFileV1(
 	}, nil
 }
 
+// legacyCompletingWorkspaceReadActualPointV2 models an external caller that
+// has observed a valid Started attempt and a genuine provider result, but does
+// not hold the Sandbox-internal AuthorizedTransition capability. The public V1
+// completion surface must still write nothing; the kernel then uses the exact
+// capability issued before the actual point to persist the same result.
+type legacyCompletingWorkspaceReadActualPointV2 struct {
+	inner             WorkspaceReadActualPointV1
+	store             *sqlitestore.Store
+	authorization     runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3
+	err               error
+	wrongAttemptErr   error
+	wrongAdmissionErr error
+}
+
+func (a *legacyCompletingWorkspaceReadActualPointV2) ReadWorkspaceFileV1(
+	ctx context.Context,
+	request WorkspaceReadActualPointRequestV1,
+) (WorkspaceReadActualPointResultV1, error) {
+	result, err := a.inner.ReadWorkspaceFileV1(ctx, request)
+	if err != nil {
+		return result, err
+	}
+	checked := time.Unix(0, request.S1CheckedUnixNano).UTC()
+	expires := time.Unix(0, minWorkspaceReadExecutorExpiryV2(
+		request.ExpiresUnixNano,
+		request.Reservation.Meta.ExpiresUnixNano,
+		request.CurrentQuery.AdmissionReceipt.ExpiresUnixNano,
+		result.ProviderReceipt.ExpiresUnixNano,
+	))
+	observation, sealErr := contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
+		Reservation: request.Reservation.Meta.Ref(), Command: request.Command.Meta.Ref(), WorkspaceView: request.Workspace.Meta.Ref(), File: result.File,
+		RelativePath: request.Command.RelativePath, StartByte: result.StartByte, ReturnedBytes: result.ReturnedBytes, TotalBytes: result.TotalBytes,
+		Complete: result.Complete, Content: result.Content, ContentDigest: result.ContentDigest,
+		S1CheckedUnixNano: request.S1CheckedUnixNano, S2CheckedUnixNano: request.S1CheckedUnixNano,
+		AdmissionReceipt: request.CurrentQuery.AdmissionReceipt, ProviderReceipt: result.ProviderReceipt,
+	}, "workspace-read-observation-legacy-attack", checked, expires)
+	if sealErr != nil {
+		return result, sealErr
+	}
+	_, a.err = a.store.CompleteWorkspaceReadV1(ctx, request.CurrentQuery.Attempt.OwnerRef(), observation)
+
+	wrongAttempt := request.CurrentQuery.Attempt
+	wrongAttempt.ID += "-spliced"
+	wrongAttemptAuthority, authorityErr := ownerworkspaceread.NewAuthorizedExecutionV2(wrongAttempt, a.authorization, checked)
+	if authorityErr != nil {
+		return result, authorityErr
+	}
+	unknownDigest, digestErr := contract.Digest("legacy-completion-attack", "wrong-attempt")
+	if digestErr != nil {
+		return result, digestErr
+	}
+	wrongAttemptTransition, authorityErr := wrongAttemptAuthority.Unknown(unknownDigest, checked)
+	if authorityErr != nil {
+		return result, authorityErr
+	}
+	_, a.wrongAttemptErr = a.store.TransitionWorkspaceReadAuthorizedV2(ctx, wrongAttemptTransition)
+
+	wrongAdmission := observation
+	wrongAdmission.AdmissionReceipt.ID += "-spliced"
+	wrongAdmission, sealErr = contract.SealWorkspaceReadObservationV1(wrongAdmission, observation.Meta.ID+"-spliced", checked, expires)
+	if sealErr != nil {
+		return result, sealErr
+	}
+	correctAuthority, authorityErr := ownerworkspaceread.NewAuthorizedExecutionV2(request.CurrentQuery.Attempt, a.authorization, checked)
+	if authorityErr != nil {
+		return result, authorityErr
+	}
+	wrongAdmissionTransition, authorityErr := correctAuthority.Observed(wrongAdmission, checked)
+	if authorityErr != nil {
+		return result, authorityErr
+	}
+	_, a.wrongAdmissionErr = a.store.TransitionWorkspaceReadAuthorizedV2(ctx, wrongAdmissionTransition)
+	return result, nil
+}
+
+func minWorkspaceReadExecutorExpiryV2(values ...int64) int64 {
+	minimum := int64(0)
+	for _, value := range values {
+		if value > 0 && (minimum == 0 || value < minimum) {
+			minimum = value
+		}
+	}
+	return minimum
+}
+
 type countingWorkspaceReadCurrentReaderV2 struct {
 	inner sandboxports.WorkspaceReadCurrentProjectionReaderV2
 	calls atomic.Uint64
@@ -989,6 +1449,80 @@ func (r *countingWorkspaceReadCurrentReaderV2) InspectWorkspaceReadCurrentV2(ctx
 
 type fixedWorkspaceReadAssociationReaderV1 struct {
 	value runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1
+}
+
+type fixedWorkspaceReadSourceReaderV2 struct {
+	value contract.WorkspaceReadSourceCurrentProjectionV2
+}
+
+type sequencedWorkspaceReadSourceReaderV2 struct {
+	first       contract.WorkspaceReadSourceCurrentProjectionV2
+	second      contract.WorkspaceReadSourceCurrentProjectionV2
+	switchAfter uint64
+	calls       atomic.Uint64
+}
+
+type expiringWorkspaceReadSourceReaderV2 struct {
+	value  contract.WorkspaceReadSourceCurrentProjectionV2
+	expire func()
+	once   sync.Once
+}
+
+func (r *expiringWorkspaceReadSourceReaderV2) InspectWorkspaceReadSourceCurrentV2(
+	_ context.Context,
+	exact contract.WorkspaceReadSourceCommandRefV2,
+) (contract.WorkspaceReadSourceCurrentProjectionV2, error) {
+	if r == nil || r.value.SourceCommand != exact {
+		return contract.WorkspaceReadSourceCurrentProjectionV2{}, sandboxports.ErrConflict
+	}
+	r.once.Do(r.expire)
+	return r.value, nil
+}
+
+func (r *sequencedWorkspaceReadSourceReaderV2) InspectWorkspaceReadSourceCurrentV2(
+	_ context.Context,
+	exact contract.WorkspaceReadSourceCommandRefV2,
+) (contract.WorkspaceReadSourceCurrentProjectionV2, error) {
+	if r == nil || r.first.SourceCommand != exact || r.second.SourceCommand != exact {
+		return contract.WorkspaceReadSourceCurrentProjectionV2{}, sandboxports.ErrConflict
+	}
+	if r.calls.Add(1) > r.switchAfter {
+		return r.second, nil
+	}
+	return r.first, nil
+}
+
+func (r fixedWorkspaceReadSourceReaderV2) InspectWorkspaceReadSourceCurrentV2(
+	_ context.Context,
+	exact contract.WorkspaceReadSourceCommandRefV2,
+) (contract.WorkspaceReadSourceCurrentProjectionV2, error) {
+	if r.value.SourceCommand != exact {
+		return contract.WorkspaceReadSourceCurrentProjectionV2{}, sandboxports.ErrConflict
+	}
+	return r.value, nil
+}
+
+type fixedWorkspaceReadEffectReaderV2 struct {
+	value runtimeports.ControlledOperationEffectCurrentProjectionV2
+}
+
+func (r fixedWorkspaceReadEffectReaderV2) InspectCurrentControlledOperationEffectV2(
+	_ context.Context,
+	_ runtimeports.OperationSubjectV3,
+	_ runtimecore.EffectIntentID,
+) (runtimeports.ControlledOperationEffectCurrentProjectionV2, error) {
+	return r.value, nil
+}
+
+type fixedWorkspaceReadPreparedReaderV2 struct {
+	value runtimeports.ControlledOperationPreparedCurrentProjectionV2
+}
+
+func (r fixedWorkspaceReadPreparedReaderV2) InspectCurrentControlledOperationPreparedV2(
+	_ context.Context,
+	_ runtimeports.PreparedProviderAttemptRefV2,
+) (runtimeports.ControlledOperationPreparedCurrentProjectionV2, error) {
+	return r.value, nil
 }
 
 func (r fixedWorkspaceReadAssociationReaderV1) InspectCurrentPreparedDomainCommandAssociationV1(context.Context, runtimeports.PreparedDomainCommandAssociationRefV1) (runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1, error) {
@@ -1039,15 +1573,73 @@ func (r *sequencedWorkspaceReadEnforcementReaderV1) InspectCurrentOperationDispa
 }
 
 type countingWorkspaceReadActualPointV1 struct {
-	inner kernel.WorkspaceReadActualPointV1
-	calls atomic.Uint64
-	mu    sync.Mutex
-	err   error
+	inner                       WorkspaceReadActualPointV1
+	calls                       atomic.Uint64
+	prepareCalls                atomic.Uint64
+	prepareErr                  error
+	mu                          sync.Mutex
+	err                         error
+	loseDispatchReply           atomic.Bool
+	inspectFailures             atomic.Uint64
+	journalMu                   sync.Mutex
+	inspection                  *WorkspaceReadActualPointInspectionV2
+	startedOnly                 bool
+	legacyCompletedEvidenceOnly bool
+}
+
+type expiringWorkspaceReadPostActualStoreV2 struct {
+	*sqlitestore.Store
+	after func(contract.WorkspaceReadExecutionQualificationV2)
+}
+
+type lostReplyWorkspaceReadPostActualStoreV2 struct {
+	*sqlitestore.Store
+	once sync.Once
+}
+
+func (s *lostReplyWorkspaceReadPostActualStoreV2) EnsureAuthorizedExecutionQualificationV2(ctx context.Context, capability ownerworkspaceread.AuthorizedExecutionQualificationV2) (contract.WorkspaceReadExecutionQualificationV2, bool, error) {
+	qualification, created, err := s.Store.EnsureAuthorizedExecutionQualificationV2(ctx, capability)
+	if err != nil {
+		return qualification, created, err
+	}
+	lost := false
+	s.once.Do(func() { lost = true })
+	if lost {
+		return contract.WorkspaceReadExecutionQualificationV2{}, false, errors.New("injected Qualification commit lost reply")
+	}
+	return qualification, created, nil
+}
+
+func (s *expiringWorkspaceReadPostActualStoreV2) EnsureAuthorizedExecutionQualificationV2(ctx context.Context, capability ownerworkspaceread.AuthorizedExecutionQualificationV2) (contract.WorkspaceReadExecutionQualificationV2, bool, error) {
+	qualification, created, err := s.Store.EnsureAuthorizedExecutionQualificationV2(ctx, capability)
+	if err == nil && created && s.after != nil {
+		s.after(qualification)
+	}
+	return qualification, created, err
+}
+
+type preparedWorkspaceReadActualPointTestV2 struct {
+	owner         *countingWorkspaceReadActualPointV1
+	request       WorkspaceReadActualPointRequestV1
+	requestDigest string
+	payloadDigest string
+}
+
+func (p *preparedWorkspaceReadActualPointTestV2) ActualRequestDigestV2() string {
+	return p.requestDigest
+}
+func (p *preparedWorkspaceReadActualPointTestV2) ActualPayloadDigestV2() string {
+	return p.payloadDigest
+}
+func (p *preparedWorkspaceReadActualPointTestV2) ActualAttemptIDV2() string {
+	return p.request.CurrentQuery.Base.Authorization.Attempt.AttemptID
+}
+func (p *preparedWorkspaceReadActualPointTestV2) ActualExpiresUnixNanoV2() int64 {
+	return p.request.ExpiresUnixNano
 }
 
 type driftingWorkspaceReadActualPointV1 struct {
-	inner            kernel.WorkspaceReadActualPointV1
-	store            *sqlitestore.Store
+	inner            WorkspaceReadActualPointV1
 	databasePath     string
 	driftReservation bool
 	driftAttempt     bool
@@ -1055,7 +1647,7 @@ type driftingWorkspaceReadActualPointV1 struct {
 	err              error
 }
 
-func (a *driftingWorkspaceReadActualPointV1) ReadWorkspaceFileV1(ctx context.Context, input kernel.WorkspaceReadActualPointRequestV1) (kernel.WorkspaceReadActualPointResultV1, error) {
+func (a *driftingWorkspaceReadActualPointV1) ReadWorkspaceFileV1(ctx context.Context, input WorkspaceReadActualPointRequestV1) (WorkspaceReadActualPointResultV1, error) {
 	a.once.Do(func() {
 		switch {
 		case a.driftReservation:
@@ -1090,16 +1682,50 @@ func (a *driftingWorkspaceReadActualPointV1) ReadWorkspaceFileV1(ctx context.Con
 				a.err = err
 				return
 			}
-			_, a.err = a.store.MarkWorkspaceReadUnknownV1(ctx, input.CurrentQuery.Attempt.OwnerRef(), unknown)
+			db, err := sql.Open("sqlite", a.databasePath)
+			if err != nil {
+				a.err = err
+				return
+			}
+			defer db.Close()
+			var body []byte
+			if err = db.QueryRowContext(ctx, `SELECT body FROM workspace_read_attempt_current WHERE attempt_id=?`, input.CurrentQuery.Attempt.ID).Scan(&body); err != nil {
+				a.err = err
+				return
+			}
+			var current contract.WorkspaceReadAttemptV1
+			if err = json.Unmarshal(body, &current); err != nil {
+				a.err = err
+				return
+			}
+			current.State = contract.WorkspaceReadUnknownV1
+			current.UnknownDigest = unknown
+			current.Observation = nil
+			current.FailureDigest = ""
+			current, err = contract.SealWorkspaceReadAttemptV1(
+				current, current.Meta.ID, current.Meta.Revision+1,
+				time.Unix(0, current.Meta.UpdatedUnixNano).Add(time.Nanosecond),
+				time.Unix(0, current.Meta.ExpiresUnixNano),
+			)
+			if err != nil {
+				a.err = err
+				return
+			}
+			body, err = json.Marshal(current)
+			if err != nil {
+				a.err = err
+				return
+			}
+			_, a.err = db.ExecContext(ctx, `UPDATE workspace_read_attempt_current SET revision=?,digest=?,body=? WHERE attempt_id=?`, current.Meta.Revision, current.Meta.Digest, body, current.Meta.ID)
 		}
 	})
 	if a.err != nil {
-		return kernel.WorkspaceReadActualPointResultV1{}, a.err
+		return WorkspaceReadActualPointResultV1{}, a.err
 	}
 	return a.inner.ReadWorkspaceFileV1(ctx, input)
 }
 
-func (a *countingWorkspaceReadActualPointV1) ReadWorkspaceFileV1(ctx context.Context, input kernel.WorkspaceReadActualPointRequestV1) (kernel.WorkspaceReadActualPointResultV1, error) {
+func (a *countingWorkspaceReadActualPointV1) ReadWorkspaceFileV1(ctx context.Context, input WorkspaceReadActualPointRequestV1) (WorkspaceReadActualPointResultV1, error) {
 	a.calls.Add(1)
 	wire, wireErr := json.Marshal(input.CurrentQuery)
 	if wireErr == nil {
@@ -1110,13 +1736,95 @@ func (a *countingWorkspaceReadActualPointV1) ReadWorkspaceFileV1(ctx context.Con
 		}
 	}
 	if wireErr != nil {
-		return kernel.WorkspaceReadActualPointResultV1{}, wireErr
+		return WorkspaceReadActualPointResultV1{}, wireErr
 	}
 	result, err := a.inner.ReadWorkspaceFileV1(ctx, input)
 	a.mu.Lock()
 	a.err = err
 	a.mu.Unlock()
 	return result, err
+}
+
+func (a *countingWorkspaceReadActualPointV1) PrepareWorkspaceReadV2(_ context.Context, input WorkspaceReadActualPointRequestV1) (WorkspaceReadActualPointPreparationV2, error) {
+	a.prepareCalls.Add(1)
+	if a.prepareErr != nil {
+		return nil, a.prepareErr
+	}
+	requestDigest, err := contract.Digest("workspace-read-test-actual-request-v2", input.CurrentQuery)
+	if err != nil {
+		return nil, err
+	}
+	return &preparedWorkspaceReadActualPointTestV2{owner: a, request: input, requestDigest: requestDigest, payloadDigest: input.Command.SourceToolPayloadDigest}, nil
+}
+
+func (a *countingWorkspaceReadActualPointV1) DispatchPreparedWorkspaceReadV2(ctx context.Context, value WorkspaceReadActualPointPreparationV2) (WorkspaceReadActualPointResultV1, error) {
+	prepared, ok := value.(*preparedWorkspaceReadActualPointTestV2)
+	if !ok || prepared == nil || prepared.owner != a {
+		return WorkspaceReadActualPointResultV1{}, errors.New("foreign test preparation")
+	}
+	if a.startedOnly {
+		journal := contract.WorkspaceReadPhysicalJournalRefV2{
+			AttemptID: prepared.ActualAttemptIDV2(), RequestDigest: prepared.requestDigest,
+			PayloadDigest: prepared.payloadDigest, Phase: contract.WorkspaceReadPhysicalJournalExecuteV2,
+			State: contract.WorkspaceReadPhysicalJournalStartedV2, Revision: 1,
+			RecordedUnixNano: prepared.request.S1CheckedUnixNano,
+			RecordDigest:     digestWorkspaceReadExecutorTest("test-started-journal-" + prepared.requestDigest),
+		}
+		evidence, evidenceErr := AuthorizeWorkspaceReadPhysicalJournalEvidenceForTestV2(journal)
+		if evidenceErr != nil {
+			return WorkspaceReadActualPointResultV1{}, evidenceErr
+		}
+		a.journalMu.Lock()
+		a.inspection = &WorkspaceReadActualPointInspectionV2{Journal: journal, JournalEvidence: evidence}
+		a.journalMu.Unlock()
+		return WorkspaceReadActualPointResultV1{}, errors.New("injected Started journal crash")
+	}
+	result, err := a.ReadWorkspaceFileV1(ctx, prepared.request)
+	if err != nil {
+		return result, err
+	}
+	journal := contract.WorkspaceReadPhysicalJournalRefV2{
+		AttemptID: prepared.ActualAttemptIDV2(), RequestDigest: prepared.requestDigest,
+		PayloadDigest: prepared.payloadDigest, Phase: contract.WorkspaceReadPhysicalJournalExecuteV2,
+		State: contract.WorkspaceReadPhysicalJournalCompletedV2, Revision: 2,
+		RecordedUnixNano: prepared.request.S1CheckedUnixNano,
+		RecordDigest:     digestWorkspaceReadExecutorTest("test-completed-journal-" + prepared.requestDigest),
+	}
+	evidence, evidenceErr := AuthorizeWorkspaceReadPhysicalJournalEvidenceForTestV2(journal)
+	if evidenceErr != nil {
+		return WorkspaceReadActualPointResultV1{}, evidenceErr
+	}
+	result.Journal = journal
+	result.JournalEvidence = evidence
+	a.journalMu.Lock()
+	inspection := &WorkspaceReadActualPointInspectionV2{Journal: journal, JournalEvidence: evidence, Result: &result}
+	if a.legacyCompletedEvidenceOnly {
+		inspection.Result = nil
+	}
+	a.inspection = inspection
+	a.journalMu.Unlock()
+	if a.loseDispatchReply.CompareAndSwap(true, false) {
+		return result, errors.New("injected post-actual lost reply")
+	}
+	return result, nil
+}
+
+func (a *countingWorkspaceReadActualPointV1) InspectWorkspaceReadJournalV2(context.Context, contract.WorkspaceReadExecutionQualificationV2) (WorkspaceReadActualPointInspectionV2, error) {
+	for {
+		remaining := a.inspectFailures.Load()
+		if remaining == 0 {
+			break
+		}
+		if a.inspectFailures.CompareAndSwap(remaining, remaining-1) {
+			return WorkspaceReadActualPointInspectionV2{}, errors.New("injected journal inspect unavailability")
+		}
+	}
+	a.journalMu.Lock()
+	defer a.journalMu.Unlock()
+	if a.inspection == nil {
+		return WorkspaceReadActualPointInspectionV2{}, ErrWorkspaceReadPhysicalJournalNotFoundV2
+	}
+	return *a.inspection, nil
 }
 
 func (a *countingWorkspaceReadActualPointV1) lastError() error {
@@ -1234,7 +1942,38 @@ func (r workspaceReadRuntimeReviewReaderV4) InspectOperationReviewCurrentV4(cont
 	return r.value, nil
 }
 
-func buildWorkspaceReadRuntimeCurrentV4(t *testing.T, now time.Time, providerPayloadDigest string) runtimeports.CurrentOperationDispatchEnforcementV4 {
+type workspaceReadRuntimeFixtureV4 struct {
+	current runtimeports.CurrentOperationDispatchEnforcementV4
+	intent  runtimeports.OperationEffectIntentV3
+}
+
+func buildWorkspaceReadRuntimeCurrentV4(
+	t *testing.T,
+	now time.Time,
+	providerPayloadDigest string,
+) runtimeports.CurrentOperationDispatchEnforcementV4 {
+	t.Helper()
+	payload := runtimeports.OpaquePayloadV2{
+		Schema: runtimeports.SchemaRefV2{
+			Namespace: "praxis.tool", Name: "workspace-read", Version: "1.0.0",
+			MediaType:     "application/json",
+			ContentDigest: runtimecore.DigestBytes([]byte("workspace-read-schema")),
+		},
+		ContentDigest: runtimecore.Digest(providerPayloadDigest),
+		Length:        1, Ref: "workspace-read-provider-payload",
+		LimitPolicy: runtimeports.OpaqueLimitPolicyRefV2{
+			Policy: "praxis.tool/workspace-read-limit",
+			Digest: runtimecore.DigestBytes([]byte("workspace-read-limit")),
+		},
+	}
+	return buildWorkspaceReadRuntimeFixtureV4(t, now, payload).current
+}
+
+func buildWorkspaceReadRuntimeFixtureV4(
+	t *testing.T,
+	now time.Time,
+	payload runtimeports.OpaquePayloadV2,
+) workspaceReadRuntimeFixtureV4 {
 	t.Helper()
 	clock := func() time.Time { return now }
 	expires := now.Add(45 * time.Second).UnixNano()
@@ -1263,14 +2002,6 @@ func buildWorkspaceReadRuntimeCurrentV4(t *testing.T, now time.Time, providerPay
 		BindingSetID: "binding-workspace-read", BindingSetRevision: 1,
 		ComponentID: "praxis.sandbox/workspace-read", ManifestDigest: runtimecore.DigestBytes([]byte("manifest-workspace-read")),
 		ArtifactDigest: runtimecore.DigestBytes([]byte("artifact-workspace-read")), Capability: runtimeports.CapabilityNameV2(runtimeports.OperationScopeEvidenceActionEffectKindV3),
-	}
-	payload := runtimeports.OpaquePayloadV2{
-		Schema: runtimeports.SchemaRefV2{
-			Namespace: "praxis.tool", Name: "workspace-read", Version: "1.0.0", MediaType: "application/json",
-			ContentDigest: runtimecore.DigestBytes([]byte("workspace-read-schema")),
-		},
-		ContentDigest: runtimecore.Digest(providerPayloadDigest), Length: 1, Ref: "workspace-read-provider-payload",
-		LimitPolicy: runtimeports.OpaqueLimitPolicyRefV2{Policy: "praxis.tool/workspace-read-limit", Digest: runtimecore.DigestBytes([]byte("workspace-read-limit"))},
 	}
 	intent := runtimeports.OperationEffectIntentV3{
 		ContractVersion: runtimeports.OperationEffectContractVersionV3,
@@ -1469,7 +2200,7 @@ func buildWorkspaceReadRuntimeCurrentV4(t *testing.T, now time.Time, providerPay
 	if err != nil {
 		t.Fatal(err)
 	}
-	return executed
+	return workspaceReadRuntimeFixtureV4{current: executed, intent: intent}
 }
 
 func mustWorkspaceReadRuntimeOperationDigestV4(t *testing.T, subject runtimeports.OperationSubjectV3) runtimecore.Digest {

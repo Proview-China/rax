@@ -9,6 +9,7 @@ use praxis_sandbox_dataplane::checkpoint::CheckpointStore;
 use praxis_sandbox_dataplane::containerd::{ContainerdConfig, ContainerdProvider};
 use praxis_sandbox_dataplane::contract::{
     DataPlaneOperationV1, DataPlaneRequestV1, DispatchResponseV1, ProviderKindV1,
+    WorkspaceReadJournalInspectRequestV2, WorkspaceReadJournalInspectResponseV2,
 };
 use praxis_sandbox_dataplane::enforcer::DataPlaneEnforcer;
 use praxis_sandbox_dataplane::error::{ClosedError, ClosedReason, Result};
@@ -77,6 +78,13 @@ struct RootState {
     workspace_commit: Option<WorkspaceCommitProviderV1>,
     workspace_read: Option<WorkspaceReadProviderV1>,
     allowed_dispatch_uid: u32,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum DispatchEnvelopeV2 {
+    WorkspaceReadJournalInspect(WorkspaceReadJournalInspectRequestV2),
+    Dispatch(Box<DataPlaneRequestV1>),
 }
 
 #[tokio::main]
@@ -180,10 +188,26 @@ async fn run() -> Result<()> {
 
 async fn serve_connection(state: Arc<RootState>, mut stream: UnixStream) -> Result<()> {
     validate_peer(&stream, state.allowed_dispatch_uid)?;
-    let envelope: DataPlaneRequestV1 = read_frame(&mut stream).await?;
+    let envelope: DispatchEnvelopeV2 = read_frame(&mut stream).await?;
+    if let DispatchEnvelopeV2::WorkspaceReadJournalInspect(request) = envelope {
+        request.validate()?;
+        let response = match state
+            .enforcer
+            .inspect_workspace_read_journal_lookup_v2(&request.lookup)
+            .await
+        {
+            Ok(inspection) => WorkspaceReadJournalInspectResponseV2::success(&request, inspection)?,
+            Err(error) => WorkspaceReadJournalInspectResponseV2::failure(&request, error)?,
+        };
+        return write_frame(&mut stream, &response).await;
+    }
+    let DispatchEnvelopeV2::Dispatch(envelope) = envelope else {
+        unreachable!("workspace read journal inspect returned above")
+    };
     envelope.validate(praxis_sandbox_dataplane::contract::now_unix_nano())?;
     let request = &envelope.request;
-    let result = match envelope.operation {
+    let operation = envelope.operation;
+    let result = match operation {
         DataPlaneOperationV1::Inspect => state.enforcer.inspect(request).await,
         DataPlaneOperationV1::Dispatch => match request.payload.kind() {
             ProviderKindV1::HostWorkspace => match &state.host {
@@ -224,9 +248,38 @@ async fn serve_connection(state: Arc<RootState>, mut stream: UnixStream) -> Resu
             },
         },
     };
-    let response = match result {
-        Ok(result) => DispatchResponseV1::success(request, &result)?,
-        Err(error) => DispatchResponseV1::failure(request, error)?,
+    let workspace_read_journal = if request.payload.kind() == ProviderKindV1::WorkspaceRead
+        && request.phase == praxis_sandbox_dataplane::contract::EnforcementPhaseV1::Execute
+    {
+        state
+            .enforcer
+            .inspect_workspace_read_journal_v2(request)
+            .await
+            .ok()
+            .map(|inspection| inspection.journal)
+    } else {
+        None
+    };
+    let response = match (operation, result, workspace_read_journal) {
+        (DataPlaneOperationV1::Inspect, Ok(result), Some(journal)) => {
+            DispatchResponseV1::historical_success(request, &result, journal)?
+        }
+        (_, Ok(result), Some(journal)) => DispatchResponseV1::success(request, &result)?
+            .with_workspace_read_journal(request, journal)?,
+        (_, Ok(_), None)
+            if request.payload.kind() == ProviderKindV1::WorkspaceRead
+                && request.phase
+                    == praxis_sandbox_dataplane::contract::EnforcementPhaseV1::Execute =>
+        {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidContract,
+                "workspace read result lacks durable journal evidence",
+            ));
+        }
+        (_, Ok(result), None) => DispatchResponseV1::success(request, &result)?,
+        (_, Err(error), Some(journal)) => DispatchResponseV1::failure(request, error)?
+            .with_workspace_read_journal(request, journal)?,
+        (_, Err(error), None) => DispatchResponseV1::failure(request, error)?,
     };
     write_frame(&mut stream, &response).await
 }

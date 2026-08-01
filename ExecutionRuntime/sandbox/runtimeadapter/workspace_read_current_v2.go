@@ -11,24 +11,61 @@ import (
 )
 
 type WorkspaceReadCurrentAdapterV2 struct {
-	base         sandboxports.WorkspaceReadCurrentProjectionReaderV1
-	reservations sandboxports.WorkspaceReadReservationExactReaderV1
-	attempts     sandboxports.WorkspaceReadAttemptCurrentReaderV1
-	now          func() time.Time
+	base              sandboxports.WorkspaceReadCurrentProjectionReaderV1
+	reservations      sandboxports.WorkspaceReadReservationExactReaderV1
+	attempts          sandboxports.WorkspaceReadAttemptCurrentReaderV1
+	now               func() time.Time
+	physicalQualified bool
+}
+
+type workspaceReadPublishedCurrentProjectionReaderV2 interface {
+	sandboxports.WorkspaceReadCurrentProjectionReaderV1
+	workspaceReadPublishedCurrentV2() bool
 }
 
 func NewWorkspaceReadCurrentAdapterV2(
+	base workspaceReadPublishedCurrentProjectionReaderV2,
+	reservations sandboxports.WorkspaceReadReservationExactReaderV1,
+	attempts sandboxports.WorkspaceReadAttemptCurrentReaderV1,
+	now func() time.Time,
+) (*WorkspaceReadCurrentAdapterV2, error) {
+	if base == nil || !base.workspaceReadPublishedCurrentV2() {
+		return nil, errors.New("workspace read current v2 requires the Sandbox Owner published-current adapter")
+	}
+	return newWorkspaceReadCurrentAdapterV2(base, reservations, attempts, now, true)
+}
+
+// NewWorkspaceReadCurrentAdapterV2Reference preserves owner-local V2 contract
+// tests, but its result is rejected by CurrentServer and can never authorize a
+// Rust physical read. Production composition must use
+// NewWorkspaceReadCurrentAdapterV2 with the published-current marker.
+func NewWorkspaceReadCurrentAdapterV2Reference(
 	base sandboxports.WorkspaceReadCurrentProjectionReaderV1,
 	reservations sandboxports.WorkspaceReadReservationExactReaderV1,
 	attempts sandboxports.WorkspaceReadAttemptCurrentReaderV1,
 	now func() time.Time,
+) (*WorkspaceReadCurrentAdapterV2, error) {
+	return newWorkspaceReadCurrentAdapterV2(base, reservations, attempts, now, false)
+}
+
+func newWorkspaceReadCurrentAdapterV2(
+	base sandboxports.WorkspaceReadCurrentProjectionReaderV1,
+	reservations sandboxports.WorkspaceReadReservationExactReaderV1,
+	attempts sandboxports.WorkspaceReadAttemptCurrentReaderV1,
+	now func() time.Time,
+	physicalQualified bool,
 ) (*WorkspaceReadCurrentAdapterV2, error) {
 	if base == nil || reservations == nil || attempts == nil || now == nil {
 		return nil, errors.New("workspace read current v2 adapter requires every exact Owner reader and a clock")
 	}
 	return &WorkspaceReadCurrentAdapterV2{
 		base: base, reservations: reservations, attempts: attempts, now: now,
+		physicalQualified: physicalQualified,
 	}, nil
+}
+
+func (a *WorkspaceReadCurrentAdapterV2) PhysicalQualifiedV2() bool {
+	return a != nil && a.physicalQualified
 }
 
 var _ sandboxports.WorkspaceReadCurrentProjectionReaderV2 = (*WorkspaceReadCurrentAdapterV2)(nil)

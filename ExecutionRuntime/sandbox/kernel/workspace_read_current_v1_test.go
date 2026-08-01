@@ -1,4 +1,4 @@
-package dataplaneadapter_test
+package kernel_test
 
 import (
 	"context"
@@ -80,7 +80,7 @@ func TestWorkspaceReadCurrentV2EnforcesExactMinimumTTL(t *testing.T) {
 		t.Fatal("v2 projection remained current at its exact expiry")
 	}
 	expiredFixture := newWorkspaceReadCurrentFixtureV1(t)
-	expiredReader, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(
+	expiredReader, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2Reference(
 		expiredFixture.adapter, expiredFixture.readers, expiredFixture.readers, func() time.Time { return atExpiry },
 	)
 	if err != nil {
@@ -99,7 +99,7 @@ func TestWorkspaceReadCurrentV2RejectsClockRollbackBeforeS1(t *testing.T) {
 		fixture.now.Add(time.Second),
 	}
 	var calls atomic.Int64
-	adapter, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(
+	adapter, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2Reference(
 		fixture.adapter,
 		fixture.readers,
 		fixture.readers,
@@ -693,7 +693,7 @@ func newWorkspaceReadCurrentFixtureV1(t *testing.T) workspaceReadCurrentFixtureV
 	if err != nil {
 		t.Fatal(err)
 	}
-	adapterV2, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2(adapter, readers, readers, func() time.Time { return now })
+	adapterV2, err := runtimeadapter.NewWorkspaceReadCurrentAdapterV2Reference(adapter, readers, readers, func() time.Time { return now })
 	if err != nil {
 		t.Fatal(err)
 	}

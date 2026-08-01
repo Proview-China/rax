@@ -7,7 +7,9 @@ use crate::contract::{
     CurrentAuthorizationV1, DispatchRequestV1, EnforcementPhaseV1, now_unix_nano,
 };
 use crate::error::{ClosedError, ClosedReason, EffectBoundary, Result};
-use crate::journal::AttemptJournal;
+use crate::journal::{
+    AttemptJournal, WorkspaceReadPhysicalJournalInspectionV2, WorkspaceReadPhysicalJournalLookupV2,
+};
 use crate::provider::{Provider, ProviderResult};
 
 #[async_trait]
@@ -116,6 +118,22 @@ impl<R: CurrentFactsReader> DataPlaneEnforcer<R> {
             }
             Err(error) => Err(error),
         }
+    }
+
+    /// Reads only the exact local append-only journal. The request may be
+    /// historical; no Runtime current reader or Provider method is reachable.
+    pub async fn inspect_workspace_read_journal_v2(
+        &self,
+        request: &DispatchRequestV1,
+    ) -> Result<WorkspaceReadPhysicalJournalInspectionV2> {
+        self.journal.inspect_workspace_read_v2(request).await
+    }
+
+    pub async fn inspect_workspace_read_journal_lookup_v2(
+        &self,
+        lookup: &WorkspaceReadPhysicalJournalLookupV2,
+    ) -> Result<WorkspaceReadPhysicalJournalInspectionV2> {
+        self.journal.inspect_workspace_read_lookup_v2(lookup).await
     }
 
     fn checkpoint_store(&self) -> Result<&CheckpointStore> {

@@ -11,15 +11,56 @@ import (
 	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/kernel"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
 
 type WorkspaceReadCurrentAdapterV1 struct {
-	runtime      sandboxports.OperationDispatchEnforcementCurrentReaderV4
-	associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1
-	commands     sandboxports.WorkspaceReadCommandCurrentReaderV1
-	workspaces   sandboxports.WorkspaceCurrentReaderV1
-	now          func() time.Time
+	runtime        sandboxports.OperationDispatchEnforcementCurrentReaderV4
+	associations   runtimeports.PreparedDomainCommandAssociationCurrentReaderV1
+	commands       sandboxports.WorkspaceReadCommandCurrentReaderV1
+	publishedOwner *kernel.WorkspaceReadCommandOwnerV2
+	workspaces     sandboxports.WorkspaceCurrentReaderV1
+	now            func() time.Time
+}
+
+// WorkspaceReadPublishedCurrentAdapterV2 is the only V1 aggregate that may be
+// promoted to the V2 Rust actual-point current. Its marker is package-private,
+// so a raw Command reader or an external wrapper cannot claim this status.
+type WorkspaceReadPublishedCurrentAdapterV2 struct {
+	base *WorkspaceReadCurrentAdapterV1
+}
+
+func (a *WorkspaceReadPublishedCurrentAdapterV2) workspaceReadPublishedCurrentV2() bool {
+	return a != nil && a.base != nil && a.base.publishedOwner != nil
+}
+
+func (a *WorkspaceReadPublishedCurrentAdapterV2) InspectWorkspaceReadCurrentV1(
+	ctx context.Context,
+	query sandboxports.WorkspaceReadCurrentQueryV1,
+) (sandboxports.WorkspaceReadCurrentProjectionV1, error) {
+	if !a.workspaceReadPublishedCurrentV2() {
+		return sandboxports.WorkspaceReadCurrentProjectionV1{}, errors.New("workspace read published current adapter is unavailable")
+	}
+	return a.base.InspectWorkspaceReadCurrentV1(ctx, query)
+}
+
+func NewWorkspaceReadPublishedCurrentAdapterV2(
+	runtime sandboxports.OperationDispatchEnforcementCurrentReaderV4,
+	associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1,
+	owner *kernel.WorkspaceReadCommandOwnerV2,
+	workspaces sandboxports.WorkspaceCurrentReaderV1,
+	now func() time.Time,
+) (*WorkspaceReadPublishedCurrentAdapterV2, error) {
+	if owner == nil {
+		return nil, errors.New("workspace read published current adapter requires the Sandbox Command Owner")
+	}
+	base, err := NewWorkspaceReadCurrentAdapterV1(runtime, associations, owner, workspaces, now)
+	if err != nil {
+		return nil, err
+	}
+	base.publishedOwner = owner
+	return &WorkspaceReadPublishedCurrentAdapterV2{base: base}, nil
 }
 
 func NewWorkspaceReadCurrentAdapterV1(
@@ -40,10 +81,11 @@ func NewWorkspaceReadCurrentAdapterV1(
 var _ sandboxports.WorkspaceReadCurrentProjectionReaderV1 = (*WorkspaceReadCurrentAdapterV1)(nil)
 
 type workspaceReadCurrentSnapshotV1 struct {
-	association runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1
-	command     contract.WorkspaceReadCommandV1
-	workspace   contract.WorkspaceView
-	runtime     runtimeports.CurrentOperationDispatchEnforcementV4
+	association    runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1
+	command        contract.WorkspaceReadCommandV1
+	commandCurrent contract.WorkspaceReadCommandOwnerCurrentV2
+	workspace      contract.WorkspaceView
+	runtime        runtimeports.CurrentOperationDispatchEnforcementV4
 }
 
 func (a *WorkspaceReadCurrentAdapterV1) InspectWorkspaceReadCurrentV1(ctx context.Context, query sandboxports.WorkspaceReadCurrentQueryV1) (sandboxports.WorkspaceReadCurrentProjectionV1, error) {
@@ -71,7 +113,7 @@ func (a *WorkspaceReadCurrentAdapterV1) InspectWorkspaceReadCurrentV1(ctx contex
 		return sandboxports.WorkspaceReadCurrentProjectionV1{}, errors.New("workspace read current closure drifted between S1 and S2")
 	}
 
-	expires := minimumWorkspaceReadCurrentExpiryV1(
+	expiryInputs := []int64{
 		query.ExpiresUnixNano,
 		s2.association.ExpiresUnixNano,
 		s2.command.Meta.ExpiresUnixNano,
@@ -84,7 +126,11 @@ func (a *WorkspaceReadCurrentAdapterV1) InspectWorkspaceReadCurrentV1(ctx contex
 		s2.runtime.Sandbox.RuntimeLease.Ref.ExpiresUnixNano,
 		s2.runtime.Phase.ExpiresUnixNano,
 		s2.runtime.Dispatch.Record.Permit.LegacyPermit.ExpiresUnixNano,
-	)
+	}
+	if s2.commandCurrent.Meta.ExpiresUnixNano > 0 {
+		expiryInputs = append(expiryInputs, s2.commandCurrent.Meta.ExpiresUnixNano)
+	}
+	expires := minimumWorkspaceReadCurrentExpiryV1(expiryInputs...)
 	projection := sandboxports.WorkspaceReadCurrentProjectionV1{
 		QueryDigest:                      query.Digest,
 		StableKeyDigest:                  query.StableKeyDigest,
@@ -142,12 +188,29 @@ func (a *WorkspaceReadCurrentAdapterV1) readSnapshotV1(ctx context.Context, quer
 	if err := association.ValidateCurrent(query.Association, now); err != nil {
 		return workspaceReadCurrentSnapshotV1{}, err
 	}
-	command, err := a.commands.InspectWorkspaceReadCommandCurrentV1(ctx, query.Command)
+	var command contract.WorkspaceReadCommandV1
+	var commandCurrent contract.WorkspaceReadCommandOwnerCurrentV2
+	if a.publishedOwner != nil {
+		command, commandCurrent, err = a.publishedOwner.InspectWorkspaceReadCommandPhysicalCurrentV2(ctx, query.Command)
+	} else {
+		command, err = a.commands.InspectWorkspaceReadCommandCurrentV1(ctx, query.Command)
+	}
 	if err != nil {
 		return workspaceReadCurrentSnapshotV1{}, err
 	}
 	if err := command.ValidateCurrent(now); err != nil {
 		return workspaceReadCurrentSnapshotV1{}, err
+	}
+	if a.publishedOwner != nil {
+		if query.PublishedCommandCurrent == nil {
+			return workspaceReadCurrentSnapshotV1{}, errors.New("physical workspace read current query omitted the published Command current")
+		}
+		if err := commandCurrent.ValidateCurrent(now); err != nil || commandCurrent.Command != query.Command || commandCurrent.Meta.Ref() != *query.PublishedCommandCurrent {
+			if err != nil {
+				return workspaceReadCurrentSnapshotV1{}, err
+			}
+			return workspaceReadCurrentSnapshotV1{}, errors.New("published workspace read Command current drifted")
+		}
 	}
 	workspace, err := a.workspaces.InspectWorkspaceViewCurrentV1(ctx, query.WorkspaceView)
 	if err != nil {
@@ -169,7 +232,42 @@ func (a *WorkspaceReadCurrentAdapterV1) readSnapshotV1(ctx context.Context, quer
 	if err := validateWorkspaceReadCurrentBindingsV1(query, association, command, workspace, current); err != nil {
 		return workspaceReadCurrentSnapshotV1{}, err
 	}
-	return workspaceReadCurrentSnapshotV1{association: association, command: command, workspace: workspace, runtime: current}, nil
+	if a.publishedOwner != nil {
+		finalCommand, finalCommandCurrent, finalErr := a.publishedOwner.InspectWorkspaceReadCommandPhysicalCurrentV2(ctx, query.Command)
+		if finalErr != nil {
+			return workspaceReadCurrentSnapshotV1{}, finalErr
+		}
+		if !reflect.DeepEqual(finalCommand, command) || finalCommandCurrent.Meta.Ref() != commandCurrent.Meta.Ref() {
+			return workspaceReadCurrentSnapshotV1{}, errors.New("published workspace read Command current drifted before snapshot return")
+		}
+		command = finalCommand
+		commandCurrent = finalCommandCurrent
+	}
+	finalNow := a.now()
+	if finalNow.IsZero() || finalNow.Before(now) {
+		return workspaceReadCurrentSnapshotV1{}, errors.New("workspace read current clock regressed before snapshot return")
+	}
+	if err := query.ValidateCurrent(finalNow); err != nil {
+		return workspaceReadCurrentSnapshotV1{}, err
+	}
+	if err := association.ValidateCurrent(query.Association, finalNow); err != nil {
+		return workspaceReadCurrentSnapshotV1{}, err
+	}
+	if err := command.ValidateCurrent(finalNow); err != nil {
+		return workspaceReadCurrentSnapshotV1{}, err
+	}
+	if a.publishedOwner != nil {
+		if err := commandCurrent.ValidateCurrent(finalNow); err != nil {
+			return workspaceReadCurrentSnapshotV1{}, err
+		}
+	}
+	if err := workspace.ValidateCurrent(finalNow); err != nil {
+		return workspaceReadCurrentSnapshotV1{}, err
+	}
+	if finalNow.UnixNano() < current.CheckedUnixNano || !finalNow.Before(time.Unix(0, current.ExpiresUnixNano)) {
+		return workspaceReadCurrentSnapshotV1{}, errors.New("runtime enforcement current expired before snapshot return")
+	}
+	return workspaceReadCurrentSnapshotV1{association: association, command: command, commandCurrent: commandCurrent, workspace: workspace, runtime: current}, nil
 }
 
 func validateWorkspaceReadCurrentBindingsV1(

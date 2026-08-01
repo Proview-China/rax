@@ -3,7 +3,11 @@ package sqlite
 import (
 	"context"
 	"errors"
+	"go/ast"
+	"go/parser"
+	"go/token"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -11,8 +15,37 @@ import (
 	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/testkit"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
+
+func TestWorkspaceReadLegacyReserveV1FailsClosedWithoutFacts(t *testing.T) {
+	ctx := context.Background()
+	now := time.Unix(1_900_000_000, 0)
+	expires := now.Add(time.Hour)
+	store, err := OpenWithClock(ctx, filepath.Join(t.TempDir(), "sandbox.db"), func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "legacy-reserve")
+	binding := workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt)
+	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt, binding); !errors.Is(reserveErr, ports.ErrConflict) || created {
+		t.Fatalf("legacy Reserve did not fail closed: created=%v err=%v", created, reserveErr)
+	}
+	for _, table := range []string{
+		"workspace_read_reservation",
+		"workspace_read_attempt_origin",
+		"workspace_read_attempt_current",
+		"workspace_read_admission_attempt_binding",
+		"workspace_read_runtime_attempt_admission_binding_v2",
+	} {
+		var rows int
+		if err = store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&rows); err != nil || rows != 0 {
+			t.Fatalf("legacy Reserve wrote %s rows=%d err=%v", table, rows, err)
+		}
+	}
+}
 
 func TestWorkspaceReadReserveAcrossHandlesCreatesOnce(t *testing.T) {
 	t.Parallel()
@@ -80,7 +113,7 @@ func TestWorkspaceReadAdmissionHandoffReturnsOriginalAttemptAcrossConcurrencyRes
 	}
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "admission-handoff")
 	binding := workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt)
-	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt, binding); reserveErr != nil || !created {
+	if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); reserveErr != nil || !created {
 		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
 	}
 
@@ -112,8 +145,8 @@ func TestWorkspaceReadAdmissionHandoffReturnsOriginalAttemptAcrossConcurrencyRes
 		}
 	}
 
-	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "admission-handoff-unknown")); err != nil {
-		t.Fatal(err)
+	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "admission-handoff-unknown")); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("legacy Unknown advanced a reference attempt: %v", err)
 	}
 	if err = store.Close(); err != nil {
 		t.Fatal(err)
@@ -129,7 +162,7 @@ func TestWorkspaceReadAdmissionHandoffReturnsOriginalAttemptAcrossConcurrencyRes
 		t.Fatalf("expired historical handoff lost original attempt: %#v err=%v", recovered, err)
 	}
 	projection, err := reopened.InspectBoundedWorkspaceReadV1(ctx, recovered.Attempt)
-	if err != nil || projection.Attempt.State != contract.WorkspaceReadUnknownV1 {
+	if err != nil || projection.Attempt.State != contract.WorkspaceReadStartedV1 {
 		t.Fatalf("original attempt did not inspect latest current: %#v err=%v", projection, err)
 	}
 }
@@ -146,7 +179,7 @@ func TestWorkspaceReadAdmissionHandoffRejectsEveryReceiptSplice(t *testing.T) {
 	t.Cleanup(func() { _ = store.Close() })
 	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "admission-splice")
 	binding := workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt)
-	if _, created, reserveErr := store.ReserveWorkspaceReadV1(ctx, reservation, attempt, binding); reserveErr != nil || !created {
+	if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); reserveErr != nil || !created {
 		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
 	}
 
@@ -185,8 +218,8 @@ func TestWorkspaceReadExactReservationAndAttemptReadersSurviveRestartAndCurrentA
 	if got, inspectErr := store.InspectWorkspaceReadAttemptCurrentV1(ctx, originalAttempt); inspectErr != nil || got.State != contract.WorkspaceReadStartedV1 {
 		t.Fatalf("exact attempt current drifted: %#v err=%v", got, inspectErr)
 	}
-	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "exact-current-unknown")); err != nil {
-		t.Fatal(err)
+	if _, err = store.MarkWorkspaceReadUnknownV1(ctx, attempt.Meta.Ref(), mustWorkspaceReadDigest(t, "exact-current-unknown")); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("legacy Unknown advanced the exact current: %v", err)
 	}
 	if err = store.Close(); err != nil {
 		t.Fatal(err)
@@ -199,7 +232,7 @@ func TestWorkspaceReadExactReservationAndAttemptReadersSurviveRestartAndCurrentA
 	if got, inspectErr := reopened.InspectWorkspaceReadReservationExactV1(ctx, reservation.Meta.Ref()); inspectErr != nil || got != reservation {
 		t.Fatalf("restart exact reservation drifted: %#v err=%v", got, inspectErr)
 	}
-	if got, inspectErr := reopened.InspectWorkspaceReadAttemptCurrentV1(ctx, originalAttempt); inspectErr != nil || got.State != contract.WorkspaceReadUnknownV1 {
+	if got, inspectErr := reopened.InspectWorkspaceReadAttemptCurrentV1(ctx, originalAttempt); inspectErr != nil || got.State != contract.WorkspaceReadStartedV1 {
 		t.Fatalf("restart exact attempt did not return latest current: %#v err=%v", got, inspectErr)
 	}
 	splicedReservation := reservation.Meta.Ref()
@@ -235,21 +268,21 @@ func TestWorkspaceReadOriginalAttemptRecoversLatestCurrent(t *testing.T) {
 	content := "hello"
 	observation, err := contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
 		Reservation: reservation.Meta.Ref(), Command: reservation.Command, WorkspaceView: reservation.WorkspaceView,
-		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
-		RelativePath: "src/main.txt", ReturnedBytes: uint64(len(content)), TotalBytes: uint64(len(content)), Complete: true,
-		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 0, uint64(len(content)), true),
+		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t, reservation.WorkspaceView.ID, "src/main.go"), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		RelativePath: "src/main.go", StartByte: 2, ReturnedBytes: uint64(len(content)), TotalBytes: 2 + uint64(len(content)), Complete: true,
+		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 2, 2+uint64(len(content)), true),
 		S1CheckedUnixNano: now.UnixNano(), S2CheckedUnixNano: now.UnixNano(),
 		AdmissionReceipt: attempt.AdmissionReceipt, ProviderReceipt: providerReceipt,
 	}, "workspace-read-observation", now, expires)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), observation); err != nil {
-		t.Fatal(err)
+	if _, err = store.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), observation); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("legacy Complete accepted a caller-sealed observation: %v", err)
 	}
 
 	recovered, err := store.InspectBoundedWorkspaceReadV1(ctx, contract.WorkspaceReadAttemptRefV1{ID: attempt.Meta.ID, Revision: attempt.Meta.Revision, Digest: attempt.Meta.Digest})
-	if err != nil || recovered.Attempt.State != contract.WorkspaceReadObservedV1 || recovered.Observation == nil || recovered.Observation.Content != content || recovered.ProviderReceipt == nil || *recovered.ProviderReceipt != providerReceipt {
+	if err != nil || recovered.Attempt.State != contract.WorkspaceReadStartedV1 || recovered.Observation != nil || recovered.ProviderReceipt != nil {
 		t.Fatalf("recover latest via original ref: %#v err=%v", recovered, err)
 	}
 }
@@ -302,9 +335,9 @@ func TestWorkspaceReadConcurrentInspectCannotPoisonActiveCompletion(t *testing.T
 	}
 	observation, err := contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
 		Reservation: reservation.Meta.Ref(), Command: reservation.Command, WorkspaceView: reservation.WorkspaceView,
-		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
-		RelativePath: "src/main.txt", ReturnedBytes: uint64(len(content)), TotalBytes: uint64(len(content)), Complete: true,
-		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 0, uint64(len(content)), true),
+		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t, reservation.WorkspaceView.ID, "src/main.go"), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		RelativePath: "src/main.go", StartByte: 2, ReturnedBytes: uint64(len(content)), TotalBytes: 2 + uint64(len(content)), Complete: true,
+		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 2, 2+uint64(len(content)), true),
 		S1CheckedUnixNano: now.UnixNano(), S2CheckedUnixNano: now.UnixNano(),
 		AdmissionReceipt: attempt.AdmissionReceipt, ProviderReceipt: providerReceipt,
 	}, "workspace-read-observation-concurrent", now, expires)
@@ -332,7 +365,11 @@ func TestWorkspaceReadConcurrentInspectCannotPoisonActiveCompletion(t *testing.T
 		defer group.Done()
 		<-start
 		_, completeErr := store.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), observation)
-		results <- completeErr
+		if !errors.Is(completeErr, ports.ErrConflict) {
+			results <- errors.New("legacy Complete did not fail closed")
+			return
+		}
+		results <- nil
 	}()
 	close(start)
 	group.Wait()
@@ -343,7 +380,7 @@ func TestWorkspaceReadConcurrentInspectCannotPoisonActiveCompletion(t *testing.T
 		}
 	}
 	final, err := store.InspectBoundedWorkspaceReadV1(ctx, original)
-	if err != nil || final.Attempt.State != contract.WorkspaceReadObservedV1 || final.Observation == nil || final.Observation.Meta.Ref() != observation.Meta.Ref() {
+	if err != nil || final.Attempt.State != contract.WorkspaceReadStartedV1 || final.Observation != nil {
 		t.Fatalf("active completion was poisoned by Inspect: %#v err=%v", final, err)
 	}
 }
@@ -383,13 +420,12 @@ func TestWorkspaceReadStartedRecoveryRequiresNewOwnerIncarnation(t *testing.T) {
 	if err != nil || stillStarted.Attempt.State != contract.WorkspaceReadStartedV1 {
 		t.Fatalf("restart Inspect must not mutate: %#v err=%v", stillStarted, err)
 	}
-	recovered, err := reopened.RecoverStartedWorkspaceReadAfterRestartV1(ctx, original)
-	if err != nil || recovered.Attempt.State != contract.WorkspaceReadUnknownV1 || recovered.Observation != nil {
-		t.Fatalf("explicit restart recovery: %#v err=%v", recovered, err)
+	if _, err = reopened.RecoverStartedWorkspaceReadAfterRestartV1(ctx, original); !errors.Is(err, ports.ErrConflict) {
+		t.Fatalf("raw V1 restart recovery bypassed the Runtime-attempt V2 binding: %v", err)
 	}
-	again, err := reopened.RecoverStartedWorkspaceReadAfterRestartV1(ctx, original)
-	if err != nil || again.Attempt.Meta.Ref() != recovered.Attempt.Meta.Ref() {
-		t.Fatalf("restart recovery must be idempotent for the same incarnation: %#v err=%v", again, err)
+	after, err := reopened.InspectBoundedWorkspaceReadV1(ctx, original)
+	if err != nil || after.Attempt.State != contract.WorkspaceReadStartedV1 || after.Observation != nil {
+		t.Fatalf("rejected raw restart recovery mutated state: %#v err=%v", after, err)
 	}
 }
 
@@ -515,9 +551,9 @@ func TestWorkspaceReadStoreRejectsFutureReceiptAndObservation(t *testing.T) {
 	}
 	observation, err := contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
 		Reservation: reservation.Meta.Ref(), Command: reservation.Command, WorkspaceView: reservation.WorkspaceView,
-		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
-		RelativePath: "src/main.txt", ReturnedBytes: uint64(len(content)), TotalBytes: uint64(len(content)), Complete: true,
-		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 0, uint64(len(content)), true),
+		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t, reservation.WorkspaceView.ID, "src/main.go"), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		RelativePath: "src/main.go", StartByte: 2, ReturnedBytes: uint64(len(content)), TotalBytes: 2 + uint64(len(content)), Complete: true,
+		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 2, 2+uint64(len(content)), true),
 		S1CheckedUnixNano: now.UnixNano(), S2CheckedUnixNano: future.UnixNano(),
 		AdmissionReceipt: attempt.AdmissionReceipt, ProviderReceipt: providerReceipt,
 	}, "workspace-read-observation-future", future, expires)
@@ -586,10 +622,10 @@ func TestWorkspaceReadCompletionRejectsExactCoordinateSplicesAndMissingInputs(t 
 			value.ContentDigest = contract.WorkspaceReadContentDigestV1([]byte(value.Content), value.StartByte, value.TotalBytes, true)
 		}},
 		{name: "returned-over-command-max", mutate: func(_ *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
-			value.Content = "helloo"
+			value.Content = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 			value.ReturnedBytes = uint64(len(value.Content))
-			value.TotalBytes = value.ReturnedBytes
-			value.ContentDigest = contract.WorkspaceReadContentDigestV1([]byte(value.Content), 0, value.TotalBytes, true)
+			value.TotalBytes = value.StartByte + value.ReturnedBytes
+			value.ContentDigest = contract.WorkspaceReadContentDigestV1([]byte(value.Content), value.StartByte, value.TotalBytes, true)
 		}},
 		{name: "command-ref", mutate: func(t *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
 			value.Command = contract.Ref{ID: "other-command", Revision: 1, Digest: mustWorkspaceReadDigest(t, "other-command")}
@@ -600,13 +636,47 @@ func TestWorkspaceReadCompletionRejectsExactCoordinateSplicesAndMissingInputs(t 
 		{name: "file-id", mutate: func(_ *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
 			value.File.ID = "workspace-file-spliced"
 		}},
-		{name: "file-digest", mutate: func(t *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
-			value.File.Digest = mustWorkspaceReadDigest(t, "spliced-file")
+		{name: "file-revision", mutate: func(_ *testing.T, _ *Store, value *contract.WorkspaceReadObservationV1) {
+			value.File.Revision++
 		}},
 		{name: "missing-command", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
 			if _, err := store.db.Exec(`DELETE FROM workspace_read_command_current`); err != nil {
 				t.Fatal(err)
 			}
+		}},
+		{name: "raw-only-v18", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
+			if _, err := store.db.Exec(`DELETE FROM workspace_read_command_owner_current_pointer_v2;
+				DELETE FROM workspace_read_command_owner_current_history_v2;
+				DELETE FROM workspace_read_command_publication_v2`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "missing-publication", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
+			if _, err := store.db.Exec(`DELETE FROM workspace_read_command_publication_v2`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "missing-owner-current-history", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
+			if _, err := store.db.Exec(`DELETE FROM workspace_read_command_owner_current_history_v2`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "missing-owner-current-pointer", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
+			if _, err := store.db.Exec(`DELETE FROM workspace_read_command_owner_current_pointer_v2`); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "owner-current-pointer-drift", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
+			if _, err := store.db.Exec(
+				`UPDATE workspace_read_command_owner_current_pointer_v2 SET current_digest=?`,
+				mustWorkspaceReadDigest(t, "spliced-owner-current"),
+			); err != nil {
+				t.Fatal(err)
+			}
+		}},
+		{name: "expired-owner-current", mutate: func(_ *testing.T, store *Store, value *contract.WorkspaceReadObservationV1) {
+			checked := time.Unix(0, value.S1CheckedUnixNano)
+			store.clock = func() time.Time { return checked.Add(10 * time.Second) }
 		}},
 		{name: "missing-view", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
 			if _, err := store.db.Exec(`DELETE FROM workspace_view_history`); err != nil {
@@ -615,7 +685,8 @@ func TestWorkspaceReadCompletionRejectsExactCoordinateSplicesAndMissingInputs(t 
 		}},
 		{name: "file-scope", mutate: func(t *testing.T, store *Store, _ *contract.WorkspaceReadObservationV1) {
 			var body []byte
-			if err := store.db.QueryRow(`SELECT body FROM workspace_view_history WHERE view_id='workspace'`).Scan(&body); err != nil {
+			closure := workspaceReadCompletionPublishedClosureV2(t, time.Unix(1_900_000_000, 0))
+			if err := store.db.QueryRow(`SELECT body FROM workspace_view_history WHERE view_id=?`, closure.fixture.Workspace.Meta.ID).Scan(&body); err != nil {
 				t.Fatal(err)
 			}
 			var workspace contract.WorkspaceView
@@ -627,7 +698,7 @@ func TestWorkspaceReadCompletionRejectsExactCoordinateSplicesAndMissingInputs(t 
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err = store.db.Exec(`UPDATE workspace_view_history SET body=? WHERE view_id='workspace'`, body); err != nil {
+			if _, err = store.db.Exec(`UPDATE workspace_view_history SET body=? WHERE view_id=?`, body, closure.fixture.Workspace.Meta.ID); err != nil {
 				t.Fatal(err)
 			}
 		}},
@@ -666,9 +737,88 @@ func TestWorkspaceReadCompletionRejectsExactCoordinateSplicesAndMissingInputs(t 
 	}
 }
 
+func TestWorkspaceReadCompletionRejectsRawOnlyCommandAfterRestart(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	now := time.Unix(1_900_000_000, 0)
+	expires := now.Add(time.Hour)
+	database := filepath.Join(t.TempDir(), "sandbox.db")
+	store, err := OpenWithClock(ctx, database, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservation, attempt := workspaceReadReservationFixture(t, now, expires, "restart-raw-only-v18")
+	seedWorkspaceReadCompletionInputsV1(t, store, now, expires)
+	if _, created, reserveErr := reserveWorkspaceReadFixtureV1(t, store, ctx, reservation, attempt); reserveErr != nil || !created {
+		t.Fatalf("reserve: created=%v err=%v", created, reserveErr)
+	}
+	observation := workspaceReadCompletionObservationFixtureV1(t, reservation, attempt, now, expires)
+	observation, err = contract.SealWorkspaceReadObservationV1(observation, "observation-restart-raw-only-v18", now, expires)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.db.Exec("DELETE FROM workspace_read_command_owner_current_pointer_v2; " +
+		"DELETE FROM workspace_read_command_owner_current_history_v2; " +
+		"DELETE FROM workspace_read_command_publication_v2"); err != nil {
+		t.Fatal(err)
+	}
+	if err = store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenWithClock(ctx, database, func() time.Time { return now })
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = reopened.Close() })
+	if _, err = reopened.CompleteWorkspaceReadV1(ctx, attempt.Meta.Ref(), observation); err == nil {
+		t.Fatal("raw-only v18 command completed after restart")
+	}
+	projection, inspectErr := reopened.InspectBoundedWorkspaceReadV1(ctx, contract.WorkspaceReadAttemptRefV1{ID: attempt.Meta.ID, Revision: attempt.Meta.Revision, Digest: attempt.Meta.Digest})
+	if inspectErr != nil || projection.Attempt.State != contract.WorkspaceReadStartedV1 || projection.Observation != nil {
+		t.Fatalf("restart rejection mutated current: %#v err=%v", projection, inspectErr)
+	}
+	var observations int
+	if err = reopened.db.QueryRow("SELECT COUNT(*) FROM workspace_read_observation").Scan(&observations); err != nil {
+		t.Fatal(err)
+	}
+	if observations != 0 {
+		t.Fatalf("restart rejection wrote %d observations", observations)
+	}
+}
+
+func TestWorkspaceReadSQLiteHasNoExportedRawCommandWriter(t *testing.T) {
+	t.Parallel()
+	files, err := filepath.Glob("*.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range files {
+		if strings.HasSuffix(path, "_test.go") {
+			continue
+		}
+		file, parseErr := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if parseErr != nil {
+			t.Fatal(parseErr)
+		}
+		for _, declaration := range file.Decls {
+			function, ok := declaration.(*ast.FuncDecl)
+			if !ok || function.Recv != nil || !ast.IsExported(function.Name.Name) {
+				continue
+			}
+			name := strings.ToLower(function.Name.Name)
+			workspaceReadCommand := strings.Contains(name, "workspacereadcommand")
+			rawWriter := strings.Contains(name, "seed") || strings.Contains(name, "raw") || strings.Contains(name, "write") || function.Name.Name == "CreateWorkspaceReadCommandV1"
+			if workspaceReadCommand && rawWriter {
+				t.Errorf("exported raw workspace-read Command writer %s exists in %s", function.Name.Name, path)
+			}
+		}
+	}
+}
+
 func workspaceReadReservationFixture(t *testing.T, now, expires time.Time, request string) (contract.WorkspaceReadReservationV1, contract.WorkspaceReadAttemptV1) {
 	t.Helper()
-	workspace, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
+	closure := workspaceReadCompletionPublishedClosureV2(t, now)
+	workspace, command := closure.fixture.Workspace, closure.command
 	stable := "sha256:" + mustWorkspaceReadDigest(t, "stable")
 	runtimeAdmission, err := runtimeports.SealControlledOperationProviderAdmissionReceiptRefV2(runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{
 		ID: "admission", Revision: 1, StableKeyDigest: runtimecore.Digest(stable), Admitted: true,
@@ -705,7 +855,7 @@ func workspaceReadReservationFixture(t *testing.T, now, expires time.Time, reque
 
 func reserveWorkspaceReadFixtureV1(t *testing.T, store *Store, ctx context.Context, reservation contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1) (contract.WorkspaceReadExecutionProjectionV1, bool, error) {
 	t.Helper()
-	return store.ReserveWorkspaceReadV1(ctx, reservation, attempt, workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt))
+	return store.reserveWorkspaceReadV1(ctx, reservation, attempt, workspaceReadAdmissionAttemptBindingFixtureV1(t, reservation, attempt), nil)
 }
 
 func workspaceReadAdmissionAttemptBindingFixtureV1(t *testing.T, reservation contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1) ports.WorkspaceReadAdmissionAttemptBindingV1 {
@@ -776,7 +926,7 @@ func workspaceReadCompletionInputFixtureV1(t *testing.T, now, expires time.Time)
 		TenantID: "tenant", SourceToolCommand: contract.Ref{ID: "tool-command", Revision: 1, Digest: mustWorkspaceReadDigest(t, "tool-command")},
 		SourceToolPayloadSchema: "praxis.tool/workspace-read@1", SourceToolPayloadDigest: mustWorkspaceReadDigest(t, "payload"), SourceToolPayloadRevision: 1,
 		WorkspaceView: workspace.Meta.Ref(), FileScopeDigest: scope, RelativePath: "src/main.txt", MaxBytes: 5,
-		ExpectedFileRef:           &contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: workspace.Meta.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		ExpectedFileRef:           &contract.Ref{ID: mustWorkspaceReadFileIDV1(t, workspace.Meta.ID, "src/main.txt"), Revision: workspace.Meta.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
 		RequestedNotAfterUnixNano: expires.UnixNano(), OperationDigest: mustWorkspaceReadDigest(t, "operation"), EffectID: "effect",
 		IntentRevision: 1, IntentDigest: mustWorkspaceReadDigest(t, "intent"), AttemptID: "attempt-1",
 		PreparedDigest: mustWorkspaceReadDigest(t, "prepared"), DispatchDigest: mustWorkspaceReadDigest(t, "dispatch"),
@@ -790,23 +940,40 @@ func workspaceReadCompletionInputFixtureV1(t *testing.T, now, expires time.Time)
 
 func seedWorkspaceReadCompletionInputsV1(t *testing.T, store *Store, now, expires time.Time) {
 	t.Helper()
-	workspace, command := workspaceReadCompletionInputFixtureV1(t, now, expires)
-	if _, err := store.CreateWorkspaceViewV1(context.Background(), workspace); err != nil {
+	_ = expires
+	closure := workspaceReadCompletionPublishedClosureV2(t, now)
+	if _, err := store.CreateWorkspaceViewV1(context.Background(), closure.fixture.Workspace); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.CreateWorkspaceReadCommandV1(context.Background(), command); err != nil {
+	if _, _, err := store.ApplyWorkspaceReadCommandPublicationV2(
+		context.Background(),
+		closure.capability,
+	); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func workspaceReadCompletionPublishedClosureV2(
+	t *testing.T,
+	now time.Time,
+) workspaceReadPublicationClosureV2 {
+	t.Helper()
+	return newWorkspaceReadPublicationClosureV2(
+		t,
+		testkit.WorkspaceReadCommandPublicationV2(now, "sqlite-completion"),
+		now,
+	)
 }
 
 func workspaceReadCompletionObservationFixtureV1(t *testing.T, reservation contract.WorkspaceReadReservationV1, attempt contract.WorkspaceReadAttemptV1, now, expires time.Time) contract.WorkspaceReadObservationV1 {
 	t.Helper()
 	content := "hello"
+	const startByte = uint64(2)
 	return contract.WorkspaceReadObservationV1{
 		Reservation: reservation.Meta.Ref(), Command: reservation.Command, WorkspaceView: reservation.WorkspaceView,
-		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
-		RelativePath: "src/main.txt", ReturnedBytes: uint64(len(content)), TotalBytes: uint64(len(content)), Complete: true,
-		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), 0, uint64(len(content)), true),
+		File:         contract.Ref{ID: mustWorkspaceReadFileIDV1(t, reservation.WorkspaceView.ID, "src/main.go"), Revision: reservation.WorkspaceView.Revision, Digest: mustWorkspaceReadDigest(t, "whole-file")},
+		RelativePath: "src/main.go", StartByte: startByte, ReturnedBytes: uint64(len(content)), TotalBytes: startByte + uint64(len(content)), Complete: true,
+		Content: content, ContentDigest: contract.WorkspaceReadContentDigestV1([]byte(content), startByte, startByte+uint64(len(content)), true),
 		S1CheckedUnixNano: now.UnixNano(), S2CheckedUnixNano: now.UnixNano(),
 		AdmissionReceipt: attempt.AdmissionReceipt,
 		ProviderReceipt: contract.WorkspaceReadReceiptBindingV1{
@@ -817,9 +984,9 @@ func workspaceReadCompletionObservationFixtureV1(t *testing.T, reservation contr
 	}
 }
 
-func mustWorkspaceReadFileIDV1(t *testing.T) string {
+func mustWorkspaceReadFileIDV1(t *testing.T, workspaceID, relativePath string) string {
 	t.Helper()
-	id, err := contract.WorkspaceReadFileIDV1("workspace", "src/main.txt")
+	id, err := contract.WorkspaceReadFileIDV1(workspaceID, relativePath)
 	if err != nil {
 		t.Fatal(err)
 	}

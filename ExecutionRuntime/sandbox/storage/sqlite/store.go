@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"encoding/json"
@@ -22,9 +23,15 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 18
+const schemaVersion = 20
 
 const (
+	workspaceReadCommandCurrentTableDDLV19 = `CREATE TABLE IF NOT EXISTS workspace_read_command_current (
+		command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL,
+		digest TEXT NOT NULL, body BLOB NOT NULL)`
+	workspaceReadCommandBodySealTableDDLV1 = `CREATE TABLE IF NOT EXISTS workspace_read_command_body_seal (
+		command_id TEXT NOT NULL PRIMARY KEY, revision INTEGER NOT NULL,
+		digest TEXT NOT NULL, canonical_body_digest TEXT NOT NULL)`
 	workspaceReadRuntimeAttemptBindingTableDDLV2 = `CREATE TABLE IF NOT EXISTS workspace_read_runtime_attempt_admission_binding_v2 (
 		runtime_attempt_digest TEXT NOT NULL PRIMARY KEY,
 		operation_digest TEXT NOT NULL, effect_id TEXT NOT NULL,
@@ -51,7 +58,40 @@ const (
 	workspaceReadRuntimeWorkspaceAttemptIdentityIndexDDLV2 = `CREATE UNIQUE INDEX IF NOT EXISTS workspace_read_runtime_workspace_attempt_identity_v2
 		ON workspace_read_runtime_attempt_admission_binding_v2(
 			workspace_attempt_id,workspace_attempt_revision,workspace_attempt_digest)`
+	workspaceReadCommandPublicationTableDDLV19 = `CREATE TABLE workspace_read_command_publication_v2 (
+		publication_id TEXT NOT NULL, revision INTEGER NOT NULL, digest TEXT NOT NULL,
+		command_id TEXT NOT NULL, command_revision INTEGER NOT NULL, command_digest TEXT NOT NULL,
+		source_id TEXT NOT NULL, source_revision INTEGER NOT NULL, source_digest TEXT NOT NULL,
+		runtime_attempt_digest TEXT NOT NULL,
+		semantic_digest TEXT NOT NULL, created_unix_nano INTEGER NOT NULL,
+		expires_unix_nano INTEGER NOT NULL, body BLOB NOT NULL,
+		PRIMARY KEY(publication_id,revision,digest),
+		UNIQUE(publication_id,revision),
+		UNIQUE(command_id,command_revision,command_digest),
+		UNIQUE(source_id,source_revision,source_digest),
+		UNIQUE(runtime_attempt_digest))`
+	workspaceReadCommandOwnerCurrentHistoryTableDDLV19 = `CREATE TABLE workspace_read_command_owner_current_history_v2 (
+		current_id TEXT NOT NULL, revision INTEGER NOT NULL, digest TEXT NOT NULL,
+		command_id TEXT NOT NULL, command_revision INTEGER NOT NULL, command_digest TEXT NOT NULL,
+		publication_id TEXT NOT NULL, publication_revision INTEGER NOT NULL, publication_digest TEXT NOT NULL,
+		checked_unix_nano INTEGER NOT NULL, expires_unix_nano INTEGER NOT NULL, body BLOB NOT NULL,
+		PRIMARY KEY(current_id,revision,digest),
+		UNIQUE(current_id,revision))`
+	workspaceReadCommandOwnerCurrentPointerTableDDLV19 = `CREATE TABLE workspace_read_command_owner_current_pointer_v2 (
+		command_id TEXT NOT NULL PRIMARY KEY, command_revision INTEGER NOT NULL, command_digest TEXT NOT NULL,
+		current_id TEXT NOT NULL, current_revision INTEGER NOT NULL, current_digest TEXT NOT NULL,
+		publication_id TEXT NOT NULL, publication_revision INTEGER NOT NULL, publication_digest TEXT NOT NULL)`
+	workspaceReadCommandPublicationLedgerTableDDLV19 = `CREATE TABLE workspace_read_command_publication_schema_v19 (
+		singleton INTEGER NOT NULL PRIMARY KEY CHECK(singleton=1),
+		contract_version TEXT NOT NULL, namespace_digest TEXT NOT NULL)`
 )
+
+var workspaceReadCommandPublicationSchemaStatementsV19 = []string{
+	workspaceReadCommandPublicationTableDDLV19,
+	workspaceReadCommandOwnerCurrentHistoryTableDDLV19,
+	workspaceReadCommandOwnerCurrentPointerTableDDLV19,
+	workspaceReadCommandPublicationLedgerTableDDLV19,
+}
 
 type Store struct {
 	db                            *sql.DB
@@ -106,20 +146,73 @@ func (s *Store) Close() error { return s.db.Close() }
 func (s *Store) Stats() sql.DBStats { return s.db.Stats() }
 
 func (s *Store) initialize(ctx context.Context) error {
-	var version int
-	if err := s.db.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
-		return fmt.Errorf("inspect Sandbox SQLite schema: %w", err)
-	}
-	if version < 0 || version > schemaVersion {
-		return fmt.Errorf("Sandbox SQLite schema version %d is unsupported", version)
-	}
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return fmt.Errorf("begin Sandbox SQLite schema transaction: %w", err)
 	}
 	defer tx.Rollback()
+	var version int
+	if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+		return fmt.Errorf("inspect Sandbox SQLite schema in migration transaction: %w", err)
+	}
+	if version < 0 || version > schemaVersion {
+		return fmt.Errorf("Sandbox SQLite schema version %d is unsupported", version)
+	}
+	if version == schemaVersion {
+		if err := verifyWorkspaceReadCommandCurrentSchemaV19(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command current schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadCommandBodySealSchemaV1(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command body-seal schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadRuntimeAttemptBindingSchemaV2(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Runtime-attempt schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadCommandPublicationSchemaV19(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command publication schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadPostActualSchemaV20(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v20 workspace read post-actual schema drifted: %v", ports.ErrConflict, err)
+		}
+		return tx.Commit()
+	}
+	if version == 19 {
+		if err := verifyWorkspaceReadCommandCurrentSchemaV19(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command current schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadCommandBodySealSchemaV1(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command body-seal schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadRuntimeAttemptBindingSchemaV2(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Runtime-attempt schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadCommandPublicationSchemaV19(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command publication schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := installWorkspaceReadPostActualSchemaV20(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
+			return fmt.Errorf("set Sandbox SQLite schema version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit Sandbox SQLite schema: %w", err)
+		}
+		return nil
+	}
 	if err := preflightWorkspaceReadRuntimeAttemptBindingMigrationV2(ctx, tx, version); err != nil {
 		return err
+	}
+	if err := preflightWorkspaceReadCommandPublicationMigrationV19(ctx, tx); err != nil {
+		return err
+	}
+	// workspace_read_command_current was introduced with schema v15. Older
+	// valid databases do not have that namespace yet and must be allowed to
+	// create it transactionally before the strict post-create verification.
+	if version >= 15 {
+		if err := verifyWorkspaceReadCommandCurrentSchemaV19(ctx, tx); err != nil {
+			return fmt.Errorf("%w: pre-v19 workspace read Command current schema drifted: %v", ports.ErrConflict, err)
+		}
 	}
 	for _, statement := range schemaStatements {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
@@ -129,7 +222,38 @@ func (s *Store) initialize(ctx context.Context) error {
 	if err := verifyWorkspaceReadCommandBodySealSchemaV1(ctx, tx); err != nil {
 		return err
 	}
+	if err := verifyWorkspaceReadCommandCurrentSchemaV19(ctx, tx); err != nil {
+		return err
+	}
 	if err := verifyWorkspaceReadRuntimeAttemptBindingSchemaV2(ctx, tx); err != nil {
+		return err
+	}
+	for _, statement := range workspaceReadCommandPublicationSchemaStatementsV19 {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("create workspace read Command publication v19 schema: %w", err)
+		}
+	}
+	if err := verifyWorkspaceReadCommandPublicationObjectsV19(ctx, tx); err != nil {
+		return err
+	}
+	if err := probeWorkspaceReadCommandPublicationSchemaV19(ctx, tx); err != nil {
+		return err
+	}
+	namespaceDigest := workspaceReadCommandPublicationSchemaDigestV19()
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO workspace_read_command_publication_schema_v19(
+			singleton,contract_version,namespace_digest
+		) VALUES(1,?,?)`,
+		"praxis.sandbox/workspace-read-command-publication/v2",
+		namespaceDigest,
+	); err != nil {
+		return fmt.Errorf("write workspace read Command publication v19 schema ledger: %w", err)
+	}
+	if err := verifyWorkspaceReadCommandPublicationSchemaV19(ctx, tx); err != nil {
+		return err
+	}
+	if err := installWorkspaceReadPostActualSchemaV20(ctx, tx); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
@@ -276,11 +400,8 @@ var schemaStatements = []string{
 		PRIMARY KEY(change_set_id,revision,digest), UNIQUE(change_set_id,revision))`,
 	`CREATE TABLE IF NOT EXISTS workspace_change_set_current (
 		change_set_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
-	`CREATE TABLE IF NOT EXISTS workspace_read_command_current (
-		command_id TEXT PRIMARY KEY, revision INTEGER NOT NULL, digest TEXT NOT NULL, body BLOB NOT NULL)`,
-	`CREATE TABLE IF NOT EXISTS workspace_read_command_body_seal (
-		command_id TEXT NOT NULL PRIMARY KEY, revision INTEGER NOT NULL,
-		digest TEXT NOT NULL, canonical_body_digest TEXT NOT NULL)`,
+	workspaceReadCommandCurrentTableDDLV19,
+	workspaceReadCommandBodySealTableDDLV1,
 	`CREATE TABLE IF NOT EXISTS workspace_read_reservation (
 		stable_digest TEXT PRIMARY KEY, reservation_id TEXT NOT NULL UNIQUE, body BLOB NOT NULL)`,
 	`CREATE TABLE IF NOT EXISTS workspace_read_attempt_current (
@@ -316,9 +437,163 @@ var schemaStatements = []string{
 		UNIQUE(planned_change_set_id,planned_change_set_revision,planned_change_set_digest))`,
 }
 
+func verifyWorkspaceReadCommandCurrentSchemaV19(ctx context.Context, tx *sql.Tx) error {
+	if ctx == nil || tx == nil {
+		return errors.New("verify workspace read Command current schema requires context and transaction")
+	}
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT type,name,tbl_name FROM sqlite_master
+		  WHERE name='workspace_read_command_current'
+		     OR name LIKE 'workspace_read_command_current_%'
+		     OR tbl_name='workspace_read_command_current'
+		  ORDER BY type,name`,
+	)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Command current namespace: %w", err)
+	}
+	expected := map[string]struct{}{
+		"table:workspace_read_command_current:workspace_read_command_current":                    {},
+		"index:sqlite_autoindex_workspace_read_command_current_1:workspace_read_command_current": {},
+	}
+	found := make(map[string]struct{}, len(expected))
+	for rows.Next() {
+		var kind, name, table string
+		if err = rows.Scan(&kind, &name, &table); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("decode workspace read Command current namespace: %w", err)
+		}
+		object := kind + ":" + name + ":" + table
+		if _, ok := expected[object]; !ok {
+			_ = rows.Close()
+			return fmt.Errorf("workspace read Command current namespace contains unexpected object %q", object)
+		}
+		found[object] = struct{}{}
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("inspect workspace read Command current namespace rows: %w", err)
+	}
+	if err = rows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Command current namespace rows: %w", err)
+	}
+	if len(found) != len(expected) {
+		return errors.New("workspace read Command current namespace is incomplete")
+	}
+
+	var actualDDL sql.NullString
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT sql FROM sqlite_master WHERE type='table' AND name='workspace_read_command_current'`,
+	).Scan(&actualDDL); err != nil {
+		return fmt.Errorf("inspect workspace read Command current DDL: %w", err)
+	}
+	if !actualDDL.Valid {
+		return errors.New("workspace read Command current DDL is missing")
+	}
+	actualTokens, err := canonicalSQLiteDDLTokensV2(actualDDL.String)
+	if err != nil {
+		return err
+	}
+	expectedTokens, err := canonicalSQLiteDDLTokensV2(workspaceReadCommandCurrentTableDDLV19)
+	if err != nil {
+		return err
+	}
+	if !equalSQLiteDDLTokensV2(actualTokens, expectedTokens) {
+		return errors.New("workspace read Command current DDL semantics drifted")
+	}
+	if err = verifyWorkspaceReadSchemaColumnsV19(
+		ctx,
+		tx,
+		"workspace_read_command_current",
+		[]workspaceReadSchemaColumnV19{
+			{name: "command_id", kind: "TEXT", notNull: 0, primaryKey: 1},
+			{name: "revision", kind: "INTEGER", notNull: 1},
+			{name: "digest", kind: "TEXT", notNull: 1},
+			{name: "body", kind: "BLOB", notNull: 1},
+		},
+	); err != nil {
+		return err
+	}
+	return verifyWorkspaceReadIndexSetV19(
+		ctx,
+		tx,
+		"workspace_read_command_current",
+		map[string]workspaceReadIndexExpectationV19{
+			"sqlite_autoindex_workspace_read_command_current_1": {
+				sequence: 0,
+				origin:   "pk",
+				columns:  []string{"command_id"},
+				cids:     []int{0},
+			},
+		},
+	)
+}
+
 func verifyWorkspaceReadCommandBodySealSchemaV1(ctx context.Context, tx *sql.Tx) error {
 	if ctx == nil || tx == nil {
 		return errors.New("verify workspace read Command body seal schema requires context and transaction")
+	}
+	namespaceRows, err := tx.QueryContext(
+		ctx,
+		`SELECT type,name,tbl_name FROM sqlite_master
+		  WHERE name='workspace_read_command_body_seal'
+		     OR name LIKE 'workspace_read_command_body_seal_%'
+		     OR tbl_name='workspace_read_command_body_seal'
+		  ORDER BY type,name`,
+	)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Command body seal namespace: %w", err)
+	}
+	expectedNamespace := map[string]struct{}{
+		"table:workspace_read_command_body_seal:workspace_read_command_body_seal":                    {},
+		"index:sqlite_autoindex_workspace_read_command_body_seal_1:workspace_read_command_body_seal": {},
+	}
+	foundNamespace := make(map[string]struct{}, len(expectedNamespace))
+	for namespaceRows.Next() {
+		var kind, name, table string
+		if err = namespaceRows.Scan(&kind, &name, &table); err != nil {
+			_ = namespaceRows.Close()
+			return fmt.Errorf("decode workspace read Command body seal namespace: %w", err)
+		}
+		object := kind + ":" + name + ":" + table
+		if _, ok := expectedNamespace[object]; !ok {
+			_ = namespaceRows.Close()
+			return fmt.Errorf("workspace read Command body seal namespace contains unexpected object %q", object)
+		}
+		foundNamespace[object] = struct{}{}
+	}
+	if err = namespaceRows.Err(); err != nil {
+		_ = namespaceRows.Close()
+		return fmt.Errorf("inspect workspace read Command body seal namespace rows: %w", err)
+	}
+	if err = namespaceRows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Command body seal namespace rows: %w", err)
+	}
+	if len(foundNamespace) != len(expectedNamespace) {
+		return errors.New("workspace read Command body seal namespace is incomplete")
+	}
+	var actualDDL sql.NullString
+	if err = tx.QueryRowContext(
+		ctx,
+		`SELECT sql FROM sqlite_master
+		  WHERE type='table' AND name='workspace_read_command_body_seal'`,
+	).Scan(&actualDDL); err != nil {
+		return fmt.Errorf("inspect workspace read Command body seal DDL: %w", err)
+	}
+	if !actualDDL.Valid {
+		return errors.New("workspace read Command body seal DDL is missing")
+	}
+	actualTokens, err := canonicalSQLiteDDLTokensV2(actualDDL.String)
+	if err != nil {
+		return err
+	}
+	expectedTokens, err := canonicalSQLiteDDLTokensV2(workspaceReadCommandBodySealTableDDLV1)
+	if err != nil {
+		return err
+	}
+	if !equalSQLiteDDLTokensV2(actualTokens, expectedTokens) {
+		return errors.New("workspace read Command body seal DDL semantics drifted")
 	}
 	rows, err := tx.QueryContext(ctx, `PRAGMA table_xinfo(workspace_read_command_body_seal)`)
 	if err != nil {
@@ -378,6 +653,85 @@ func verifyWorkspaceReadCommandBodySealSchemaV1(ctx context.Context, tx *sql.Tx)
 	if index != len(expected) {
 		return errors.New("workspace read Command body seal schema is incomplete")
 	}
+	indexRows, err := tx.QueryContext(ctx, `PRAGMA index_list(workspace_read_command_body_seal)`)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Command body seal indexes: %w", err)
+	}
+	indexCount := 0
+	for indexRows.Next() {
+		var sequence, unique, partial int
+		var name, origin string
+		if err = indexRows.Scan(&sequence, &name, &unique, &origin, &partial); err != nil {
+			_ = indexRows.Close()
+			return fmt.Errorf("decode workspace read Command body seal index: %w", err)
+		}
+		if indexCount != 0 || sequence != 0 ||
+			name != "sqlite_autoindex_workspace_read_command_body_seal_1" ||
+			unique != 1 || origin != "pk" || partial != 0 {
+			_ = indexRows.Close()
+			return errors.New("workspace read Command body seal index list drifted")
+		}
+		indexCount++
+	}
+	if err = indexRows.Err(); err != nil {
+		_ = indexRows.Close()
+		return fmt.Errorf("inspect workspace read Command body seal index rows: %w", err)
+	}
+	if err = indexRows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Command body seal index rows: %w", err)
+	}
+	if indexCount != 1 {
+		return errors.New("workspace read Command body seal index list is incomplete")
+	}
+	indexInfoRows, err := tx.QueryContext(
+		ctx,
+		`PRAGMA index_xinfo(sqlite_autoindex_workspace_read_command_body_seal_1)`,
+	)
+	if err != nil {
+		return fmt.Errorf("inspect workspace read Command body seal index columns: %w", err)
+	}
+	indexPosition := 0
+	for indexInfoRows.Next() {
+		var sequence, columnID, descending, key int
+		var column, collation sql.NullString
+		if err = indexInfoRows.Scan(
+			&sequence, &columnID, &column, &descending, &collation, &key,
+		); err != nil {
+			_ = indexInfoRows.Close()
+			return fmt.Errorf("decode workspace read Command body seal index column: %w", err)
+		}
+		if sequence != indexPosition || descending != 0 ||
+			!collation.Valid || collation.String != "BINARY" {
+			_ = indexInfoRows.Close()
+			return errors.New("workspace read Command body seal index metadata drifted")
+		}
+		switch indexPosition {
+		case 0:
+			if key != 1 || columnID != 0 || !column.Valid || column.String != "command_id" {
+				_ = indexInfoRows.Close()
+				return errors.New("workspace read Command body seal index key drifted")
+			}
+		case 1:
+			if key != 0 || columnID != -1 || column.Valid {
+				_ = indexInfoRows.Close()
+				return errors.New("workspace read Command body seal index auxiliary column drifted")
+			}
+		default:
+			_ = indexInfoRows.Close()
+			return errors.New("workspace read Command body seal index contains extra columns")
+		}
+		indexPosition++
+	}
+	if err = indexInfoRows.Err(); err != nil {
+		_ = indexInfoRows.Close()
+		return fmt.Errorf("inspect workspace read Command body seal index column rows: %w", err)
+	}
+	if err = indexInfoRows.Close(); err != nil {
+		return fmt.Errorf("close workspace read Command body seal index column rows: %w", err)
+	}
+	if indexPosition != 2 {
+		return errors.New("workspace read Command body seal index columns are incomplete")
+	}
 	return nil
 }
 
@@ -414,6 +768,501 @@ func preflightWorkspaceReadRuntimeAttemptBindingMigrationV2(ctx context.Context,
 	}
 	if len(objects) != 0 {
 		return fmt.Errorf("%w: workspace read Runtime-attempt migration namespace is partial without a v18 ledger: %v", ports.ErrConflict, objects)
+	}
+	return nil
+}
+
+func preflightWorkspaceReadCommandPublicationMigrationV19(ctx context.Context, tx *sql.Tx) error {
+	objects, err := workspaceReadCommandPublicationNamespaceV19(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if len(objects) != 0 {
+		return fmt.Errorf(
+			"%w: workspace read Command publication v19 namespace is partial without its ledger: %v",
+			ports.ErrConflict,
+			objects,
+		)
+	}
+	return nil
+}
+
+func workspaceReadCommandPublicationNamespaceV19(
+	ctx context.Context,
+	tx *sql.Tx,
+) ([]string, error) {
+	rows, err := tx.QueryContext(
+		ctx,
+		`SELECT type,name,tbl_name FROM sqlite_master
+		  WHERE name LIKE 'workspace_read_command_publication_%'
+		     OR name LIKE 'workspace_read_command_owner_current_%'
+		     OR tbl_name LIKE 'workspace_read_command_publication_%'
+		     OR tbl_name LIKE 'workspace_read_command_owner_current_%'
+		  ORDER BY type,name`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("inspect workspace read Command publication namespace: %w", err)
+	}
+	defer rows.Close()
+	var objects []string
+	for rows.Next() {
+		var kind, name, table string
+		if err := rows.Scan(&kind, &name, &table); err != nil {
+			return nil, fmt.Errorf("decode workspace read Command publication namespace: %w", err)
+		}
+		objects = append(objects, kind+":"+name+":"+table)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("inspect workspace read Command publication namespace rows: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, fmt.Errorf("close workspace read Command publication namespace rows: %w", err)
+	}
+	return objects, nil
+}
+
+type workspaceReadSchemaColumnV19 struct {
+	name       string
+	kind       string
+	notNull    int
+	primaryKey int
+}
+
+func verifyWorkspaceReadCommandPublicationSchemaV19(ctx context.Context, tx *sql.Tx) error {
+	if err := verifyWorkspaceReadCommandPublicationObjectsV19(ctx, tx); err != nil {
+		return err
+	}
+	var contractVersion, namespaceDigest string
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT contract_version,namespace_digest
+		   FROM workspace_read_command_publication_schema_v19
+		  WHERE singleton=1`,
+	).Scan(&contractVersion, &namespaceDigest); err != nil {
+		return fmt.Errorf("inspect workspace read Command publication schema ledger: %w", err)
+	}
+	if contractVersion != "praxis.sandbox/workspace-read-command-publication/v2" ||
+		namespaceDigest != workspaceReadCommandPublicationSchemaDigestV19() {
+		return errors.New("workspace read Command publication schema ledger drifted")
+	}
+	var rows int
+	if err := tx.QueryRowContext(
+		ctx,
+		`SELECT COUNT(*) FROM workspace_read_command_publication_schema_v19`,
+	).Scan(&rows); err != nil {
+		return fmt.Errorf("count workspace read Command publication schema ledger: %w", err)
+	}
+	if rows != 1 {
+		return errors.New("workspace read Command publication schema ledger is not singleton")
+	}
+	return nil
+}
+
+func verifyWorkspaceReadCommandPublicationObjectsV19(ctx context.Context, tx *sql.Tx) error {
+	expectedNamespace := map[string]struct{}{
+		"table:workspace_read_command_publication_schema_v19:workspace_read_command_publication_schema_v19":                        {},
+		"table:workspace_read_command_publication_v2:workspace_read_command_publication_v2":                                        {},
+		"table:workspace_read_command_owner_current_history_v2:workspace_read_command_owner_current_history_v2":                    {},
+		"table:workspace_read_command_owner_current_pointer_v2:workspace_read_command_owner_current_pointer_v2":                    {},
+		"index:sqlite_autoindex_workspace_read_command_publication_v2_1:workspace_read_command_publication_v2":                     {},
+		"index:sqlite_autoindex_workspace_read_command_publication_v2_2:workspace_read_command_publication_v2":                     {},
+		"index:sqlite_autoindex_workspace_read_command_publication_v2_3:workspace_read_command_publication_v2":                     {},
+		"index:sqlite_autoindex_workspace_read_command_publication_v2_4:workspace_read_command_publication_v2":                     {},
+		"index:sqlite_autoindex_workspace_read_command_publication_v2_5:workspace_read_command_publication_v2":                     {},
+		"index:sqlite_autoindex_workspace_read_command_owner_current_history_v2_1:workspace_read_command_owner_current_history_v2": {},
+		"index:sqlite_autoindex_workspace_read_command_owner_current_history_v2_2:workspace_read_command_owner_current_history_v2": {},
+		"index:sqlite_autoindex_workspace_read_command_owner_current_pointer_v2_1:workspace_read_command_owner_current_pointer_v2": {},
+	}
+	objects, err := workspaceReadCommandPublicationNamespaceV19(ctx, tx)
+	if err != nil {
+		return err
+	}
+	found := make(map[string]struct{}, len(objects))
+	for _, object := range objects {
+		if _, ok := expectedNamespace[object]; !ok {
+			return fmt.Errorf("workspace read Command publication namespace contains unexpected object %q", object)
+		}
+		found[object] = struct{}{}
+	}
+	if len(found) != len(expectedNamespace) {
+		return errors.New("workspace read Command publication namespace is incomplete")
+	}
+
+	if err := verifyWorkspaceReadSchemaColumnsV19(ctx, tx, "workspace_read_command_publication_v2", []workspaceReadSchemaColumnV19{
+		{name: "publication_id", kind: "TEXT", notNull: 1, primaryKey: 1},
+		{name: "revision", kind: "INTEGER", notNull: 1, primaryKey: 2},
+		{name: "digest", kind: "TEXT", notNull: 1, primaryKey: 3},
+		{name: "command_id", kind: "TEXT", notNull: 1},
+		{name: "command_revision", kind: "INTEGER", notNull: 1},
+		{name: "command_digest", kind: "TEXT", notNull: 1},
+		{name: "source_id", kind: "TEXT", notNull: 1},
+		{name: "source_revision", kind: "INTEGER", notNull: 1},
+		{name: "source_digest", kind: "TEXT", notNull: 1},
+		{name: "runtime_attempt_digest", kind: "TEXT", notNull: 1},
+		{name: "semantic_digest", kind: "TEXT", notNull: 1},
+		{name: "created_unix_nano", kind: "INTEGER", notNull: 1},
+		{name: "expires_unix_nano", kind: "INTEGER", notNull: 1},
+		{name: "body", kind: "BLOB", notNull: 1},
+	}); err != nil {
+		return err
+	}
+	if err := verifyWorkspaceReadSchemaColumnsV19(ctx, tx, "workspace_read_command_owner_current_history_v2", []workspaceReadSchemaColumnV19{
+		{name: "current_id", kind: "TEXT", notNull: 1, primaryKey: 1},
+		{name: "revision", kind: "INTEGER", notNull: 1, primaryKey: 2},
+		{name: "digest", kind: "TEXT", notNull: 1, primaryKey: 3},
+		{name: "command_id", kind: "TEXT", notNull: 1},
+		{name: "command_revision", kind: "INTEGER", notNull: 1},
+		{name: "command_digest", kind: "TEXT", notNull: 1},
+		{name: "publication_id", kind: "TEXT", notNull: 1},
+		{name: "publication_revision", kind: "INTEGER", notNull: 1},
+		{name: "publication_digest", kind: "TEXT", notNull: 1},
+		{name: "checked_unix_nano", kind: "INTEGER", notNull: 1},
+		{name: "expires_unix_nano", kind: "INTEGER", notNull: 1},
+		{name: "body", kind: "BLOB", notNull: 1},
+	}); err != nil {
+		return err
+	}
+	if err := verifyWorkspaceReadSchemaColumnsV19(ctx, tx, "workspace_read_command_owner_current_pointer_v2", []workspaceReadSchemaColumnV19{
+		{name: "command_id", kind: "TEXT", notNull: 1, primaryKey: 1},
+		{name: "command_revision", kind: "INTEGER", notNull: 1},
+		{name: "command_digest", kind: "TEXT", notNull: 1},
+		{name: "current_id", kind: "TEXT", notNull: 1},
+		{name: "current_revision", kind: "INTEGER", notNull: 1},
+		{name: "current_digest", kind: "TEXT", notNull: 1},
+		{name: "publication_id", kind: "TEXT", notNull: 1},
+		{name: "publication_revision", kind: "INTEGER", notNull: 1},
+		{name: "publication_digest", kind: "TEXT", notNull: 1},
+	}); err != nil {
+		return err
+	}
+	if err := verifyWorkspaceReadSchemaColumnsV19(ctx, tx, "workspace_read_command_publication_schema_v19", []workspaceReadSchemaColumnV19{
+		{name: "singleton", kind: "INTEGER", notNull: 1, primaryKey: 1},
+		{name: "contract_version", kind: "TEXT", notNull: 1},
+		{name: "namespace_digest", kind: "TEXT", notNull: 1},
+	}); err != nil {
+		return err
+	}
+	if err := verifyWorkspaceReadCommandPublicationIndexesV19(ctx, tx); err != nil {
+		return err
+	}
+	return verifyWorkspaceReadCommandPublicationDDLV19(ctx, tx)
+}
+
+func verifyWorkspaceReadSchemaColumnsV19(
+	ctx context.Context,
+	tx *sql.Tx,
+	table string,
+	expected []workspaceReadSchemaColumnV19,
+) error {
+	rows, err := tx.QueryContext(ctx, fmt.Sprintf("PRAGMA table_xinfo(%s)", table))
+	if err != nil {
+		return fmt.Errorf("inspect %s columns: %w", table, err)
+	}
+	defer rows.Close()
+	index := 0
+	for rows.Next() {
+		var (
+			columnID    int
+			name        string
+			kind        string
+			notNull     int
+			defaultBody sql.NullString
+			primaryKey  int
+			hidden      int
+		)
+		if err := rows.Scan(
+			&columnID, &name, &kind, &notNull, &defaultBody, &primaryKey, &hidden,
+		); err != nil {
+			return fmt.Errorf("decode %s columns: %w", table, err)
+		}
+		if index >= len(expected) ||
+			columnID != index ||
+			name != expected[index].name ||
+			kind != expected[index].kind ||
+			notNull != expected[index].notNull ||
+			primaryKey != expected[index].primaryKey ||
+			hidden != 0 ||
+			defaultBody.Valid {
+			return fmt.Errorf("%s columns drifted", table)
+		}
+		index++
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("inspect %s column rows: %w", table, err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close %s column rows: %w", table, err)
+	}
+	if index != len(expected) {
+		return fmt.Errorf("%s columns are incomplete", table)
+	}
+	return nil
+}
+
+func verifyWorkspaceReadCommandPublicationDDLV19(ctx context.Context, tx *sql.Tx) error {
+	expected := map[string]string{
+		"workspace_read_command_publication_v2":           workspaceReadCommandPublicationTableDDLV19,
+		"workspace_read_command_owner_current_history_v2": workspaceReadCommandOwnerCurrentHistoryTableDDLV19,
+		"workspace_read_command_owner_current_pointer_v2": workspaceReadCommandOwnerCurrentPointerTableDDLV19,
+		"workspace_read_command_publication_schema_v19":   workspaceReadCommandPublicationLedgerTableDDLV19,
+	}
+	for name, expectedDDL := range expected {
+		var actual sql.NullString
+		if err := tx.QueryRowContext(
+			ctx,
+			`SELECT sql FROM sqlite_master WHERE type='table' AND name=?`,
+			name,
+		).Scan(&actual); err != nil {
+			return fmt.Errorf("inspect %s DDL: %w", name, err)
+		}
+		if !actual.Valid {
+			return fmt.Errorf("%s DDL is missing", name)
+		}
+		actualTokens, err := canonicalSQLiteDDLTokensV2(actual.String)
+		if err != nil {
+			return err
+		}
+		expectedTokens, err := canonicalSQLiteDDLTokensV2(expectedDDL)
+		if err != nil {
+			return err
+		}
+		if !equalSQLiteDDLTokensV2(actualTokens, expectedTokens) {
+			return fmt.Errorf("%s DDL semantics drifted", name)
+		}
+	}
+	return nil
+}
+
+type workspaceReadIndexExpectationV19 struct {
+	sequence int
+	origin   string
+	columns  []string
+	cids     []int
+}
+
+func verifyWorkspaceReadCommandPublicationIndexesV19(ctx context.Context, tx *sql.Tx) error {
+	tables := map[string]map[string]workspaceReadIndexExpectationV19{
+		"workspace_read_command_publication_v2": {
+			"sqlite_autoindex_workspace_read_command_publication_v2_5": {
+				sequence: 0, origin: "u",
+				columns: []string{"runtime_attempt_digest"}, cids: []int{9},
+			},
+			"sqlite_autoindex_workspace_read_command_publication_v2_4": {
+				sequence: 1, origin: "u",
+				columns: []string{"source_id", "source_revision", "source_digest"},
+				cids:    []int{6, 7, 8},
+			},
+			"sqlite_autoindex_workspace_read_command_publication_v2_3": {
+				sequence: 2, origin: "u",
+				columns: []string{"command_id", "command_revision", "command_digest"},
+				cids:    []int{3, 4, 5},
+			},
+			"sqlite_autoindex_workspace_read_command_publication_v2_2": {
+				sequence: 3, origin: "u",
+				columns: []string{"publication_id", "revision"}, cids: []int{0, 1},
+			},
+			"sqlite_autoindex_workspace_read_command_publication_v2_1": {
+				sequence: 4, origin: "pk",
+				columns: []string{"publication_id", "revision", "digest"},
+				cids:    []int{0, 1, 2},
+			},
+		},
+		"workspace_read_command_owner_current_history_v2": {
+			"sqlite_autoindex_workspace_read_command_owner_current_history_v2_2": {
+				sequence: 0, origin: "u",
+				columns: []string{"current_id", "revision"}, cids: []int{0, 1},
+			},
+			"sqlite_autoindex_workspace_read_command_owner_current_history_v2_1": {
+				sequence: 1, origin: "pk",
+				columns: []string{"current_id", "revision", "digest"},
+				cids:    []int{0, 1, 2},
+			},
+		},
+		"workspace_read_command_owner_current_pointer_v2": {
+			"sqlite_autoindex_workspace_read_command_owner_current_pointer_v2_1": {
+				sequence: 0, origin: "pk",
+				columns: []string{"command_id"}, cids: []int{0},
+			},
+		},
+		"workspace_read_command_publication_schema_v19": {},
+	}
+	for table, expected := range tables {
+		if err := verifyWorkspaceReadIndexSetV19(ctx, tx, table, expected); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func verifyWorkspaceReadIndexSetV19(
+	ctx context.Context,
+	tx *sql.Tx,
+	table string,
+	expected map[string]workspaceReadIndexExpectationV19,
+) error {
+	rows, err := tx.QueryContext(ctx, `PRAGMA index_list(`+table+`)`)
+	if err != nil {
+		return fmt.Errorf("inspect %s indexes: %w", table, err)
+	}
+	defer rows.Close()
+	found := make(map[string]bool, len(expected))
+	position := 0
+	for rows.Next() {
+		var sequence, unique, partial int
+		var name, origin string
+		if err = rows.Scan(&sequence, &name, &unique, &origin, &partial); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("decode %s index: %w", table, err)
+		}
+		expectation, ok := expected[name]
+		if !ok ||
+			sequence != position ||
+			sequence != expectation.sequence ||
+			unique != 1 ||
+			origin != expectation.origin ||
+			partial != 0 ||
+			found[name] {
+			_ = rows.Close()
+			return fmt.Errorf("%s index list drifted", table)
+		}
+		found[name] = true
+		position++
+	}
+	if err = rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("inspect %s index rows: %w", table, err)
+	}
+	if err = rows.Close(); err != nil {
+		return fmt.Errorf("close %s index rows: %w", table, err)
+	}
+	if position != len(expected) {
+		return fmt.Errorf("%s index list is incomplete", table)
+	}
+	for name, expectation := range expected {
+		if !found[name] {
+			return fmt.Errorf("%s expected index %s is missing", table, name)
+		}
+		indexRows, queryErr := tx.QueryContext(ctx, `PRAGMA index_xinfo(`+name+`)`)
+		if queryErr != nil {
+			return fmt.Errorf("inspect %s index columns: %w", name, queryErr)
+		}
+		indexPosition := 0
+		for indexRows.Next() {
+			var sequence, columnID, descending, key int
+			var column, collation sql.NullString
+			if err = indexRows.Scan(
+				&sequence,
+				&columnID,
+				&column,
+				&descending,
+				&collation,
+				&key,
+			); err != nil {
+				_ = indexRows.Close()
+				return fmt.Errorf("decode %s index column: %w", name, err)
+			}
+			if sequence != indexPosition ||
+				descending != 0 ||
+				!collation.Valid ||
+				collation.String != "BINARY" {
+				_ = indexRows.Close()
+				return fmt.Errorf("%s index column metadata drifted", name)
+			}
+			if indexPosition < len(expectation.columns) {
+				if key != 1 ||
+					columnID != expectation.cids[indexPosition] ||
+					!column.Valid ||
+					column.String != expectation.columns[indexPosition] {
+					_ = indexRows.Close()
+					return fmt.Errorf("%s key columns drifted", name)
+				}
+			} else if indexPosition == len(expectation.columns) {
+				if key != 0 || columnID != -1 || column.Valid {
+					_ = indexRows.Close()
+					return fmt.Errorf("%s auxiliary column drifted", name)
+				}
+			} else {
+				_ = indexRows.Close()
+				return fmt.Errorf("%s contains extra columns", name)
+			}
+			indexPosition++
+		}
+		if err = indexRows.Err(); err != nil {
+			_ = indexRows.Close()
+			return fmt.Errorf("inspect %s index column rows: %w", name, err)
+		}
+		if err = indexRows.Close(); err != nil {
+			return fmt.Errorf("close %s index column rows: %w", name, err)
+		}
+		if indexPosition != len(expectation.columns)+1 {
+			return fmt.Errorf("%s index columns are incomplete", name)
+		}
+	}
+	return nil
+}
+
+func workspaceReadCommandPublicationSchemaDigestV19() string {
+	sum := sha256.Sum256([]byte(strings.Join(workspaceReadCommandPublicationSchemaStatementsV19, "\n")))
+	return hex.EncodeToString(sum[:])
+}
+
+func probeWorkspaceReadCommandPublicationSchemaV19(ctx context.Context, tx *sql.Tx) error {
+	if _, err := tx.ExecContext(ctx, "SAVEPOINT workspace_read_command_publication_v19_probe"); err != nil {
+		return fmt.Errorf("begin workspace read Command publication v19 probe: %w", err)
+	}
+	rollback := func() {
+		_, _ = tx.ExecContext(ctx, "ROLLBACK TO workspace_read_command_publication_v19_probe")
+		_, _ = tx.ExecContext(ctx, "RELEASE workspace_read_command_publication_v19_probe")
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO workspace_read_command_publication_v2(
+				publication_id,revision,digest,
+				command_id,command_revision,command_digest,
+				source_id,source_revision,source_digest,
+				runtime_attempt_digest,semantic_digest,
+				created_unix_nano,expires_unix_nano,body
+			) VALUES('probe-publication',1,'probe-publication-digest',
+				'probe-command',1,'probe-command-digest',
+				'probe-source',1,'probe-source-digest',
+				'probe-runtime-attempt-digest','probe-semantic-digest',1,2,x'00')`,
+	); err != nil {
+		rollback()
+		return fmt.Errorf("write workspace read Command publication v19 probe: %w", err)
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO workspace_read_command_owner_current_history_v2(
+			current_id,revision,digest,
+			command_id,command_revision,command_digest,
+			publication_id,publication_revision,publication_digest,
+			checked_unix_nano,expires_unix_nano,body
+		) VALUES('probe-current',1,'probe-current-digest',
+			'probe-command',1,'probe-command-digest',
+			'probe-publication',1,'probe-publication-digest',1,2,x'00')`,
+	); err != nil {
+		rollback()
+		return fmt.Errorf("write workspace read Command Owner current v19 probe: %w", err)
+	}
+	if _, err := tx.ExecContext(
+		ctx,
+		`INSERT INTO workspace_read_command_owner_current_pointer_v2(
+			command_id,command_revision,command_digest,
+			current_id,current_revision,current_digest,
+			publication_id,publication_revision,publication_digest
+		) VALUES('probe-command',1,'probe-command-digest',
+			'probe-current',1,'probe-current-digest',
+			'probe-publication',1,'probe-publication-digest')`,
+	); err != nil {
+		rollback()
+		return fmt.Errorf("write workspace read Command Owner pointer v19 probe: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "ROLLBACK TO workspace_read_command_publication_v19_probe"); err != nil {
+		rollback()
+		return fmt.Errorf("rollback workspace read Command publication v19 probe: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, "RELEASE workspace_read_command_publication_v19_probe"); err != nil {
+		return fmt.Errorf("release workspace read Command publication v19 probe: %w", err)
 	}
 	return nil
 }

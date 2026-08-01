@@ -1,6 +1,7 @@
 package kernel
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 func TestWorkspaceReadRuntimeLeaseBindingRejectsEveryAxis(t *testing.T) {
 	expires := time.Unix(1_900_000_000, 0).Add(time.Hour).UnixNano()
 	scope := runtimecore.DigestBytes([]byte("workspace-read-scope"))
+	rawScope := strings.TrimPrefix(string(scope), "sha256:")
 	current := runtimeports.CurrentOperationDispatchEnforcementV4{
 		Sandbox: runtimeports.OperationDispatchSandboxCurrentProjectionV4{
 			Operation: runtimeports.OperationSubjectV3{
@@ -32,7 +34,7 @@ func TestWorkspaceReadRuntimeLeaseBindingRejectsEveryAxis(t *testing.T) {
 	binding := contract.RuntimeLeaseBinding{
 		TenantID: "tenant", InstanceID: "instance", InstanceEpoch: 3,
 		LeaseID: "lease", LeaseEpoch: 2, FenceEpoch: 4,
-		ScopeDigest: string(scope), ObservedRevision: 5, ExpiresUnixNano: expires,
+		ScopeDigest: rawScope, ObservedRevision: 5, ExpiresUnixNano: expires,
 	}
 	if err := validateWorkspaceReadRuntimeLeaseV1(binding, current); err != nil {
 		t.Fatalf("valid exact lease: %v", err)
@@ -48,8 +50,9 @@ func TestWorkspaceReadRuntimeLeaseBindingRejectsEveryAxis(t *testing.T) {
 		{"lease-epoch", func(v *contract.RuntimeLeaseBinding) { v.LeaseEpoch++ }},
 		{"fence", func(v *contract.RuntimeLeaseBinding) { v.FenceEpoch++ }},
 		{"scope", func(v *contract.RuntimeLeaseBinding) {
-			v.ScopeDigest = string(runtimecore.DigestBytes([]byte("other")))
+			v.ScopeDigest = strings.TrimPrefix(string(runtimecore.DigestBytes([]byte("other"))), "sha256:")
 		}},
+		{"scope-prefixed-splice", func(v *contract.RuntimeLeaseBinding) { v.ScopeDigest = string(scope) }},
 		{"observed-revision", func(v *contract.RuntimeLeaseBinding) { v.ObservedRevision++ }},
 		{"expiry", func(v *contract.RuntimeLeaseBinding) { v.ExpiresUnixNano++ }},
 	}

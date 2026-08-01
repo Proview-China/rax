@@ -115,19 +115,20 @@ type WorkspaceReadReservationV1 struct {
 // therefore reject an overlong reservation without importing another owner's
 // mutable current.
 type WorkspaceReadTTLClosureV1 struct {
-	UnifiedNotAfterUnixNano       int64  `json:"unified_not_after_unix_nano"`
-	RuntimeEnforcementExpiresNano int64  `json:"runtime_enforcement_expires_unix_nano"`
-	AssociationExpiresUnixNano    int64  `json:"association_expires_unix_nano"`
-	CommandRequestedNotAfterNano  int64  `json:"command_requested_not_after_unix_nano"`
-	CommandExpiresUnixNano        int64  `json:"command_expires_unix_nano"`
-	WorkspaceViewExpiresUnixNano  int64  `json:"workspace_view_expires_unix_nano"`
-	WorkspaceLeaseExpiresUnixNano int64  `json:"workspace_lease_expires_unix_nano"`
-	EffectiveExpiresUnixNano      int64  `json:"effective_expires_unix_nano"`
-	Digest                        string `json:"digest"`
+	UnifiedNotAfterUnixNano                int64  `json:"unified_not_after_unix_nano"`
+	RuntimeEnforcementExpiresNano          int64  `json:"runtime_enforcement_expires_unix_nano"`
+	AssociationExpiresUnixNano             int64  `json:"association_expires_unix_nano"`
+	CommandRequestedNotAfterNano           int64  `json:"command_requested_not_after_unix_nano"`
+	CommandExpiresUnixNano                 int64  `json:"command_expires_unix_nano"`
+	PublishedCommandCurrentExpiresUnixNano int64  `json:"published_command_current_expires_unix_nano,omitempty"`
+	WorkspaceViewExpiresUnixNano           int64  `json:"workspace_view_expires_unix_nano"`
+	WorkspaceLeaseExpiresUnixNano          int64  `json:"workspace_lease_expires_unix_nano"`
+	EffectiveExpiresUnixNano               int64  `json:"effective_expires_unix_nano"`
+	Digest                                 string `json:"digest"`
 }
 
 func SealWorkspaceReadTTLClosureV1(value WorkspaceReadTTLClosureV1) (WorkspaceReadTTLClosureV1, error) {
-	value.EffectiveExpiresUnixNano = minInt64V1(
+	expires := []int64{
 		value.UnifiedNotAfterUnixNano,
 		value.RuntimeEnforcementExpiresNano,
 		value.AssociationExpiresUnixNano,
@@ -135,7 +136,11 @@ func SealWorkspaceReadTTLClosureV1(value WorkspaceReadTTLClosureV1) (WorkspaceRe
 		value.CommandExpiresUnixNano,
 		value.WorkspaceViewExpiresUnixNano,
 		value.WorkspaceLeaseExpiresUnixNano,
-	)
+	}
+	if value.PublishedCommandCurrentExpiresUnixNano > 0 {
+		expires = append(expires, value.PublishedCommandCurrentExpiresUnixNano)
+	}
+	value.EffectiveExpiresUnixNano = minInt64V1(expires...)
 	value.Digest = ""
 	digest, err := Digest("workspace-read-ttl-closure", value)
 	if err != nil {
@@ -149,7 +154,7 @@ func SealWorkspaceReadTTLClosureV1(value WorkspaceReadTTLClosureV1) (WorkspaceRe
 }
 
 func (value WorkspaceReadTTLClosureV1) ValidateShape() error {
-	expectedExpiry := minInt64V1(
+	expires := []int64{
 		value.UnifiedNotAfterUnixNano,
 		value.RuntimeEnforcementExpiresNano,
 		value.AssociationExpiresUnixNano,
@@ -157,7 +162,11 @@ func (value WorkspaceReadTTLClosureV1) ValidateShape() error {
 		value.CommandExpiresUnixNano,
 		value.WorkspaceViewExpiresUnixNano,
 		value.WorkspaceLeaseExpiresUnixNano,
-	)
+	}
+	if value.PublishedCommandCurrentExpiresUnixNano > 0 {
+		expires = append(expires, value.PublishedCommandCurrentExpiresUnixNano)
+	}
+	expectedExpiry := minInt64V1(expires...)
 	copy := value
 	copy.Digest = ""
 	digest, err := Digest("workspace-read-ttl-closure", copy)
@@ -167,6 +176,7 @@ func (value WorkspaceReadTTLClosureV1) ValidateShape() error {
 		value.AssociationExpiresUnixNano <= 0 ||
 		value.CommandRequestedNotAfterNano <= 0 ||
 		value.CommandExpiresUnixNano <= 0 ||
+		value.PublishedCommandCurrentExpiresUnixNano < 0 ||
 		value.WorkspaceViewExpiresUnixNano <= 0 ||
 		value.WorkspaceLeaseExpiresUnixNano <= 0 ||
 		value.EffectiveExpiresUnixNano != expectedExpiry ||

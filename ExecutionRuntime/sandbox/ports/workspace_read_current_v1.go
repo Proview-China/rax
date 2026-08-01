@@ -17,20 +17,21 @@ const WorkspaceReadCurrentContractVersionV1 = "praxis.sandbox/workspace-read-cur
 // It carries no mutable current selected by the caller and grants no Provider
 // authority.
 type WorkspaceReadCurrentQueryV1 struct {
-	ContractVersion     string                                                           `json:"contract_version"`
-	RuntimeInspect      runtimeports.InspectCurrentOperationDispatchEnforcementRequestV4 `json:"runtime_inspect"`
-	Authorization       runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3 `json:"authorization"`
-	StableKeyDigest     runtimecore.Digest                                               `json:"stable_key_digest"`
-	AuthorizationDigest runtimecore.Digest                                               `json:"authorization_digest"`
-	Association         runtimeports.PreparedDomainCommandAssociationRefV1               `json:"association"`
-	DomainCommand       runtimeports.OperationDomainCommandRefV1                         `json:"domain_command"`
-	Command             contract.Ref                                                     `json:"command"`
-	WorkspaceView       contract.Ref                                                     `json:"workspace_view"`
-	FileScopeDigest     string                                                           `json:"file_scope_digest"`
-	RelativePath        string                                                           `json:"relative_path"`
-	CheckedUnixNano     int64                                                            `json:"checked_unix_nano"`
-	ExpiresUnixNano     int64                                                            `json:"expires_unix_nano"`
-	Digest              string                                                           `json:"digest"`
+	ContractVersion         string                                                           `json:"contract_version"`
+	RuntimeInspect          runtimeports.InspectCurrentOperationDispatchEnforcementRequestV4 `json:"runtime_inspect"`
+	Authorization           runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3 `json:"authorization"`
+	StableKeyDigest         runtimecore.Digest                                               `json:"stable_key_digest"`
+	AuthorizationDigest     runtimecore.Digest                                               `json:"authorization_digest"`
+	Association             runtimeports.PreparedDomainCommandAssociationRefV1               `json:"association"`
+	DomainCommand           runtimeports.OperationDomainCommandRefV1                         `json:"domain_command"`
+	Command                 contract.Ref                                                     `json:"command"`
+	PublishedCommandCurrent *contract.Ref                                                    `json:"published_command_current,omitempty"`
+	WorkspaceView           contract.Ref                                                     `json:"workspace_view"`
+	FileScopeDigest         string                                                           `json:"file_scope_digest"`
+	RelativePath            string                                                           `json:"relative_path"`
+	CheckedUnixNano         int64                                                            `json:"checked_unix_nano"`
+	ExpiresUnixNano         int64                                                            `json:"expires_unix_nano"`
+	Digest                  string                                                           `json:"digest"`
 }
 
 func (q WorkspaceReadCurrentQueryV1) Validate() error {
@@ -49,6 +50,9 @@ func (q WorkspaceReadCurrentQueryV1) Validate() error {
 		q.ExpiresUnixNano <= q.CheckedUnixNano ||
 		!contract.ValidDigest(q.Digest) {
 		return errors.New("workspace read current query is incomplete")
+	}
+	if q.PublishedCommandCurrent != nil && q.PublishedCommandCurrent.ValidateShape("published workspace read command current") != nil {
+		return errors.New("workspace read published command current coordinate is invalid")
 	}
 	if q.StableKeyDigest != q.Authorization.StableKeyDigest ||
 		q.AuthorizationDigest != q.Authorization.AuthorizationDigest ||

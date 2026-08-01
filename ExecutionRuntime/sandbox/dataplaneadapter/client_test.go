@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,90 @@ func TestClientSendsExplicitDispatchAndInspectEnvelopes(t *testing.T) {
 				t.Fatal(err)
 			}
 		})
+	}
+}
+
+func TestClientWorkspaceReadJournalV2IsTheOnlyExpiredHistoricalLookup(t *testing.T) {
+	now := time.Now().UTC()
+	lookup := WorkspaceReadPhysicalJournalLookupV2{
+		AttemptID: "attempt-historical", RequestDigest: digestForTest(t, "historical-request"),
+		PayloadDigest: digestForTest(t, "historical-payload"), Phase: "execute",
+	}
+	var err error
+	lookup.Digest, err = canonicalDigest("WorkspaceReadPhysicalJournalLookupV2", lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	journal := WorkspaceReadPhysicalJournalRefV2{
+		AttemptID: lookup.AttemptID, RequestDigest: lookup.RequestDigest, PayloadDigest: lookup.PayloadDigest,
+		Phase: lookup.Phase, State: "started", Revision: 1, RecordedUnixNano: now.Add(-time.Hour).UnixNano(),
+	}
+	journal.RecordDigest, err = canonicalDigest("WorkspaceReadPhysicalJournalRefV2", journal)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := WorkspaceReadJournalInspectResponseV2{
+		ContractVersion: WorkspaceReadJournalInspectContractVersionV2,
+		LookupDigest:    lookup.Digest, Journal: &journal, CheckedUnixNano: now.UnixNano(),
+	}
+	response.Digest, err = canonicalDigest("WorkspaceReadJournalInspectResponseV2", response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	socket := testkit.ShortUnixSocketPath(t, "journal-v2.sock")
+	listener, err := net.ListenUnix("unix", &net.UnixAddr{Name: socket, Net: "unix"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	serverErr := make(chan error, 1)
+	go func() {
+		connection, acceptErr := listener.AcceptUnix()
+		if acceptErr != nil {
+			serverErr <- acceptErr
+			return
+		}
+		defer connection.Close()
+		var request WorkspaceReadJournalInspectRequestV2
+		if readErr := readFrame(connection, &request); readErr != nil {
+			serverErr <- readErr
+			return
+		}
+		if request.ContractVersion != WorkspaceReadJournalInspectContractVersionV2 || request.Lookup != lookup {
+			serverErr <- ClosedError{Reason: "invalid_contract", Message: "historical lookup drifted"}
+			return
+		}
+		serverErr <- writeFrame(connection, response)
+	}()
+	client := Client{SocketPath: socket, AllowedUID: uint32(os.Getuid())}
+	got, err := client.InspectWorkspaceReadJournalV2(context.Background(), lookup)
+	if err != nil || got.Journal == nil || *got.Journal != journal {
+		t.Fatalf("dedicated historical lookup failed: response=%#v err=%v", got, err)
+	}
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+
+	legacy := fixtureRequest(t, now)
+	legacy.RequestedNotAfterUnixNano = now.Add(-time.Nanosecond).UnixNano()
+	legacy.Digest, err = legacy.digestV1()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = client.Inspect(context.Background(), legacy); err == nil {
+		t.Fatal("legacy V1 Inspect accepted an expired request")
+	}
+}
+
+func TestPublicClientDispatchRejectsWorkspaceReadBeforeUnixDialV2(t *testing.T) {
+	now := time.Now().UTC()
+	request := fixtureRequest(t, now)
+	request.EffectKind = "praxis.sandbox/workspace-read"
+	request.Payload.ProviderKind = "workspace_read"
+	client := Client{SocketPath: filepath.Join(t.TempDir(), "must-not-dial.sock"), AllowedUID: uint32(os.Getuid())}
+	if _, err := client.Dispatch(context.Background(), request); err == nil ||
+		!strings.Contains(err.Error(), "only through the Sandbox Kernel qualified physical boundary") {
+		t.Fatalf("public Client.Dispatch did not fail closed before IPC: %v", err)
 	}
 }
 

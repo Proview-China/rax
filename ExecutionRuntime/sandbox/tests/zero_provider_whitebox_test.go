@@ -1,6 +1,7 @@
 package sandbox_test
 
 import (
+	"go/ast"
 	"go/parser"
 	"go/token"
 	"io/fs"
@@ -97,10 +98,22 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 		statePlaneAdapter := strings.HasPrefix(relative, filepath.Join("storage", "sqlite")+string(filepath.Separator))
 		workspaceDriver := strings.HasPrefix(relative, "workspacefs"+string(filepath.Separator))
 		workspaceReadRuntimeEntry := relative == filepath.Join("kernel", "workspace_read_v1.go") ||
+			relative == filepath.Join("kernel", "workspace_read_actual_point_v2.go") ||
+			relative == filepath.Join("kernel", "workspace_read_terminal_authority_v2.go") ||
 			relative == filepath.Join("ports", "workspace_read_v1.go") ||
+			relative == filepath.Join("ports", "workspace_read_actual_point_v2.go") ||
 			relative == filepath.Join("ports", "workspace_read_current_v1.go") ||
 			relative == filepath.Join("ports", "workspace_read_admission_attempt_binding_v2.go") ||
-			relative == filepath.Join("internal", "owner", "workspaceread", "authorized_reservation_v2.go")
+			relative == filepath.Join("internal", "owner", "workspaceread", "authorized_reservation_v2.go") ||
+			relative == filepath.Join("internal", "owner", "workspaceread", "authorized_transition_v2.go") ||
+			// Command publication reads only Runtime public core/ports. Keep
+			// this allowlist exact; Runtime implementation/write packages
+			// remain rejected by the import check below.
+			relative == filepath.Join("contract", "workspace_read_command_publication_v2.go") ||
+			relative == filepath.Join("contract", "workspace_read_post_actual_v2.go") ||
+			relative == filepath.Join("internal", "owner", "workspaceread", "authorized_command_publication_v2.go") ||
+			relative == filepath.Join("internal", "owner", "workspaceread", "post_actual_v2.go") ||
+			relative == filepath.Join("kernel", "workspace_read_command_publication_v2.go")
 		if relative, _ := filepath.Rel(root, path); strings.HasPrefix(relative, "runtimeadapter"+string(filepath.Separator)) {
 			payload, err := os.ReadFile(path)
 			if err != nil {
@@ -121,9 +134,11 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 			if err != nil {
 				return err
 			}
+			privateWorkspaceReadIPC := relative == filepath.Join("kernel", "workspace_read_actual_point_v2.go")
 			approvedTransportImport := (apiTransport && importPath == "net/http") ||
 				(cliTransport && (importPath == "net" || importPath == "net/http" || importPath == "os")) ||
-				(hostRoot && (importPath == "net" || importPath == "net/http"))
+				(hostRoot && (importPath == "net" || importPath == "net/http")) ||
+				(privateWorkspaceReadIPC && (importPath == "net" || importPath == "syscall"))
 			if forbiddenStandardLibrary[importPath] && !dataPlaneAdapter && !statePlaneAdapter && !(workspaceDriver && importPath == "os") && !approvedTransportImport {
 				t.Errorf("production file %s imports forbidden side-effect package %q", path, importPath)
 			}
@@ -163,4 +178,152 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 	if err != nil {
 		t.Fatal(err)
 	}
+}
+
+func TestWorkspaceReadCommandPublicationV2HasNoPhysicalOrRuntimeWriteBypass(t *testing.T) {
+	t.Parallel()
+	_, currentFile, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("resolve test file")
+	}
+	root := filepath.Dir(filepath.Dir(currentFile))
+
+	// The raw State Plane may expose immutable/history inspection and its
+	// authorized local repository. It must not itself satisfy the legacy raw
+	// current port or the kernel-private physical qualification.
+	forbiddenStoreMethods := map[string]bool{
+		"CreateWorkspaceReadCommandV1":                  true,
+		"InspectWorkspaceReadCommandCurrentV1":          true,
+		"InspectWorkspaceReadPublishedCommandCurrentV2": true,
+	}
+	err := filepath.WalkDir(filepath.Join(root, "storage", "sqlite"), func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if entry.IsDir() || filepath.Ext(path) != ".go" || strings.HasSuffix(path, "_test.go") {
+			return nil
+		}
+		file, err := parser.ParseFile(token.NewFileSet(), path, nil, 0)
+		if err != nil {
+			return err
+		}
+		for _, declaration := range file.Decls {
+			method, ok := declaration.(*ast.FuncDecl)
+			if !ok || method.Recv == nil || !forbiddenStoreMethods[method.Name.Name] {
+				continue
+			}
+			for _, receiver := range method.Recv.List {
+				pointer, pointerOK := receiver.Type.(*ast.StarExpr)
+				if !pointerOK {
+					continue
+				}
+				named, namedOK := pointer.X.(*ast.Ident)
+				if namedOK && named.Name == "Store" {
+					t.Errorf("raw SQLite Store regained forbidden workspace read injection method %s in %s", method.Name.Name, path)
+				}
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	portsBody := mustReadProductionFile(t, filepath.Join(root, "ports", "workspace_read_v1.go"))
+	ownerStart := strings.Index(portsBody, "type WorkspaceReadOwnerStoreV1 interface {")
+	ownerEnd := strings.Index(portsBody, "type WorkspaceReadExecutionPortV1 interface {")
+	if ownerStart < 0 || ownerEnd <= ownerStart {
+		t.Fatal("WorkspaceReadOwnerStoreV1 source boundary is missing")
+	}
+	ownerStoreBody := portsBody[ownerStart:ownerEnd]
+	for _, forbidden := range []string{
+		"WorkspaceReadCommandCurrentReaderV1",
+		"CreateWorkspaceReadCommandV1",
+		"InspectWorkspaceReadCommandCurrentV1",
+		"InspectWorkspaceReadPublishedCommandCurrentV2",
+	} {
+		if strings.Contains(ownerStoreBody, forbidden) {
+			t.Errorf("WorkspaceReadOwnerStoreV1 regained forbidden Command surface %q", forbidden)
+		}
+	}
+	physicalBody := mustReadProductionFile(t, filepath.Join(root, "kernel", "workspace_read_v1.go"))
+	for _, required := range []string{
+		"type workspaceReadPublishedCommandCurrentReaderV2 interface {",
+		"commands        workspaceReadPublishedCommandCurrentReaderV2",
+		"func NewWorkspaceReadPhysicalExecutorV1(commands workspaceReadPublishedCommandCurrentReaderV2,",
+	} {
+		if strings.Count(physicalBody, required) != 1 {
+			t.Errorf("physical executor private Owner-current requirement %q is missing or duplicated", required)
+		}
+	}
+	if strings.Count(physicalBody, "e.commands.inspectWorkspaceReadPublishedCommandCurrentV2(ctx, commandRef)") != 2 {
+		t.Error("physical executor must read the private Command+OwnerCurrent closure at entry and final qualification")
+	}
+	if strings.Contains(physicalBody, "e.commands.InspectWorkspaceReadCommandCurrentV1(") {
+		t.Error("physical executor regained the legacy raw-current Command read")
+	}
+
+	publisherBody := mustReadProductionFile(t, filepath.Join(root, "kernel", "workspace_read_command_publication_v2.go"))
+	for _, required := range []string{
+		"effects    runtimeports.ControlledOperationEffectCurrentReaderV2",
+		"prepared   runtimeports.ControlledOperationPreparedCurrentReaderV2",
+		"o.effects.InspectCurrentControlledOperationEffectV2(",
+		"o.prepared.InspectCurrentControlledOperationPreparedV2(ctx, source.Prepared)",
+		"func (o *WorkspaceReadCommandOwnerV2) inspectWorkspaceReadPublishedCommandCurrentV2(",
+	} {
+		if strings.Count(publisherBody, required) != 1 {
+			t.Errorf("Command publisher read-only/nominal requirement %q is missing or duplicated", required)
+		}
+	}
+
+	currentV2Body := mustReadProductionFile(t, filepath.Join(root, "runtimeadapter", "workspace_read_current_v2.go"))
+	for _, required := range []string{
+		"type workspaceReadPublishedCurrentProjectionReaderV2 interface {",
+		"workspaceReadPublishedCurrentV2() bool",
+		"physicalQualified: physicalQualified",
+	} {
+		if strings.Count(currentV2Body, required) != 1 {
+			t.Errorf("Rust current V2 private promotion gate %q is missing or duplicated", required)
+		}
+	}
+	serverBody := mustReadProductionFile(t, filepath.Join(root, "dataplaneadapter", "current_server.go"))
+	for _, required := range []string{
+		"WorkspaceReadCurrentV2 workspaceReadCurrentPhysicalReaderV2",
+		"!s.WorkspaceReadCurrentV2.PhysicalQualifiedV2()",
+	} {
+		if strings.Count(serverBody, required) != 1 {
+			t.Errorf("CurrentServer physical-qualified V2 gate %q is missing or duplicated", required)
+		}
+	}
+	clientBody := mustReadProductionFile(t, filepath.Join(root, "dataplaneadapter", "client.go"))
+	if strings.Count(clientBody, `request.Payload.ProviderKind == "workspace_read" || request.EffectKind == "praxis.sandbox/workspace-read"`) != 1 {
+		t.Error("public Data Plane Client.Dispatch does not fail closed for workspace.read")
+	}
+	privateActualPointBody := mustReadProductionFile(t, filepath.Join(root, "kernel", "workspace_read_actual_point_v2.go"))
+	for _, forbidden := range []string{
+		"type WorkspaceReadActualPointAdapter", "func NewWorkspaceReadActualPointAdapter",
+		".Client.Dispatch(ctx, request)", ".client.Dispatch(ctx, request)",
+	} {
+		if strings.Contains(privateActualPointBody, forbidden) {
+			t.Errorf("private workspace.read actual point regained public/raw dispatch surface %q", forbidden)
+		}
+	}
+	for _, forbidden := range []string{
+		"ProviderExecutor", "ProviderTransport", "PhysicalExecutor", "ActualPoint",
+		"o.effects.Create", "o.effects.Apply", "o.effects.Commit", "o.effects.Reserve", "o.effects.Enforce",
+		"o.prepared.Create", "o.prepared.Apply", "o.prepared.Commit", "o.prepared.Reserve", "o.prepared.Execute",
+	} {
+		if strings.Contains(publisherBody, forbidden) {
+			t.Errorf("Command publisher gained Provider/physical/Runtime write surface %q", forbidden)
+		}
+	}
+}
+
+func mustReadProductionFile(t *testing.T, path string) string {
+	t.Helper()
+	payload, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return string(payload)
 }
