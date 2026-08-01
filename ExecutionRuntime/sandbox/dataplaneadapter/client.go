@@ -31,6 +31,9 @@ type DataPlaneRequestV1 struct {
 }
 
 func (c Client) Dispatch(ctx context.Context, request DispatchRequestV1) (DispatchResponseV1, error) {
+	if request.Payload.ProviderKind == "workspace_read" || request.EffectKind == "praxis.sandbox/workspace-read" {
+		return DispatchResponseV1{}, errors.New("workspace.read dispatch is available only through the Sandbox Kernel qualified physical boundary")
+	}
 	return c.call(ctx, DataPlaneDispatchV1, request)
 }
 
@@ -38,6 +41,49 @@ func (c Client) Dispatch(ctx context.Context, request DispatchRequestV1) (Dispat
 // durable journal. The Data Plane does not call a Provider for this method.
 func (c Client) Inspect(ctx context.Context, request DispatchRequestV1) (DispatchResponseV1, error) {
 	return c.call(ctx, DataPlaneInspectV1, request)
+}
+
+// InspectWorkspaceReadJournalV2 performs an exact historical lookup. It sends
+// no dispatch operation and cannot reach a Provider in the Rust Data Plane.
+func (c Client) InspectWorkspaceReadJournalV2(ctx context.Context, lookup WorkspaceReadPhysicalJournalLookupV2) (WorkspaceReadJournalInspectResponseV2, error) {
+	if err := lookup.Validate(); err != nil {
+		return WorkspaceReadJournalInspectResponseV2{}, err
+	}
+	connection, err := (&net.Dialer{}).DialContext(ctx, "unix", c.SocketPath)
+	if err != nil {
+		return WorkspaceReadJournalInspectResponseV2{}, err
+	}
+	defer connection.Close()
+	unix, ok := connection.(*net.UnixConn)
+	if !ok {
+		return WorkspaceReadJournalInspectResponseV2{}, errors.New("data plane connection is not Unix domain IPC")
+	}
+	if deadline, ok := ctx.Deadline(); ok {
+		if err := unix.SetDeadline(deadline); err != nil {
+			return WorkspaceReadJournalInspectResponseV2{}, err
+		}
+	}
+	if err := validatePeerUID(unix, c.AllowedUID); err != nil {
+		return WorkspaceReadJournalInspectResponseV2{}, err
+	}
+	request := WorkspaceReadJournalInspectRequestV2{
+		ContractVersion: WorkspaceReadJournalInspectContractVersionV2,
+		Lookup:          lookup,
+	}
+	if err := writeFrame(unix, request); err != nil {
+		return WorkspaceReadJournalInspectResponseV2{}, err
+	}
+	var response WorkspaceReadJournalInspectResponseV2
+	if err := readFrame(unix, &response); err != nil {
+		return WorkspaceReadJournalInspectResponseV2{}, err
+	}
+	if err := response.Validate(lookup); err != nil {
+		return WorkspaceReadJournalInspectResponseV2{}, err
+	}
+	if response.Error != nil {
+		return response, response.Error
+	}
+	return response, nil
 }
 
 func (c Client) call(ctx context.Context, operation DataPlaneOperationV1, request DispatchRequestV1) (DispatchResponseV1, error) {
@@ -139,11 +185,37 @@ func (r DispatchResponseV1) Validate(request DispatchRequestV1) error {
 	} else if r.ProviderAttempt != nil || r.ProviderObservation != nil || r.ProviderReceipt != nil || r.ObservationDigest != nil || r.ReceiptDigest != nil || r.Error == nil {
 		return errors.New("rejected data plane response presence is invalid")
 	}
+	if r.WorkspaceReadJournal != nil {
+		if request.Payload.ProviderKind != "workspace_read" || request.Phase != PhaseExecute || r.WorkspaceReadJournal.Validate(request) != nil {
+			return errors.New("workspace read journal evidence drifted from request")
+		}
+		if r.Accepted && r.WorkspaceReadJournal.State != "completed" {
+			return errors.New("accepted workspace read lacks completed journal evidence")
+		}
+	} else if request.Payload.ProviderKind == "workspace_read" && request.Phase == PhaseExecute && r.Accepted {
+		return errors.New("accepted workspace read response lacks journal evidence")
+	}
 	copy := r
 	copy.Digest = ""
 	digest, err := canonicalDigest("DispatchResponseV1", copy)
 	if err != nil || digest != r.Digest {
 		return errors.New("data plane response digest drifted")
+	}
+	return nil
+}
+
+func (r WorkspaceReadPhysicalJournalRefV2) Validate(request DispatchRequestV1) error {
+	if r.AttemptID != request.AttemptID || r.RequestDigest != request.Digest || r.PayloadDigest != request.PayloadDigest || r.Phase != string(request.Phase) || r.RecordedUnixNano <= 0 || !validDigest(r.RecordDigest) {
+		return errors.New("workspace read physical journal coordinates are invalid")
+	}
+	if r.State == "started" && r.Revision != 1 || r.State == "completed" && r.Revision != 2 || r.State != "started" && r.State != "completed" {
+		return errors.New("workspace read physical journal state is invalid")
+	}
+	copy := r
+	copy.RecordDigest = ""
+	digest, err := canonicalDigest("WorkspaceReadPhysicalJournalRefV2", copy)
+	if err != nil || digest != r.RecordDigest {
+		return errors.New("workspace read physical journal digest drifted")
 	}
 	return nil
 }

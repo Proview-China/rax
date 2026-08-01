@@ -102,6 +102,9 @@ func TestWorkspaceReadCommandCurrentSchemaV19MigrationRejectsCoreDriftWithoutRep
 		t.Fatal(err)
 	}
 	if _, err = store.db.ExecContext(ctx, `
+		DROP TABLE workspace_read_terminal_history_v2;
+		DROP TABLE workspace_read_execution_qualification_history_v2;
+		DROP TABLE workspace_read_post_actual_schema_v20;
 		DROP TABLE workspace_read_command_owner_current_pointer_v2;
 		DROP TABLE workspace_read_command_owner_current_history_v2;
 		DROP TABLE workspace_read_command_publication_v2;
@@ -142,6 +145,9 @@ func TestWorkspaceReadCommandCurrentSchemaV19MigratesRealV13Namespace(t *testing
 	// retains the real legacy tables while avoiding a hand-written partial
 	// fixture that could accidentally bless an invalid migration.
 	if _, err = store.db.ExecContext(ctx, `
+		DROP TABLE workspace_read_terminal_history_v2;
+		DROP TABLE workspace_read_execution_qualification_history_v2;
+		DROP TABLE workspace_read_post_actual_schema_v20;
 		DROP TABLE workspace_read_observation;
 		DROP TABLE workspace_read_recovery_evidence;
 		DROP TABLE workspace_read_attempt_owner_incarnation;

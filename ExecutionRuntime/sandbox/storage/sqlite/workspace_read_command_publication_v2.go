@@ -23,6 +23,18 @@ func (s *Store) ApplyWorkspaceReadCommandPublicationV2(
 		return contract.WorkspaceReadCommandOwnerCurrentV2{}, false, ports.ErrConflict
 	}
 	for attempt := 0; ; attempt++ {
+		// Once an initial winner is visible, late contenders must converge by
+		// read-only exact closure inspection instead of repeatedly joining the
+		// write-lock queue until their short current window expires. This path
+		// never manufactures a winner: it validates the complete stored triple
+		// against the caller's immutable Command/Publication closure.
+		if winner, found, inspectErr := s.inspectInitialWorkspaceReadPublicationWinnerV2(ctx, capability); inspectErr != nil {
+			if errors.Is(inspectErr, ports.ErrConflict) {
+				return contract.WorkspaceReadCommandOwnerCurrentV2{}, false, inspectErr
+			}
+		} else if found {
+			return winner, false, nil
+		}
 		current, created, err := s.applyWorkspaceReadCommandPublicationOnceV2(ctx, capability)
 		if err == nil {
 			return current, created, nil
@@ -47,6 +59,37 @@ func (s *Store) ApplyWorkspaceReadCommandPublicationV2(
 		case <-timer.C:
 		}
 	}
+}
+
+func (s *Store) inspectInitialWorkspaceReadPublicationWinnerV2(
+	ctx context.Context,
+	capability ownerworkspaceread.AuthorizedCommandPublicationV2,
+) (contract.WorkspaceReadCommandOwnerCurrentV2, bool, error) {
+	now := s.clock()
+	if now.IsZero() {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, false, ports.ErrConflict
+	}
+	mutation, command, publication, _, _, err := capability.Open(now)
+	if err != nil || mutation != ownerworkspaceread.CommandPublicationInitialV2 {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, false, err
+	}
+	storedCommand, storedPublication, current, err := s.InspectStoredWorkspaceReadCommandTripleV2(ctx, command.Meta.Ref())
+	if errors.Is(err, ports.ErrNotFound) {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, false, nil
+	}
+	if err != nil {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, false, fmt.Errorf("inspect initial workspace read publication winner: %w", err)
+	}
+	if !sameWorkspaceReadCommandStableBodyV2(storedCommand, command) {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, false, fmt.Errorf("%w: initial Command stable body drifted", ports.ErrConflict)
+	}
+	if !sameWorkspaceReadCommandPublicationStableBodyV2(storedPublication, publication) {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, false, fmt.Errorf("%w: initial Publication stable body drifted", ports.ErrConflict)
+	}
+	if err = current.ValidateCurrent(now); err != nil {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, false, fmt.Errorf("%w: initial winner is not current: %v", ports.ErrConflict, err)
+	}
+	return current, true, nil
 }
 
 func (s *Store) applyWorkspaceReadCommandPublicationOnceV2(
@@ -780,7 +823,12 @@ func (s *Store) InspectStoredWorkspaceReadCommandOwnerCurrentByCommandV2(
 	if s == nil || s.db == nil || ctx == nil {
 		return contract.WorkspaceReadCommandOwnerCurrentV2{}, ports.ErrConflict
 	}
-	return inspectStoredWorkspaceReadCommandOwnerCurrentByCommandTxV2(ctx, s.db, command)
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return contract.WorkspaceReadCommandOwnerCurrentV2{}, workspaceReadCommandPublicationStorageErrorV2(err)
+	}
+	defer tx.Rollback()
+	return inspectStoredWorkspaceReadCommandOwnerCurrentByCommandTxV2(ctx, tx, command)
 }
 
 func inspectStoredWorkspaceReadCommandOwnerCurrentByCommandTxV2(
@@ -854,15 +902,23 @@ func (s *Store) InspectStoredWorkspaceReadCommandTripleV2(
 	contract.WorkspaceReadCommandOwnerCurrentV2,
 	error,
 ) {
-	current, err := s.InspectStoredWorkspaceReadCommandOwnerCurrentByCommandV2(ctx, command)
+	if s == nil || s.db == nil || ctx == nil {
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandPublicationV2{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, ports.ErrConflict
+	}
+	tx, err := s.db.BeginTx(ctx, &sql.TxOptions{ReadOnly: true})
+	if err != nil {
+		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandPublicationV2{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, workspaceReadCommandPublicationStorageErrorV2(err)
+	}
+	defer tx.Rollback()
+	current, err := inspectStoredWorkspaceReadCommandOwnerCurrentByCommandTxV2(ctx, tx, command)
 	if err != nil {
 		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandPublicationV2{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, err
 	}
-	storedCommand, err := s.InspectStoredWorkspaceReadCommandExactV1(ctx, current.Command)
+	storedCommand, err := inspectWorkspaceReadCommandExactTxV1(ctx, tx, current.Command)
 	if err != nil {
 		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandPublicationV2{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, referencedWorkspaceReadCommandStorageErrorV2(err)
 	}
-	publication, err := s.InspectStoredWorkspaceReadCommandPublicationExactV2(ctx, current.Publication)
+	publication, err := inspectStoredWorkspaceReadCommandPublicationExactTxV2(ctx, tx, current.Publication)
 	if err != nil {
 		return contract.WorkspaceReadCommandV1{}, contract.WorkspaceReadCommandPublicationV2{}, contract.WorkspaceReadCommandOwnerCurrentV2{}, referencedWorkspaceReadCommandStorageErrorV2(err)
 	}

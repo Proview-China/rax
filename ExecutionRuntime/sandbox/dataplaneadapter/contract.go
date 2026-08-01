@@ -14,8 +14,9 @@ import (
 )
 
 const (
-	ContractVersionV1 = "praxis.sandbox/data-plane-ipc/v1"
-	maxFrameBytes     = 4 * 1024 * 1024
+	ContractVersionV1                            = "praxis.sandbox/data-plane-ipc/v1"
+	WorkspaceReadJournalInspectContractVersionV2 = "praxis.sandbox/workspace-read-journal-inspect/v2"
+	maxFrameBytes                                = 4 * 1024 * 1024
 )
 
 type EnforcementPhaseV1 string
@@ -246,19 +247,153 @@ type ClosedError struct {
 func (e ClosedError) Error() string { return e.Reason + ": " + e.Message }
 
 type DispatchResponseV1 struct {
-	ContractVersion     string                 `json:"contract_version"`
-	RequestID           string                 `json:"request_id"`
-	RequestDigest       string                 `json:"request_digest"`
-	Accepted            bool                   `json:"accepted"`
-	ProviderAttempt     *ExactRefV1            `json:"provider_attempt"`
-	ProviderObservation *ProviderObservationV1 `json:"provider_observation"`
-	ProviderReceipt     *ProviderReceiptV1     `json:"provider_receipt"`
-	ObservationDigest   *string                `json:"observation_digest"`
-	ReceiptDigest       *string                `json:"receipt_digest"`
-	CheckedUnixNano     int64                  `json:"checked_unix_nano"`
-	ExpiresUnixNano     int64                  `json:"expires_unix_nano"`
-	Error               *ClosedError           `json:"error"`
-	Digest              string                 `json:"digest"`
+	ContractVersion      string                             `json:"contract_version"`
+	RequestID            string                             `json:"request_id"`
+	RequestDigest        string                             `json:"request_digest"`
+	Accepted             bool                               `json:"accepted"`
+	ProviderAttempt      *ExactRefV1                        `json:"provider_attempt"`
+	ProviderObservation  *ProviderObservationV1             `json:"provider_observation"`
+	ProviderReceipt      *ProviderReceiptV1                 `json:"provider_receipt"`
+	ObservationDigest    *string                            `json:"observation_digest"`
+	ReceiptDigest        *string                            `json:"receipt_digest"`
+	WorkspaceReadJournal *WorkspaceReadPhysicalJournalRefV2 `json:"workspace_read_journal,omitempty"`
+	CheckedUnixNano      int64                              `json:"checked_unix_nano"`
+	ExpiresUnixNano      int64                              `json:"expires_unix_nano"`
+	Error                *ClosedError                       `json:"error"`
+	Digest               string                             `json:"digest"`
+}
+
+// WorkspaceReadPhysicalJournalRefV2 is the Sandbox-internal IPC projection of
+// one exact append-only Rust journal record. It carries no content and grants
+// no execution authority.
+type WorkspaceReadPhysicalJournalRefV2 struct {
+	AttemptID        string `json:"attempt_id"`
+	RequestDigest    string `json:"request_digest"`
+	PayloadDigest    string `json:"payload_digest"`
+	Phase            string `json:"phase"`
+	State            string `json:"state"`
+	Revision         uint64 `json:"revision"`
+	RecordedUnixNano int64  `json:"recorded_unix_nano"`
+	RecordDigest     string `json:"record_digest"`
+}
+
+type WorkspaceReadPhysicalJournalLookupV2 struct {
+	AttemptID     string `json:"attempt_id"`
+	RequestDigest string `json:"request_digest"`
+	PayloadDigest string `json:"payload_digest"`
+	Phase         string `json:"phase"`
+	Digest        string `json:"digest"`
+}
+
+func (l WorkspaceReadPhysicalJournalLookupV2) Validate() error {
+	if strings.TrimSpace(l.AttemptID) == "" || !validDigest(l.RequestDigest) || !validDigest(l.PayloadDigest) || l.Phase != string(PhaseExecute) || !validDigest(l.Digest) {
+		return errors.New("workspace read journal lookup is incomplete")
+	}
+	copy := l
+	copy.Digest = ""
+	digest, err := canonicalDigest("WorkspaceReadPhysicalJournalLookupV2", copy)
+	if err != nil || digest != l.Digest {
+		return errors.New("workspace read journal lookup digest drifted")
+	}
+	return nil
+}
+
+func (r WorkspaceReadPhysicalJournalRefV2) ValidateLookup(lookup WorkspaceReadPhysicalJournalLookupV2) error {
+	if err := lookup.Validate(); err != nil {
+		return err
+	}
+	if r.AttemptID != lookup.AttemptID || r.RequestDigest != lookup.RequestDigest || r.PayloadDigest != lookup.PayloadDigest || r.Phase != lookup.Phase || r.RecordedUnixNano <= 0 || !validDigest(r.RecordDigest) {
+		return errors.New("workspace read journal evidence drifted from exact lookup")
+	}
+	if r.State == "started" && r.Revision != 1 || r.State == "completed" && r.Revision != 2 || r.State != "started" && r.State != "completed" {
+		return errors.New("workspace read journal state is invalid")
+	}
+	copy := r
+	copy.RecordDigest = ""
+	digest, err := canonicalDigest("WorkspaceReadPhysicalJournalRefV2", copy)
+	if err != nil || digest != r.RecordDigest {
+		return errors.New("workspace read journal digest drifted")
+	}
+	return nil
+}
+
+type ProviderResultV1 struct {
+	Attempt     ExactRefV1            `json:"attempt"`
+	Observation ProviderObservationV1 `json:"observation"`
+	Receipt     ProviderReceiptV1     `json:"receipt"`
+}
+
+type WorkspaceReadJournalInspectRequestV2 struct {
+	ContractVersion string                               `json:"contract_version"`
+	Lookup          WorkspaceReadPhysicalJournalLookupV2 `json:"lookup"`
+}
+
+type WorkspaceReadJournalInspectResponseV2 struct {
+	ContractVersion string                             `json:"contract_version"`
+	LookupDigest    string                             `json:"lookup_digest"`
+	Journal         *WorkspaceReadPhysicalJournalRefV2 `json:"journal"`
+	SealedRequest   *DispatchRequestV1                 `json:"sealed_request"`
+	ProviderResult  *ProviderResultV1                  `json:"provider_result"`
+	Error           *ClosedError                       `json:"error"`
+	CheckedUnixNano int64                              `json:"checked_unix_nano"`
+	Digest          string                             `json:"digest"`
+}
+
+func (r WorkspaceReadJournalInspectResponseV2) Validate(lookup WorkspaceReadPhysicalJournalLookupV2) error {
+	if err := lookup.Validate(); err != nil {
+		return err
+	}
+	if r.ContractVersion != WorkspaceReadJournalInspectContractVersionV2 || r.LookupDigest != lookup.Digest || r.CheckedUnixNano <= 0 || !validDigest(r.Digest) {
+		return errors.New("workspace read journal inspect response coordinates are invalid")
+	}
+	switch {
+	case r.Journal != nil && r.Error == nil:
+		if err := r.Journal.ValidateLookup(lookup); err != nil {
+			return err
+		}
+		if r.SealedRequest != nil {
+			if err := r.SealedRequest.Validate(); err != nil || r.SealedRequest.AttemptID != lookup.AttemptID || r.SealedRequest.Digest != lookup.RequestDigest || r.SealedRequest.PayloadDigest != lookup.PayloadDigest || r.SealedRequest.Phase != PhaseExecute || r.SealedRequest.Payload.ProviderKind != "workspace_read" {
+				return errors.New("workspace read sealed request drifted from journal lookup")
+			}
+		}
+		switch {
+		case r.Journal.State == "started" && r.ProviderResult == nil:
+		case r.Journal.State == "completed" && r.SealedRequest == nil && r.ProviderResult == nil:
+		case r.Journal.State == "completed" && r.SealedRequest != nil && r.ProviderResult != nil:
+			if err := validateHistoricalProviderResultV1(*r.ProviderResult, *r.SealedRequest, *r.Journal); err != nil {
+				return err
+			}
+		default:
+			return errors.New("workspace read journal inspect result presence is invalid")
+		}
+	case r.Journal == nil && r.SealedRequest == nil && r.ProviderResult == nil && r.Error != nil:
+	default:
+		return errors.New("workspace read journal inspect response presence is invalid")
+	}
+	copy := r
+	copy.Digest = ""
+	digest, err := canonicalDigest("WorkspaceReadJournalInspectResponseV2", copy)
+	if err != nil || digest != r.Digest {
+		return errors.New("workspace read journal inspect response digest drifted")
+	}
+	return nil
+}
+
+func validateHistoricalProviderResultV1(result ProviderResultV1, request DispatchRequestV1, journal WorkspaceReadPhysicalJournalRefV2) error {
+	response := DispatchResponseV1{
+		ContractVersion: ContractVersionV1,
+		RequestID:       request.RequestID, RequestDigest: request.Digest, Accepted: true,
+		ProviderAttempt: &result.Attempt, ProviderObservation: &result.Observation, ProviderReceipt: &result.Receipt,
+		ObservationDigest: &result.Observation.Digest, ReceiptDigest: &result.Receipt.Digest,
+		WorkspaceReadJournal: &journal, CheckedUnixNano: result.Receipt.RecordedUnixNano,
+		ExpiresUnixNano: result.Receipt.ExpiresUnixNano,
+	}
+	digest, err := canonicalDigest("DispatchResponseV1", response)
+	if err != nil {
+		return err
+	}
+	response.Digest = digest
+	return response.Validate(request)
 }
 
 type ProviderObservationV1 struct {

@@ -7,6 +7,8 @@ use sha2::{Digest as _, Sha256};
 use crate::error::{ClosedError, ClosedReason, EffectBoundary, Result};
 
 pub const CONTRACT_VERSION_V1: &str = "praxis.sandbox/data-plane-ipc/v1";
+pub const WORKSPACE_READ_JOURNAL_INSPECT_CONTRACT_VERSION_V2: &str =
+    "praxis.sandbox/workspace-read-journal-inspect/v2";
 pub const MAX_FRAME_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1086,6 +1088,8 @@ pub struct DispatchResponseV1 {
     pub provider_receipt: Option<crate::provider::ProviderReceipt>,
     pub observation_digest: Option<String>,
     pub receipt_digest: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workspace_read_journal: Option<crate::journal::WorkspaceReadPhysicalJournalRefV2>,
     pub checked_unix_nano: i64,
     pub expires_unix_nano: i64,
     pub error: Option<ClosedError>,
@@ -1108,6 +1112,7 @@ impl DispatchResponseV1 {
             provider_receipt: Some(result.receipt.clone()),
             observation_digest: Some(result.observation.digest.clone()),
             receipt_digest: Some(result.receipt.digest.clone()),
+            workspace_read_journal: None,
             checked_unix_nano: now_unix_nano(),
             expires_unix_nano: result.receipt.expires_unix_nano,
             error: None,
@@ -1128,6 +1133,7 @@ impl DispatchResponseV1 {
             provider_receipt: None,
             observation_digest: None,
             receipt_digest: None,
+            workspace_read_journal: None,
             checked_unix_nano: now,
             expires_unix_nano: request.requested_not_after_unix_nano.max(now),
             error: Some(error),
@@ -1142,11 +1148,219 @@ impl DispatchResponseV1 {
         canonical_digest("DispatchResponseV1", &canonical)
     }
 
+    pub fn historical_success(
+        request: &DispatchRequestV1,
+        result: &crate::provider::ProviderResult,
+        journal: crate::journal::WorkspaceReadPhysicalJournalRefV2,
+    ) -> Result<Self> {
+        result.validate(request, result.receipt.recorded_unix_nano)?;
+        journal.validate(request)?;
+        if journal.state != "completed" {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidContract,
+                "historical success requires a completed journal record",
+            ));
+        }
+        Self {
+            contract_version: CONTRACT_VERSION_V1.to_owned(),
+            request_id: request.request_id.clone(),
+            request_digest: request.digest.clone(),
+            accepted: true,
+            provider_attempt: Some(result.attempt.clone()),
+            provider_observation: Some(result.observation.clone()),
+            provider_receipt: Some(result.receipt.clone()),
+            observation_digest: Some(result.observation.digest.clone()),
+            receipt_digest: Some(result.receipt.digest.clone()),
+            workspace_read_journal: Some(journal),
+            checked_unix_nano: result.receipt.recorded_unix_nano,
+            expires_unix_nano: result.receipt.expires_unix_nano,
+            error: None,
+            digest: String::new(),
+        }
+        .seal()
+    }
+
+    pub fn with_workspace_read_journal(
+        mut self,
+        request: &DispatchRequestV1,
+        journal: crate::journal::WorkspaceReadPhysicalJournalRefV2,
+    ) -> Result<Self> {
+        journal.validate(request)?;
+        self.workspace_read_journal = Some(journal);
+        self.seal()
+    }
+
     pub fn seal(mut self) -> Result<Self> {
         self.digest.clear();
         self.digest = self.calculate_digest()?;
         Ok(self)
     }
+}
+
+/// Historical, Sandbox-internal journal lookup. It carries no mutable Runtime
+/// or Sandbox current and can never enter a Provider.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceReadJournalInspectRequestV2 {
+    pub contract_version: String,
+    pub lookup: crate::journal::WorkspaceReadPhysicalJournalLookupV2,
+}
+
+impl WorkspaceReadJournalInspectRequestV2 {
+    pub fn validate(&self) -> Result<()> {
+        if self.contract_version != WORKSPACE_READ_JOURNAL_INSPECT_CONTRACT_VERSION_V2 {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidContract,
+                "workspace read journal inspect contract version is invalid",
+            ));
+        }
+        self.lookup.validate()
+    }
+}
+
+/// The sealed request body is returned only when the new journal format stored
+/// it. A completed legacy row without that body is evidence-only and cannot be
+/// materialized into an Observed terminal.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorkspaceReadJournalInspectResponseV2 {
+    pub contract_version: String,
+    pub lookup_digest: String,
+    pub journal: Option<crate::journal::WorkspaceReadPhysicalJournalRefV2>,
+    pub sealed_request: Option<DispatchRequestV1>,
+    pub provider_result: Option<crate::provider::ProviderResult>,
+    pub error: Option<ClosedError>,
+    pub checked_unix_nano: i64,
+    pub digest: String,
+}
+
+impl WorkspaceReadJournalInspectResponseV2 {
+    pub fn success(
+        request: &WorkspaceReadJournalInspectRequestV2,
+        inspection: crate::journal::WorkspaceReadPhysicalJournalInspectionV2,
+    ) -> Result<Self> {
+        request.validate()?;
+        let response = Self {
+            contract_version: WORKSPACE_READ_JOURNAL_INSPECT_CONTRACT_VERSION_V2.to_owned(),
+            lookup_digest: request.lookup.digest.clone(),
+            journal: Some(inspection.journal),
+            sealed_request: inspection.request,
+            provider_result: inspection.result,
+            error: None,
+            checked_unix_nano: now_unix_nano(),
+            digest: String::new(),
+        };
+        response.seal(&request.lookup)
+    }
+
+    pub fn failure(
+        request: &WorkspaceReadJournalInspectRequestV2,
+        error: ClosedError,
+    ) -> Result<Self> {
+        request.validate()?;
+        Self {
+            contract_version: WORKSPACE_READ_JOURNAL_INSPECT_CONTRACT_VERSION_V2.to_owned(),
+            lookup_digest: request.lookup.digest.clone(),
+            journal: None,
+            sealed_request: None,
+            provider_result: None,
+            error: Some(error),
+            checked_unix_nano: now_unix_nano(),
+            digest: String::new(),
+        }
+        .seal(&request.lookup)
+    }
+
+    pub fn validate(
+        &self,
+        lookup: &crate::journal::WorkspaceReadPhysicalJournalLookupV2,
+    ) -> Result<()> {
+        lookup.validate()?;
+        if self.contract_version != WORKSPACE_READ_JOURNAL_INSPECT_CONTRACT_VERSION_V2
+            || self.lookup_digest != lookup.digest
+            || self.checked_unix_nano <= 0
+        {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidContract,
+                "workspace read journal inspect response coordinates are invalid",
+            ));
+        }
+        match (
+            &self.journal,
+            &self.sealed_request,
+            &self.provider_result,
+            &self.error,
+        ) {
+            (Some(journal), request, result, None) => {
+                journal.validate_lookup(lookup)?;
+                match (journal.state.as_str(), request, result) {
+                    ("started", Some(request), None) => {
+                        validate_workspace_read_journal_request_lookup_v2(request, lookup)?;
+                    }
+                    ("started" | "completed", None, None) => {}
+                    ("completed", Some(request), Some(result)) => {
+                        validate_workspace_read_journal_request_lookup_v2(request, lookup)?;
+                        result.validate(request, result.receipt.recorded_unix_nano)?;
+                    }
+                    _ => {
+                        return Err(ClosedError::new(
+                            ClosedReason::InvalidContract,
+                            "workspace read journal inspect result presence is invalid",
+                        ));
+                    }
+                }
+            }
+            (None, None, None, Some(_)) => {}
+            _ => {
+                return Err(ClosedError::new(
+                    ClosedReason::InvalidContract,
+                    "workspace read journal inspect response presence is invalid",
+                ));
+            }
+        }
+        if self.digest != self.calculate_digest()? {
+            return Err(ClosedError::new(
+                ClosedReason::InvalidDigest,
+                "workspace read journal inspect response digest drifted",
+            ));
+        }
+        Ok(())
+    }
+
+    fn calculate_digest(&self) -> Result<String> {
+        let mut canonical = self.clone();
+        canonical.digest.clear();
+        canonical_digest("WorkspaceReadJournalInspectResponseV2", &canonical)
+    }
+
+    fn seal(
+        mut self,
+        lookup: &crate::journal::WorkspaceReadPhysicalJournalLookupV2,
+    ) -> Result<Self> {
+        self.digest.clear();
+        self.digest = self.calculate_digest()?;
+        self.validate(lookup)?;
+        Ok(self)
+    }
+}
+
+fn validate_workspace_read_journal_request_lookup_v2(
+    request: &DispatchRequestV1,
+    lookup: &crate::journal::WorkspaceReadPhysicalJournalLookupV2,
+) -> Result<()> {
+    request.validate_shape()?;
+    if request.attempt_id != lookup.attempt_id
+        || request.digest != lookup.request_digest
+        || request.payload_digest != lookup.payload_digest
+        || request.phase != lookup.phase
+        || request.payload.kind() != ProviderKindV1::WorkspaceRead
+    {
+        return Err(ClosedError::new(
+            ClosedReason::BindingDrift,
+            "workspace read sealed request drifted from journal lookup",
+        ));
+    }
+    Ok(())
 }
 
 pub fn canonical_digest<T: Serialize>(kind: &str, value: &T) -> Result<String> {

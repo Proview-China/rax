@@ -6,76 +6,30 @@ import (
 	"path"
 	"reflect"
 	"strings"
+	"sync"
 	"time"
 
 	runtimecore "github.com/Proview-China/rax/ExecutionRuntime/runtime/core"
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
+	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/dataplaneadapter"
 	ownerworkspaceread "github.com/Proview-China/rax/ExecutionRuntime/sandbox/internal/owner/workspaceread"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
 )
 
-// WorkspaceReadActualPointV1 is an internal Sandbox composition seam. It is
-// exported only so dataplaneadapter can implement it without becoming a public
-// Runtime port; callers still enter through ControlledOperationPhysicalExecutionPortV3.
-type WorkspaceReadActualPointV1 interface {
-	ReadWorkspaceFileV1(context.Context, WorkspaceReadActualPointRequestV1) (WorkspaceReadActualPointResultV1, error)
-}
-
-type WorkspaceReadActualPointBoundaryV1 string
+type WorkspaceReadActualPointRequestV1 = sandboxports.WorkspaceReadActualPointRequestV1
+type WorkspaceReadActualPointBoundaryV1 = sandboxports.WorkspaceReadActualPointBoundaryV1
+type WorkspaceReadActualPointErrorV1 = sandboxports.WorkspaceReadActualPointErrorV1
 
 const (
-	WorkspaceReadEffectNotStartedV1     WorkspaceReadActualPointBoundaryV1 = "effect_not_started"
-	WorkspaceReadEffectStartedUnknownV1 WorkspaceReadActualPointBoundaryV1 = "effect_started_unknown"
+	WorkspaceReadEffectNotStartedV1     = sandboxports.WorkspaceReadEffectNotStartedV1
+	WorkspaceReadEffectStartedUnknownV1 = sandboxports.WorkspaceReadEffectStartedUnknownV1
 )
 
-type WorkspaceReadActualPointErrorV1 struct {
-	Boundary WorkspaceReadActualPointBoundaryV1
-	Cause    error
-}
-
-func (e *WorkspaceReadActualPointErrorV1) Error() string {
-	if e == nil || e.Cause == nil {
-		return "workspace read actual-point failure"
-	}
-	return e.Cause.Error()
-}
-func (e *WorkspaceReadActualPointErrorV1) Unwrap() error {
-	if e == nil {
-		return nil
-	}
-	return e.Cause
-}
-func NewWorkspaceReadActualPointErrorV1(boundary WorkspaceReadActualPointBoundaryV1, cause error) error {
-	if cause == nil {
-		cause = errors.New("workspace read actual-point failure")
-	}
-	return &WorkspaceReadActualPointErrorV1{Boundary: boundary, Cause: cause}
-}
-
-type WorkspaceReadActualPointRequestV1 struct {
-	Reservation       contract.WorkspaceReadReservationV1
-	Command           contract.WorkspaceReadCommandV1
-	Workspace         contract.WorkspaceView
-	RuntimeCurrent    runtimeports.CurrentOperationDispatchEnforcementV4
-	CurrentQuery      sandboxports.WorkspaceReadCurrentQueryV2
-	S1CheckedUnixNano int64
-	ExpiresUnixNano   int64
-}
-
-type WorkspaceReadActualPointResultV1 struct {
-	File              contract.Ref
-	Content           string
-	ContentDigest     string
-	StartByte         uint64
-	ReturnedBytes     uint64
-	TotalBytes        uint64
-	Complete          bool
-	ProviderS1Checked bool
-	ProviderS2Checked bool
-	PhysicalReadCount uint64
-	ProviderReceipt   contract.WorkspaceReadReceiptBindingV1
-}
+var (
+	NewWorkspaceReadActualPointErrorV1            = sandboxports.NewWorkspaceReadActualPointErrorV1
+	NewWorkspaceReadActualPointErrorWithJournalV2 = sandboxports.NewWorkspaceReadActualPointErrorWithJournalV2
+)
 
 // workspaceReadAuthorizedOwnerStoreV2 is an internal Sandbox composition seam.
 // It is intentionally absent from public ports: only the Sandbox kernel may
@@ -99,6 +53,10 @@ type workspaceReadPublishedCommandCurrentReaderV2 interface {
 		context.Context,
 		contract.Ref,
 	) (contract.WorkspaceReadCommandV1, contract.WorkspaceReadCommandOwnerCurrentV2, error)
+	InspectWorkspaceReadCommandPublicationExactV2(
+		context.Context,
+		contract.Ref,
+	) (contract.WorkspaceReadCommandPublicationV2, error)
 }
 
 type WorkspaceReadPhysicalExecutorV1 struct {
@@ -109,11 +67,22 @@ type WorkspaceReadPhysicalExecutorV1 struct {
 	enforcement     runtimeports.OperationDispatchEnforcementGovernancePortV4
 	store           sandboxports.WorkspaceReadOwnerStoreV1
 	authorizedStore workspaceReadAuthorizedOwnerStoreV2
-	actualPoint     WorkspaceReadActualPointV1
+	postActual      workspaceReadPostActualRepositoryV2
+	actualPoint     WorkspaceReadActualPointV2
 	clock           func() time.Time
+	dispatchMu      sync.Mutex
+	dispatchClaims  map[string]struct{}
 }
 
-func NewWorkspaceReadPhysicalExecutorV1(commands workspaceReadPublishedCommandCurrentReaderV2, associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1, workspaces sandboxports.WorkspaceCurrentReaderV1, sandboxCurrent runtimeports.OperationDispatchSandboxCurrentReaderV4, enforcement runtimeports.OperationDispatchEnforcementGovernancePortV4, store sandboxports.WorkspaceReadOwnerStoreV1, actualPoint WorkspaceReadActualPointV1, clock func() time.Time) (*WorkspaceReadPhysicalExecutorV1, error) {
+func NewWorkspaceReadPhysicalExecutorV1(commands workspaceReadPublishedCommandCurrentReaderV2, associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1, workspaces sandboxports.WorkspaceCurrentReaderV1, sandboxCurrent runtimeports.OperationDispatchSandboxCurrentReaderV4, enforcement runtimeports.OperationDispatchEnforcementGovernancePortV4, store sandboxports.WorkspaceReadOwnerStoreV1, client dataplaneadapter.Client, clock func() time.Time) (*WorkspaceReadPhysicalExecutorV1, error) {
+	actualPoint, err := newWorkspaceReadActualPointAdapterV2(client)
+	if err != nil {
+		return nil, runtimecore.NewError(runtimecore.ErrorInvalidArgument, runtimecore.ReasonInvalidReference, "workspace read private Data Plane bridge is incomplete")
+	}
+	return newWorkspaceReadPhysicalExecutorV1(commands, associations, workspaces, sandboxCurrent, enforcement, store, actualPoint, clock)
+}
+
+func newWorkspaceReadPhysicalExecutorV1(commands workspaceReadPublishedCommandCurrentReaderV2, associations runtimeports.PreparedDomainCommandAssociationCurrentReaderV1, workspaces sandboxports.WorkspaceCurrentReaderV1, sandboxCurrent runtimeports.OperationDispatchSandboxCurrentReaderV4, enforcement runtimeports.OperationDispatchEnforcementGovernancePortV4, store sandboxports.WorkspaceReadOwnerStoreV1, actualPoint WorkspaceReadActualPointV1, clock func() time.Time) (*WorkspaceReadPhysicalExecutorV1, error) {
 	if nilLikeWorkspaceReadInspectionV2(commands) || associations == nil || workspaces == nil || sandboxCurrent == nil || enforcement == nil || store == nil || actualPoint == nil || clock == nil {
 		return nil, runtimecore.NewError(runtimecore.ErrorInvalidArgument, runtimecore.ReasonInvalidReference, "workspace read physical executor dependencies are incomplete")
 	}
@@ -121,7 +90,15 @@ func NewWorkspaceReadPhysicalExecutorV1(commands workspaceReadPublishedCommandCu
 	if !ok || nilLikeWorkspaceReadInspectionV2(authorizedStore) {
 		return nil, runtimecore.NewError(runtimecore.ErrorInvalidArgument, runtimecore.ReasonInvalidReference, "workspace read Runtime-attempt history store is incomplete")
 	}
-	return &WorkspaceReadPhysicalExecutorV1{commands: commands, associations: associations, workspaces: workspaces, sandboxCurrent: sandboxCurrent, enforcement: enforcement, store: store, authorizedStore: authorizedStore, actualPoint: actualPoint, clock: clock}, nil
+	postActual, ok := store.(workspaceReadPostActualRepositoryV2)
+	if !ok || nilLikeWorkspaceReadInspectionV2(postActual) {
+		return nil, runtimecore.NewError(runtimecore.ErrorInvalidArgument, runtimecore.ReasonInvalidReference, "workspace read post-actual Owner repository is incomplete")
+	}
+	actualPointV2, ok := actualPoint.(WorkspaceReadActualPointV2)
+	if !ok || nilLikeWorkspaceReadInspectionV2(actualPointV2) {
+		return nil, runtimecore.NewError(runtimecore.ErrorInvalidArgument, runtimecore.ReasonInvalidReference, "workspace read physical execution requires the V2 qualified actual-point adapter")
+	}
+	return &WorkspaceReadPhysicalExecutorV1{commands: commands, associations: associations, workspaces: workspaces, sandboxCurrent: sandboxCurrent, enforcement: enforcement, store: store, authorizedStore: authorizedStore, postActual: postActual, actualPoint: actualPointV2, clock: clock, dispatchClaims: make(map[string]struct{})}, nil
 }
 
 func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(ctx context.Context, authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3) (runtimeports.ControlledOperationProviderAdmissionReceiptRefV2, error) {
@@ -134,13 +111,72 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 	if string(authorization.DomainCommand.Kind) != contract.WorkspaceReadCommandKindV1 {
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, runtimecore.NewError(runtimecore.ErrorForbidden, runtimecore.ReasonUnknownGovernanceCategory, "workspace read executor accepts only exact workspace.read commands")
 	}
+	receipt, err := workspaceReadAdmissionReceiptV1(authorization.StableKeyDigest)
+	if err != nil {
+		return receipt, err
+	}
+
+	// Historical recovery is deliberately before every mutable current read.
+	// Once the Sandbox has durably bound this Runtime Attempt, current expiry or
+	// unavailability must not hide a crossed physical boundary or cause a reread.
+	var (
+		historicalQualification *contract.WorkspaceReadExecutionQualificationV2
+		historicalInspection    *WorkspaceReadActualPointInspectionV2
+	)
+	if binding, inspectErr := e.authorizedStore.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt); inspectErr == nil {
+		origin := binding.WorkspaceReadAttempt
+		if terminal, terminalErr := e.postActual.InspectWorkspaceReadTerminalByOriginV2(ctx, origin); terminalErr == nil {
+			return receipt, workspaceReadTerminalOutcomeErrorV2(terminal)
+		} else if !errors.Is(terminalErr, sandboxports.ErrNotFound) {
+			return receipt, terminalErr
+		}
+		qualification, qualificationErr := e.postActual.InspectWorkspaceReadExecutionQualificationByOriginV2(ctx, origin)
+		if errors.Is(qualificationErr, sandboxports.ErrNotFound) {
+			return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read reservation exists without a durable execution Qualification; physical dispatch is forbidden")
+		}
+		if qualificationErr != nil {
+			return receipt, errors.Join(qualificationErr, errors.New("workspace read historical Qualification lookup failed"))
+		}
+		historicalQualification = &qualification
+		inspection, journalErr := e.actualPoint.InspectWorkspaceReadJournalV2(ctx, qualification)
+		if journalErr == nil {
+			journal, evidenceErr := inspection.JournalEvidence.JournalV2()
+			if evidenceErr != nil || journal != inspection.Journal {
+				return receipt, sandboxports.ErrConflict
+			}
+			if journal.State == contract.WorkspaceReadPhysicalJournalStartedV2 || inspection.Result == nil {
+				class := contract.WorkspaceReadIndeterminateErrorActualPointUnknownV2
+				if journal.State == contract.WorkspaceReadPhysicalJournalCompletedV2 {
+					class = contract.WorkspaceReadIndeterminateErrorRecoveryUnknownV2
+				}
+				return receipt, e.persistWorkspaceReadIndeterminateV2(ctx, nil, qualification, inspection.JournalEvidence, class)
+			}
+			historicalInspection = &inspection
+		} else if !workspaceReadJournalAbsentV2(journalErr) {
+			return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read exact historical journal recovery is unavailable")
+		}
+	} else if !errors.Is(inspectErr, sandboxports.ErrNotFound) {
+		return receipt, inspectErr
+	}
 
 	association, command, commandCurrent, workspace, s1, err := e.readCurrentClosureV1(ctx, authorization)
 	if err != nil {
+		if historicalQualification != nil && historicalInspection != nil {
+			return receipt, e.persistWorkspaceReadIndeterminateV2(ctx, nil, *historicalQualification, historicalInspection.JournalEvidence, workspaceReadS2ErrorClassV2(err))
+		}
+		if historicalQualification != nil {
+			return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read post-actual recovery cannot re-establish current authority; physical dispatch is forbidden")
+		}
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
 	runtimeCurrent, err := e.readRuntimeCurrentV1(ctx, authorization, s1)
 	if err != nil {
+		if historicalQualification != nil && historicalInspection != nil {
+			return receipt, e.persistWorkspaceReadIndeterminateV2(ctx, nil, *historicalQualification, historicalInspection.JournalEvidence, workspaceReadS2ErrorClassV2(err))
+		}
+		if historicalQualification != nil {
+			return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read post-actual recovery cannot re-establish Runtime current; physical dispatch is forbidden")
+		}
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
 	if err = validateWorkspaceReadRuntimeLeaseV1(workspace.Lease, runtimeCurrent); err != nil {
@@ -160,10 +196,6 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 	requestDigest := command.Meta.Digest
 	payloadDigest := command.SourceToolPayloadDigest
 	factTime := time.Unix(0, association.CheckedUnixNano)
-	receipt, err := workspaceReadAdmissionReceiptV1(authorization.StableKeyDigest)
-	if err != nil {
-		return receipt, err
-	}
 	admissionBinding := contract.WorkspaceReadReceiptBindingV1{
 		ID: receipt.ID, Revision: uint64(receipt.Revision), Digest: string(receipt.Digest),
 		StableKeyDigest: string(receipt.StableKeyDigest), CheckedUnixNano: factTime.UnixNano(), ExpiresUnixNano: expiresNano,
@@ -239,7 +271,8 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 		case contract.WorkspaceReadObservedV1:
 			return receipt, nil
 		case contract.WorkspaceReadStartedV1, contract.WorkspaceReadUnknownV1:
-			return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read requires exact Inspect of the original attempt")
+			// Continue only into the historical Qualification/journal recovery
+			// path below. A replay never enters Prepare or physical dispatch.
 		case contract.WorkspaceReadFailedV1:
 			return receipt, runtimecore.NewError(runtimecore.ErrorPreconditionFailed, runtimecore.ReasonEffectStateConflict, "workspace read deterministically failed before its actual point: "+projection.Attempt.FailureDigest)
 		default:
@@ -252,7 +285,14 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 	if err != nil {
 		return runtimeports.ControlledOperationProviderAdmissionReceiptRefV2{}, err
 	}
-	currentQuery, err := workspaceReadCurrentQueryV2(authorization, association, command, commandCurrent, workspace, reservation, attempt, admissionBinding, runtimeCurrent, s1, expiresNano)
+	queryChecked, err := workspaceReadCurrentQueryWatermarkV2(
+		association, command, commandCurrent, workspace, reservation, attempt,
+		admissionBinding, runtimeCurrent, s1,
+	)
+	if err != nil {
+		return receipt, err
+	}
+	currentQuery, err := workspaceReadCurrentQueryV2(authorization, association, command, commandCurrent, workspace, reservation, attempt, admissionBinding, runtimeCurrent, queryChecked, expiresNano)
 	if err != nil {
 		failureDigest, digestErr := contract.Digest("workspace-read-failed", struct {
 			Stage string
@@ -267,14 +307,163 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 		return receipt, NewWorkspaceReadActualPointErrorV1(WorkspaceReadEffectNotStartedV1, err)
 	}
 
-	result, readErr := e.actualPoint.ReadWorkspaceFileV1(ctx, WorkspaceReadActualPointRequestV1{
+	publication, err := e.commands.InspectWorkspaceReadCommandPublicationExactV2(ctx, commandCurrent.Publication)
+	if err != nil || publication.ValidateShape() != nil || publication.Meta.Ref() != commandCurrent.Publication || publication.Command != command.Meta.Ref() {
+		if err == nil {
+			err = sandboxports.ErrConflict
+		}
+		failureDigest, digestErr := contract.Digest("workspace-read-failed", struct{ Cause string }{err.Error()})
+		if digestErr != nil {
+			return receipt, digestErr
+		}
+		if failErr := e.failWorkspaceReadAuthorizedV2(ctx, transitionAuthority, failureDigest); failErr != nil {
+			return receipt, failErr
+		}
+		return receipt, NewWorkspaceReadActualPointErrorV1(WorkspaceReadEffectNotStartedV1, err)
+	}
+	var replayQualification *contract.WorkspaceReadExecutionQualificationV2
+	if !created {
+		origin := workspaceReadAttemptRefV1(projection.Attempt)
+		if terminal, inspectErr := e.postActual.InspectWorkspaceReadTerminalByOriginV2(ctx, origin); inspectErr == nil {
+			return receipt, workspaceReadTerminalOutcomeErrorV2(terminal)
+		} else if !errors.Is(inspectErr, sandboxports.ErrNotFound) {
+			return receipt, inspectErr
+		}
+		qualification, inspectErr := e.postActual.InspectWorkspaceReadExecutionQualificationByOriginV2(ctx, origin)
+		if errors.Is(inspectErr, sandboxports.ErrNotFound) {
+			return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read reservation exists without a durable execution Qualification; physical dispatch is forbidden")
+		}
+		if inspectErr != nil {
+			return receipt, errors.Join(inspectErr, errors.New("workspace read replay Qualification lookup failed"))
+		}
+		if historicalQualification != nil && historicalInspection != nil {
+			if !reflect.DeepEqual(*historicalQualification, qualification) {
+				return receipt, sandboxports.ErrConflict
+			}
+			return receipt, e.recoverWorkspaceReadPostActualV2(ctx, authorization, association, command, commandCurrent, publication, workspace, reservation, attempt, admissionBinding, runtimeCurrent, currentQuery, transitionAuthority, qualification, *historicalInspection)
+		}
+		inspection, inspectErr := e.actualPoint.InspectWorkspaceReadJournalV2(ctx, qualification)
+		if inspectErr == nil {
+			return receipt, e.recoverWorkspaceReadPostActualV2(ctx, authorization, association, command, commandCurrent, publication, workspace, reservation, attempt, admissionBinding, runtimeCurrent, currentQuery, transitionAuthority, qualification, inspection)
+		}
+		if !workspaceReadJournalAbsentV2(inspectErr) {
+			return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read replay can only inspect the original Qualification journal")
+		}
+		fresh := e.clock()
+		if fresh.IsZero() || fresh.Before(s1) || !fresh.Before(time.Unix(0, qualification.ExpiresUnixNano)) {
+			return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read Qualification has no durable journal and is no longer eligible for physical dispatch")
+		}
+		replayQualification = &qualification
+	}
+	actualRequest := WorkspaceReadActualPointRequestV1{
 		Reservation: reservation, Command: command, Workspace: workspace,
 		RuntimeCurrent: runtimeCurrent, CurrentQuery: currentQuery,
-		S1CheckedUnixNano: s1.UnixNano(), ExpiresUnixNano: expiresNano,
+		S1CheckedUnixNano: queryChecked.UnixNano(), ExpiresUnixNano: expiresNano,
+	}
+	prepared, err := e.actualPoint.PrepareWorkspaceReadV2(ctx, actualRequest)
+	if err != nil {
+		failureDigest, digestErr := contract.Digest("workspace-read-failed", struct{ Cause string }{err.Error()})
+		if digestErr != nil {
+			return receipt, digestErr
+		}
+		if failErr := e.failWorkspaceReadAuthorizedV2(ctx, transitionAuthority, failureDigest); failErr != nil {
+			return receipt, failErr
+		}
+		return receipt, NewWorkspaceReadActualPointErrorV1(WorkspaceReadEffectNotStartedV1, err)
+	}
+	binding, err := authorizedStore.InspectWorkspaceReadAdmissionForRuntimeAttemptV2(ctx, authorization.Attempt)
+	if err != nil {
+		return receipt, err
+	}
+	preparedProof, err := ownerworkspaceread.AuthorizePreparedWorkspaceReadRequestProofV2(
+		prepared.ActualAttemptIDV2(), prepared.ActualRequestDigestV2(), prepared.ActualPayloadDigestV2(), prepared.ActualExpiresUnixNanoV2(),
+	)
+	if err != nil {
+		return receipt, err
+	}
+	leaseDigest, err := contract.WorkspaceReadRuntimeLeaseDigestV2(workspace.Lease)
+	if err != nil {
+		return receipt, err
+	}
+	runtimeAttemptDigest, err := contract.WorkspaceReadSourceRuntimeAttemptDigestV2(authorization.Attempt)
+	if err != nil {
+		return receipt, err
+	}
+	qualificationChecked := e.clock()
+	if qualificationChecked.IsZero() || qualificationChecked.Before(s1) || !qualificationChecked.Before(time.Unix(0, expiresNano)) {
+		return receipt, NewWorkspaceReadActualPointErrorV1(WorkspaceReadEffectNotStartedV1, sandboxports.ErrConflict)
+	}
+	qualificationExpires := minWorkspaceReadExpiryV1(expiresNano, prepared.ActualExpiresUnixNanoV2())
+	if replayQualification != nil {
+		qualificationChecked = time.Unix(0, replayQualification.S1CheckedUnixNano)
+		qualificationExpires = replayQualification.ExpiresUnixNano
+	}
+	qualification, err := contract.SealWorkspaceReadExecutionQualificationV2(contract.WorkspaceReadExecutionQualificationV2{
+		OriginAttempt: workspaceReadAttemptRefV1(projection.Attempt), Reservation: reservation.Meta.Ref(),
+		AdmissionReceipt: admissionBinding, RuntimeAdmissionReceipt: receipt,
+		AdmissionAttemptBindingDigest: binding.Digest, RuntimeAttempt: authorization.Attempt,
+		RuntimeAttemptDigest: runtimeAttemptDigest, AuthorizationDigest: authorization.AuthorizationDigest,
+		Association: association.Ref, Command: command.Meta.Ref(), CommandPublication: publication.Meta.Ref(),
+		CommandOwnerCurrent: commandCurrent.Meta.Ref(), WorkspaceView: workspace.Meta.Ref(), WorkspaceLeaseDigest: leaseDigest,
+		CurrentQueryDigest: currentQuery.Digest, ExpectedRuntimeCurrentDigest: runtimeCurrent.Digest,
+		ActualRequestDigest: prepared.ActualRequestDigestV2(), PayloadDigest: prepared.ActualPayloadDigestV2(),
+		S1CheckedUnixNano: qualificationChecked.UnixNano(), ExpiresUnixNano: qualificationExpires,
 	})
+	if err != nil {
+		return receipt, err
+	}
+	qualificationAuthority, err := ownerworkspaceread.AuthorizeExecutionQualificationV2(
+		qualification, binding, reservation, attempt, publication, commandCurrent, workspace, currentQuery, runtimeCurrent, preparedProof,
+	)
+	if err != nil {
+		return receipt, err
+	}
+	qualificationCreated := false
+	if replayQualification != nil {
+		if !reflect.DeepEqual(*replayQualification, qualification) {
+			return receipt, errors.Join(sandboxports.ErrConflict, errors.New("workspace read replay Qualification closure drifted"))
+		}
+		qualification = *replayQualification
+	} else {
+		qualification, qualificationCreated, err = e.postActual.EnsureAuthorizedExecutionQualificationV2(ctx, qualificationAuthority)
+		if err != nil {
+			return receipt, errors.Join(err, errors.New("workspace read Qualification persistence failed"))
+		}
+	}
+	if terminal, inspectErr := e.postActual.InspectWorkspaceReadTerminalByOriginV2(ctx, qualification.OriginAttempt); inspectErr == nil {
+		return receipt, workspaceReadTerminalOutcomeErrorV2(terminal)
+	} else if !errors.Is(inspectErr, sandboxports.ErrNotFound) {
+		return receipt, inspectErr
+	}
+	if !qualificationCreated {
+		inspection, inspectErr := e.actualPoint.InspectWorkspaceReadJournalV2(ctx, qualification)
+		if inspectErr == nil {
+			return receipt, e.recoverWorkspaceReadPostActualV2(ctx, authorization, association, command, commandCurrent, publication, workspace, reservation, attempt, admissionBinding, runtimeCurrent, currentQuery, transitionAuthority, qualification, inspection)
+		}
+		if !workspaceReadJournalAbsentV2(inspectErr) {
+			return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read exact journal recovery is unavailable")
+		}
+		fresh := e.clock()
+		if fresh.IsZero() || fresh.Before(qualificationChecked) || !fresh.Before(time.Unix(0, qualification.ExpiresUnixNano)) {
+			return receipt, runtimecore.NewError(runtimecore.ErrorPreconditionFailed, runtimecore.ReasonBindingExpired, "workspace read Qualification expired before the physical dispatch")
+		}
+	}
+	if !e.claimWorkspaceReadPhysicalDispatchV2(qualification.Ref) {
+		return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read Qualification already has an in-process physical dispatcher; inspect the original journal")
+	}
+	dispatchNow := e.clock()
+	if dispatchNow.IsZero() || dispatchNow.Before(qualificationChecked) || !dispatchNow.Before(time.Unix(0, qualification.ExpiresUnixNano)) {
+		return receipt, NewWorkspaceReadActualPointErrorV1(WorkspaceReadEffectNotStartedV1, runtimecore.NewError(runtimecore.ErrorPreconditionFailed, runtimecore.ReasonBindingExpired, "workspace read Qualification expired before the physical dispatch"))
+	}
+
+	result, readErr := e.actualPoint.DispatchPreparedWorkspaceReadV2(ctx, prepared)
 	if readErr != nil {
+		inspection, inspectErr := e.actualPoint.InspectWorkspaceReadJournalV2(ctx, qualification)
+		if inspectErr == nil {
+			return receipt, e.recoverWorkspaceReadPostActualV2(ctx, authorization, association, command, commandCurrent, publication, workspace, reservation, attempt, admissionBinding, runtimeCurrent, currentQuery, transitionAuthority, qualification, inspection)
+		}
 		var actualPointError *WorkspaceReadActualPointErrorV1
-		if errors.As(readErr, &actualPointError) && actualPointError.Boundary == WorkspaceReadEffectNotStartedV1 {
+		if errors.As(readErr, &actualPointError) && actualPointError.Boundary == WorkspaceReadEffectNotStartedV1 && workspaceReadJournalAbsentV2(inspectErr) {
 			failureDigest, digestErr := contract.Digest("workspace-read-failed", struct{ Cause string }{readErr.Error()})
 			if digestErr != nil {
 				return receipt, digestErr
@@ -284,50 +473,279 @@ func (e *WorkspaceReadPhysicalExecutorV1) ExecuteControlledOperationPhysicalV3(c
 			}
 			return receipt, readErr
 		}
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "actual-point", readErr)
+		return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read crossed or may have crossed its actual point; inspect the exact Qualification and journal")
+	}
+	inspection := WorkspaceReadActualPointInspectionV2{Journal: result.Journal, JournalEvidence: result.JournalEvidence, Result: &result}
+	return receipt, e.recoverWorkspaceReadPostActualV2(ctx, authorization, association, command, commandCurrent, publication, workspace, reservation, attempt, admissionBinding, runtimeCurrent, currentQuery, transitionAuthority, qualification, inspection)
+}
+
+func (e *WorkspaceReadPhysicalExecutorV1) claimWorkspaceReadPhysicalDispatchV2(ref contract.WorkspaceReadExecutionQualificationRefV2) bool {
+	if e == nil || ref.Validate() != nil {
+		return false
+	}
+	e.dispatchMu.Lock()
+	defer e.dispatchMu.Unlock()
+	if e.dispatchClaims == nil {
+		e.dispatchClaims = make(map[string]struct{})
+	}
+	key := ref.ID + "/" + ref.Digest
+	if _, exists := e.dispatchClaims[key]; exists {
+		return false
+	}
+	e.dispatchClaims[key] = struct{}{}
+	return true
+}
+
+func workspaceReadTerminalOutcomeErrorV2(terminal contract.WorkspaceReadTerminalFactV2) error {
+	if err := terminal.Validate(); err != nil {
+		return sandboxports.ErrConflict
+	}
+	switch terminal.Outcome {
+	case contract.WorkspaceReadTerminalObservedV2:
+		return nil
+	case contract.WorkspaceReadTerminalIndeterminateV2:
+		return runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read has a durable indeterminate post-actual terminal; inspect the original terminal")
+	default:
+		return sandboxports.ErrConflict
+	}
+}
+
+func workspaceReadJournalAbsentV2(err error) bool {
+	return errors.Is(err, ErrWorkspaceReadPhysicalJournalNotFoundV2)
+}
+
+func (e *WorkspaceReadPhysicalExecutorV1) recoverWorkspaceReadPostActualV2(
+	ctx context.Context,
+	authorization runtimeports.ControlledOperationPhysicalExecutionAuthorizationV3,
+	association runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1,
+	command contract.WorkspaceReadCommandV1,
+	commandCurrent contract.WorkspaceReadCommandOwnerCurrentV2,
+	publication contract.WorkspaceReadCommandPublicationV2,
+	workspace contract.WorkspaceView,
+	reservation contract.WorkspaceReadReservationV1,
+	attempt contract.WorkspaceReadAttemptV1,
+	admissionBinding contract.WorkspaceReadReceiptBindingV1,
+	runtimeCurrent runtimeports.CurrentOperationDispatchEnforcementV4,
+	currentQuery sandboxports.WorkspaceReadCurrentQueryV2,
+	transitionAuthority ownerworkspaceread.AuthorizedExecutionV2,
+	qualification contract.WorkspaceReadExecutionQualificationV2,
+	inspection WorkspaceReadActualPointInspectionV2,
+) error {
+	if err := qualification.Validate(); err != nil {
+		return sandboxports.ErrConflict
+	}
+	journal, err := inspection.JournalEvidence.JournalV2()
+	if err != nil || journal != inspection.Journal || journal.AttemptID != qualification.RuntimeAttempt.AttemptID || journal.RequestDigest != qualification.ActualRequestDigest || journal.PayloadDigest != qualification.PayloadDigest {
+		return sandboxports.ErrConflict
+	}
+	if terminal, inspectErr := e.postActual.InspectWorkspaceReadTerminalByOriginV2(ctx, qualification.OriginAttempt); inspectErr == nil {
+		return workspaceReadTerminalOutcomeErrorV2(terminal)
+	} else if !errors.Is(inspectErr, sandboxports.ErrNotFound) {
+		return inspectErr
+	}
+	if journal.State == contract.WorkspaceReadPhysicalJournalStartedV2 || inspection.Result == nil {
+		class := contract.WorkspaceReadIndeterminateErrorActualPointUnknownV2
+		if journal.State == contract.WorkspaceReadPhysicalJournalCompletedV2 {
+			class = contract.WorkspaceReadIndeterminateErrorRecoveryUnknownV2
+		}
+		return e.persistWorkspaceReadIndeterminateV2(ctx, &transitionAuthority, qualification, inspection.JournalEvidence, class)
 	}
 
-	// S2 is a full current re-read after Rust crossed the physical actual point.
-	_, commandS2, commandCurrentS2, workspaceS2, s2, err := e.readCurrentClosureV1(ctx, authorization)
-	if err != nil || !contract.SameRef(commandS2.Meta.Ref(), command.Meta.Ref()) || commandCurrentS2.Meta.Ref() != commandCurrent.Meta.Ref() || !contract.SameRef(workspaceS2.Meta.Ref(), workspace.Meta.Ref()) {
-		if err == nil {
-			err = errors.New("workspace read current closure drifted at S2")
+	result := *inspection.Result
+	s2Association, s2Command, s2CommandCurrent, s2Workspace, s2Now, s2Err := e.readCurrentClosureV1(ctx, authorization)
+	var s2Runtime runtimeports.CurrentOperationDispatchEnforcementV4
+	if s2Err == nil {
+		var runtimeErr error
+		s2Runtime, runtimeErr = e.readRuntimeCurrentV1(ctx, authorization, s2Now)
+		if runtimeErr != nil {
+			s2Err = runtimeErr
+		} else {
+			s2Publication, publicationErr := e.commands.InspectWorkspaceReadCommandPublicationExactV2(ctx, qualification.CommandPublication)
+			leaseDigest, leaseErr := contract.WorkspaceReadRuntimeLeaseDigestV2(s2Workspace.Lease)
+			s2Query, queryErr := workspaceReadCurrentQueryV2(authorization, s2Association, s2Command, s2CommandCurrent, s2Workspace, reservation, attempt, admissionBinding, s2Runtime, time.Unix(0, currentQuery.Base.CheckedUnixNano), currentQuery.Base.ExpiresUnixNano)
+			if publicationErr != nil {
+				s2Err = publicationErr
+			} else if queryErr != nil {
+				s2Err = queryErr
+			} else if currentErr := s2Query.ValidateCurrent(s2Now); currentErr != nil {
+				s2Err = currentErr
+			} else if leaseErr != nil {
+				s2Err = errors.New("workspace read S2 lease digest failed")
+			} else if !reflect.DeepEqual(s2Association, association) {
+				s2Err = errors.New("workspace read S2 association drifted")
+			} else if !reflect.DeepEqual(s2Command, command) {
+				s2Err = errors.New("workspace read S2 command drifted")
+			} else if !reflect.DeepEqual(s2CommandCurrent, commandCurrent) {
+				s2Err = errors.New("workspace read S2 command current drifted")
+			} else if !reflect.DeepEqual(s2Publication, publication) {
+				s2Err = errors.New("workspace read S2 publication drifted")
+			} else if !reflect.DeepEqual(s2Workspace, workspace) {
+				s2Err = errors.New("workspace read S2 workspace drifted")
+			} else if !reflect.DeepEqual(s2Runtime, runtimeCurrent) {
+				s2Err = errors.New("workspace read S2 Runtime current drifted")
+			} else if !reflect.DeepEqual(s2Query, currentQuery) {
+				s2Err = errors.New("workspace read S2 current query drifted")
+			} else if s2Runtime.Digest != qualification.ExpectedRuntimeCurrentDigest || leaseDigest != qualification.WorkspaceLeaseDigest || s2Query.Digest != qualification.CurrentQueryDigest {
+				s2Err = errors.New("workspace read S2 qualification digest closure drifted")
+			} else if !s2Now.Before(time.Unix(0, qualification.ExpiresUnixNano)) {
+				s2Err = runtimecore.NewError(runtimecore.ErrorPreconditionFailed, runtimecore.ReasonBindingExpired, "workspace read Qualification expired before outcome S2")
+			} else if validateErr := validateWorkspaceReadRuntimeLeaseV1(s2Workspace.Lease, s2Runtime); validateErr != nil {
+				s2Err = validateErr
+			} else if validateErr := validateWorkspaceReadActualPointResultV1(result, reservation, command, workspace, s2Now); validateErr != nil {
+				s2Err = validateErr
+			}
 		}
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "s2-current", err)
 	}
-	runtimeCurrentS2, err := e.readRuntimeCurrentV1(ctx, authorization, s2)
-	if err != nil || runtimeCurrentS2.Digest != runtimeCurrent.Digest || runtimeCurrentS2.ExpiresUnixNano != runtimeCurrent.ExpiresUnixNano {
-		if err == nil {
-			err = runtimecore.NewError(runtimecore.ErrorConflict, runtimecore.ReasonBindingDrift, "workspace read Runtime current drifted at S2")
-		}
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "s2-runtime-current", err)
+	if s2Err != nil {
+		return e.persistWorkspaceReadIndeterminateV2(ctx, &transitionAuthority, qualification, inspection.JournalEvidence, workspaceReadS2ErrorClassV2(s2Err))
 	}
-	if err = validateWorkspaceReadRuntimeLeaseV1(workspaceS2.Lease, runtimeCurrentS2); err != nil {
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "s2-workspace-lease", err)
+	if s2Now.UnixNano() < journal.RecordedUnixNano || s2Now.UnixNano() < result.ProviderReceipt.CheckedUnixNano {
+		return e.persistWorkspaceReadIndeterminateV2(ctx, &transitionAuthority, qualification, inspection.JournalEvidence, contract.WorkspaceReadIndeterminateErrorS2DriftedV2)
 	}
-	if err = validateWorkspaceReadActualPointResultV1(result, reservation, command, workspace, s2); err != nil {
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "provider-result", err)
+	observationExpiry := minWorkspaceReadExpiryV1(qualification.ExpiresUnixNano, attempt.Meta.ExpiresUnixNano, reservation.Meta.ExpiresUnixNano, admissionBinding.ExpiresUnixNano, result.ProviderReceipt.ExpiresUnixNano)
+	if !s2Now.Before(time.Unix(0, observationExpiry)) {
+		return e.persistWorkspaceReadIndeterminateV2(ctx, &transitionAuthority, qualification, inspection.JournalEvidence, contract.WorkspaceReadIndeterminateErrorS2ExpiredV2)
 	}
-
-	observationExpiresNano := minWorkspaceReadExpiryV1(expiresNano, runtimeCurrentS2.ExpiresUnixNano, reservation.Meta.ExpiresUnixNano, attempt.Meta.ExpiresUnixNano, admissionBinding.ExpiresUnixNano, result.ProviderReceipt.ExpiresUnixNano)
 	observation, err := contract.SealWorkspaceReadObservationV1(contract.WorkspaceReadObservationV1{
 		Reservation: reservation.Meta.Ref(), Command: command.Meta.Ref(), WorkspaceView: workspace.Meta.Ref(), File: result.File,
-		RelativePath: command.RelativePath, StartByte: result.StartByte, ReturnedBytes: result.ReturnedBytes, TotalBytes: result.TotalBytes,
-		Complete: result.Complete, Content: result.Content, ContentDigest: result.ContentDigest,
-		S1CheckedUnixNano: s1.UnixNano(), S2CheckedUnixNano: s2.UnixNano(),
+		RelativePath: command.RelativePath, StartByte: result.StartByte, ReturnedBytes: result.ReturnedBytes,
+		TotalBytes: result.TotalBytes, Complete: result.Complete, Content: result.Content, ContentDigest: result.ContentDigest,
+		S1CheckedUnixNano: qualification.S1CheckedUnixNano, S2CheckedUnixNano: s2Now.UnixNano(),
 		AdmissionReceipt: admissionBinding, ProviderReceipt: result.ProviderReceipt,
-	}, "workspace-read-observation-"+trimRuntimeDigestV1(string(authorization.StableKeyDigest)), s2, time.Unix(0, observationExpiresNano))
+	}, "workspace-read-observation-"+trimRuntimeDigestV1(qualification.ActualRequestDigest), s2Now, time.Unix(0, observationExpiry))
 	if err != nil {
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "observation-seal", err)
+		return e.persistWorkspaceReadIndeterminateV2(ctx, &transitionAuthority, qualification, inspection.JournalEvidence, contract.WorkspaceReadIndeterminateErrorS2DriftedV2)
 	}
-	transition, err := transitionAuthority.Observed(observation, s2)
+	transition, err := transitionAuthority.Observed(observation, s2Now)
+	if err == nil {
+		_, err = e.authorizedStore.TransitionWorkspaceReadAuthorizedV2(ctx, transition)
+	}
 	if err != nil {
-		return receipt, e.markWorkspaceReadUnknownV1(ctx, transitionAuthority, "observation-authority", err)
+		stored, inspectErr := e.store.InspectBoundedWorkspaceReadV1(ctx, qualification.OriginAttempt)
+		if inspectErr != nil || stored.Attempt.State != contract.WorkspaceReadObservedV1 || stored.Observation == nil || stored.Observation.Meta.Ref() != observation.Meta.Ref() || !reflect.DeepEqual(*stored.Observation, observation) {
+			return e.persistWorkspaceReadIndeterminateV2(ctx, &transitionAuthority, qualification, inspection.JournalEvidence, contract.WorkspaceReadIndeterminateErrorRecoveryUnknownV2)
+		}
 	}
-	if _, err = authorizedStore.TransitionWorkspaceReadAuthorizedV2(ctx, transition); err != nil {
-		return receipt, runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read observation persistence requires exact Inspect")
+	s2Authority, err := authorizeWorkspaceReadOutcomeS2V2(qualification, s2Association, publication, s2CommandCurrent, s2Workspace, s2Runtime, inspection.JournalEvidence, observation.Meta.Ref(), result.ProviderReceipt, s2Now.UnixNano())
+	if err != nil {
+		return e.persistWorkspaceReadIndeterminateV2(ctx, &transitionAuthority, qualification, inspection.JournalEvidence, contract.WorkspaceReadIndeterminateErrorS2DriftedV2)
 	}
-	return receipt, nil
+	recorded := e.clock()
+	if recorded.IsZero() || recorded.Before(s2Now) {
+		return e.persistWorkspaceReadIndeterminateV2(ctx, &transitionAuthority, qualification, inspection.JournalEvidence, contract.WorkspaceReadIndeterminateErrorRecoveryUnknownV2)
+	}
+	terminalAuthority, err := buildWorkspaceReadObservedTerminalV2(qualification, inspection.JournalEvidence, s2Authority, s2Now.UnixNano(), recorded.UnixNano())
+	if err != nil {
+		return err
+	}
+	terminal, _, err := e.postActual.CreateOrInspectKernelTerminalV2(ctx, terminalAuthority)
+	if err != nil {
+		if recovered, inspectErr := e.postActual.InspectWorkspaceReadTerminalByOriginV2(ctx, qualification.OriginAttempt); inspectErr == nil {
+			return workspaceReadTerminalOutcomeErrorV2(recovered)
+		}
+		return runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read terminal commit outcome is unknown")
+	}
+	return workspaceReadTerminalOutcomeErrorV2(terminal)
+}
+
+func workspaceReadS2ErrorClassV2(err error) contract.WorkspaceReadIndeterminateErrorClassV2 {
+	if runtimecore.HasReason(err, runtimecore.ReasonBindingExpired) || runtimecore.HasReason(err, runtimecore.ReasonCapabilityExpired) || runtimecore.HasReason(err, runtimecore.ReasonDispatchPermitExpired) {
+		return contract.WorkspaceReadIndeterminateErrorS2ExpiredV2
+	}
+	if runtimecore.HasCategory(err, runtimecore.ErrorUnavailable) {
+		return contract.WorkspaceReadIndeterminateErrorS2UnavailableV2
+	}
+	return contract.WorkspaceReadIndeterminateErrorS2DriftedV2
+}
+
+func (e *WorkspaceReadPhysicalExecutorV1) persistWorkspaceReadIndeterminateV2(ctx context.Context, transitionAuthority *ownerworkspaceread.AuthorizedExecutionV2, qualification contract.WorkspaceReadExecutionQualificationV2, evidence workspaceReadPhysicalJournalEvidenceV2, class contract.WorkspaceReadIndeterminateErrorClassV2) error {
+	journal, err := evidence.JournalV2()
+	if err != nil {
+		return sandboxports.ErrConflict
+	}
+	errorDigest, err := contract.Digest("workspace-read-post-actual-indeterminate-v2", struct {
+		Qualification contract.WorkspaceReadExecutionQualificationRefV2 `json:"qualification"`
+		Journal       contract.WorkspaceReadPhysicalJournalRefV2        `json:"journal"`
+		Class         contract.WorkspaceReadIndeterminateErrorClassV2   `json:"class"`
+	}{qualification.Ref, journal, class})
+	if err != nil {
+		return err
+	}
+	checked := e.clock()
+	if checked.IsZero() || checked.UnixNano() < journal.RecordedUnixNano {
+		checked = time.Unix(0, journal.RecordedUnixNano)
+	}
+	unknown, err := authorizeWorkspaceReadIndeterminateV2(qualification, evidence, class, errorDigest, checked.UnixNano())
+	if err != nil {
+		return err
+	}
+	recorded := e.clock()
+	if recorded.IsZero() || recorded.Before(checked) {
+		recorded = checked
+	}
+	terminalAuthority, err := buildWorkspaceReadIndeterminateTerminalV2(qualification, evidence, unknown, checked.UnixNano(), recorded.UnixNano())
+	if err != nil {
+		return err
+	}
+	terminal, _, createErr := e.postActual.CreateOrInspectKernelTerminalV2(ctx, terminalAuthority)
+	if createErr != nil {
+		if recovered, inspectErr := e.postActual.InspectWorkspaceReadTerminalByOriginV2(ctx, qualification.OriginAttempt); inspectErr == nil {
+			return workspaceReadTerminalOutcomeErrorV2(recovered)
+		}
+		return runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read indeterminate terminal commit outcome is unknown")
+	}
+	if terminal.Outcome != contract.WorkspaceReadTerminalIndeterminateV2 {
+		return sandboxports.ErrConflict
+	}
+	// V20 is authoritative. The V1 transition is compatibility-only and cannot
+	// override or delay the durable terminal.
+	if transitionAuthority != nil {
+		if transition, transitionErr := transitionAuthority.Unknown(errorDigest, checked); transitionErr == nil {
+			_, _ = e.authorizedStore.TransitionWorkspaceReadAuthorizedV2(ctx, transition)
+		}
+	}
+	return runtimecore.NewError(runtimecore.ErrorIndeterminate, runtimecore.ReasonEffectUnknownOutcome, "workspace read post-actual outcome is indeterminate ("+string(class)+"); inspect the original terminal")
+}
+
+// workspaceReadCurrentQueryWatermarkV2 derives request identity only from the
+// authoritative source facts. The caller's wall clock is a currentness gate,
+// not part of the replay identity; otherwise a crash would change the exact
+// Data Plane request even when every Owner fact stayed unchanged.
+func workspaceReadCurrentQueryWatermarkV2(
+	association runtimeports.PreparedDomainCommandAssociationCurrentProjectionV1,
+	command contract.WorkspaceReadCommandV1,
+	ownerCurrent contract.WorkspaceReadCommandOwnerCurrentV2,
+	workspace contract.WorkspaceView,
+	reservation contract.WorkspaceReadReservationV1,
+	attempt contract.WorkspaceReadAttemptV1,
+	admission contract.WorkspaceReadReceiptBindingV1,
+	runtimeCurrent runtimeports.CurrentOperationDispatchEnforcementV4,
+	currentNow time.Time,
+) (time.Time, error) {
+	watermark := int64(0)
+	for _, value := range []int64{
+		association.CheckedUnixNano,
+		command.Meta.UpdatedUnixNano,
+		ownerCurrent.Meta.UpdatedUnixNano,
+		ownerCurrent.CheckedUnixNano,
+		workspace.Meta.UpdatedUnixNano,
+		reservation.Meta.UpdatedUnixNano,
+		attempt.Meta.UpdatedUnixNano,
+		admission.CheckedUnixNano,
+		runtimeCurrent.CheckedUnixNano,
+	} {
+		if value <= 0 {
+			return time.Time{}, sandboxports.ErrConflict
+		}
+		if value > watermark {
+			watermark = value
+		}
+	}
+	checked := time.Unix(0, watermark)
+	if currentNow.IsZero() || checked.After(currentNow) {
+		return time.Time{}, runtimecore.NewError(runtimecore.ErrorPreconditionFailed, runtimecore.ReasonClockRegression, "workspace read request watermark is ahead of the current owner clock")
+	}
+	return checked, nil
 }
 
 func workspaceReadCurrentQueryV2(

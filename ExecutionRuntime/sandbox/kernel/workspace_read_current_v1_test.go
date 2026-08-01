@@ -1,4 +1,4 @@
-package dataplaneadapter_test
+package kernel_test
 
 import (
 	"context"

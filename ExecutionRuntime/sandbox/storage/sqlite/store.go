@@ -23,7 +23,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schemaVersion = 19
+const schemaVersion = 20
 
 const (
 	workspaceReadCommandCurrentTableDDLV19 = `CREATE TABLE IF NOT EXISTS workspace_read_command_current (
@@ -171,7 +171,34 @@ func (s *Store) initialize(ctx context.Context) error {
 		if err := verifyWorkspaceReadCommandPublicationSchemaV19(ctx, tx); err != nil {
 			return fmt.Errorf("%w: v19 workspace read Command publication schema drifted: %v", ports.ErrConflict, err)
 		}
+		if err := verifyWorkspaceReadPostActualSchemaV20(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v20 workspace read post-actual schema drifted: %v", ports.ErrConflict, err)
+		}
 		return tx.Commit()
+	}
+	if version == 19 {
+		if err := verifyWorkspaceReadCommandCurrentSchemaV19(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command current schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadCommandBodySealSchemaV1(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command body-seal schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadRuntimeAttemptBindingSchemaV2(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Runtime-attempt schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := verifyWorkspaceReadCommandPublicationSchemaV19(ctx, tx); err != nil {
+			return fmt.Errorf("%w: v19 workspace read Command publication schema drifted: %v", ports.ErrConflict, err)
+		}
+		if err := installWorkspaceReadPostActualSchemaV20(ctx, tx); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {
+			return fmt.Errorf("set Sandbox SQLite schema version: %w", err)
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit Sandbox SQLite schema: %w", err)
+		}
+		return nil
 	}
 	if err := preflightWorkspaceReadRuntimeAttemptBindingMigrationV2(ctx, tx, version); err != nil {
 		return err
@@ -224,6 +251,9 @@ func (s *Store) initialize(ctx context.Context) error {
 		return fmt.Errorf("write workspace read Command publication v19 schema ledger: %w", err)
 	}
 	if err := verifyWorkspaceReadCommandPublicationSchemaV19(ctx, tx); err != nil {
+		return err
+	}
+	if err := installWorkspaceReadPostActualSchemaV20(ctx, tx); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, fmt.Sprintf("PRAGMA user_version=%d", schemaVersion)); err != nil {

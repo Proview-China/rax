@@ -2,6 +2,7 @@ package kernel
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -33,6 +34,19 @@ func (p *countingWorkspaceReadActualPointV2) ReadWorkspaceFileV1(
 ) (WorkspaceReadActualPointResultV1, error) {
 	p.calls.Add(1)
 	return WorkspaceReadActualPointResultV1{}, nil
+}
+
+func (p *countingWorkspaceReadActualPointV2) PrepareWorkspaceReadV2(context.Context, WorkspaceReadActualPointRequestV1) (WorkspaceReadActualPointPreparationV2, error) {
+	return nil, errors.New("unexpected physical prepare")
+}
+
+func (p *countingWorkspaceReadActualPointV2) DispatchPreparedWorkspaceReadV2(context.Context, WorkspaceReadActualPointPreparationV2) (WorkspaceReadActualPointResultV1, error) {
+	p.calls.Add(1)
+	return WorkspaceReadActualPointResultV1{}, errors.New("unexpected physical dispatch")
+}
+
+func (p *countingWorkspaceReadActualPointV2) InspectWorkspaceReadJournalV2(context.Context, contract.WorkspaceReadExecutionQualificationV2) (WorkspaceReadActualPointInspectionV2, error) {
+	return WorkspaceReadActualPointInspectionV2{}, ErrWorkspaceReadPhysicalJournalNotFoundV2
 }
 
 func TestWorkspaceReadInspectionV2SixtyFourConcurrentReadsNeverReachPhysicalPoint(t *testing.T) {

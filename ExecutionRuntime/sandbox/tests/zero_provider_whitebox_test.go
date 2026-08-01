@@ -98,7 +98,10 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 		statePlaneAdapter := strings.HasPrefix(relative, filepath.Join("storage", "sqlite")+string(filepath.Separator))
 		workspaceDriver := strings.HasPrefix(relative, "workspacefs"+string(filepath.Separator))
 		workspaceReadRuntimeEntry := relative == filepath.Join("kernel", "workspace_read_v1.go") ||
+			relative == filepath.Join("kernel", "workspace_read_actual_point_v2.go") ||
+			relative == filepath.Join("kernel", "workspace_read_terminal_authority_v2.go") ||
 			relative == filepath.Join("ports", "workspace_read_v1.go") ||
+			relative == filepath.Join("ports", "workspace_read_actual_point_v2.go") ||
 			relative == filepath.Join("ports", "workspace_read_current_v1.go") ||
 			relative == filepath.Join("ports", "workspace_read_admission_attempt_binding_v2.go") ||
 			relative == filepath.Join("internal", "owner", "workspaceread", "authorized_reservation_v2.go") ||
@@ -107,7 +110,9 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 			// this allowlist exact; Runtime implementation/write packages
 			// remain rejected by the import check below.
 			relative == filepath.Join("contract", "workspace_read_command_publication_v2.go") ||
+			relative == filepath.Join("contract", "workspace_read_post_actual_v2.go") ||
 			relative == filepath.Join("internal", "owner", "workspaceread", "authorized_command_publication_v2.go") ||
+			relative == filepath.Join("internal", "owner", "workspaceread", "post_actual_v2.go") ||
 			relative == filepath.Join("kernel", "workspace_read_command_publication_v2.go")
 		if relative, _ := filepath.Rel(root, path); strings.HasPrefix(relative, "runtimeadapter"+string(filepath.Separator)) {
 			payload, err := os.ReadFile(path)
@@ -129,9 +134,11 @@ func TestProductionSurfaceKeepsSideEffectsInsideApprovedDataPlaneAdapter(t *test
 			if err != nil {
 				return err
 			}
+			privateWorkspaceReadIPC := relative == filepath.Join("kernel", "workspace_read_actual_point_v2.go")
 			approvedTransportImport := (apiTransport && importPath == "net/http") ||
 				(cliTransport && (importPath == "net" || importPath == "net/http" || importPath == "os")) ||
-				(hostRoot && (importPath == "net" || importPath == "net/http"))
+				(hostRoot && (importPath == "net" || importPath == "net/http")) ||
+				(privateWorkspaceReadIPC && (importPath == "net" || importPath == "syscall"))
 			if forbiddenStandardLibrary[importPath] && !dataPlaneAdapter && !statePlaneAdapter && !(workspaceDriver && importPath == "os") && !approvedTransportImport {
 				t.Errorf("production file %s imports forbidden side-effect package %q", path, importPath)
 			}
@@ -281,11 +288,24 @@ func TestWorkspaceReadCommandPublicationV2HasNoPhysicalOrRuntimeWriteBypass(t *t
 	}
 	serverBody := mustReadProductionFile(t, filepath.Join(root, "dataplaneadapter", "current_server.go"))
 	for _, required := range []string{
-		"WorkspaceReadCurrentV2 *runtimeadapter.WorkspaceReadCurrentAdapterV2",
+		"WorkspaceReadCurrentV2 workspaceReadCurrentPhysicalReaderV2",
 		"!s.WorkspaceReadCurrentV2.PhysicalQualifiedV2()",
 	} {
 		if strings.Count(serverBody, required) != 1 {
 			t.Errorf("CurrentServer physical-qualified V2 gate %q is missing or duplicated", required)
+		}
+	}
+	clientBody := mustReadProductionFile(t, filepath.Join(root, "dataplaneadapter", "client.go"))
+	if strings.Count(clientBody, `request.Payload.ProviderKind == "workspace_read" || request.EffectKind == "praxis.sandbox/workspace-read"`) != 1 {
+		t.Error("public Data Plane Client.Dispatch does not fail closed for workspace.read")
+	}
+	privateActualPointBody := mustReadProductionFile(t, filepath.Join(root, "kernel", "workspace_read_actual_point_v2.go"))
+	for _, forbidden := range []string{
+		"type WorkspaceReadActualPointAdapter", "func NewWorkspaceReadActualPointAdapter",
+		".Client.Dispatch(ctx, request)", ".client.Dispatch(ctx, request)",
+	} {
+		if strings.Contains(privateActualPointBody, forbidden) {
+			t.Errorf("private workspace.read actual point regained public/raw dispatch surface %q", forbidden)
 		}
 	}
 	for _, forbidden := range []string{

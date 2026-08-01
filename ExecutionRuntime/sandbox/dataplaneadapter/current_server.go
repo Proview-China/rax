@@ -15,8 +15,12 @@ import (
 	runtimeports "github.com/Proview-China/rax/ExecutionRuntime/runtime/ports"
 	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/contract"
 	sandboxports "github.com/Proview-China/rax/ExecutionRuntime/sandbox/ports"
-	"github.com/Proview-China/rax/ExecutionRuntime/sandbox/runtimeadapter"
 )
+
+type workspaceReadCurrentPhysicalReaderV2 interface {
+	PhysicalQualifiedV2() bool
+	InspectWorkspaceReadCurrentV2(context.Context, sandboxports.WorkspaceReadCurrentQueryV2) (sandboxports.WorkspaceReadCurrentProjectionV2, error)
+}
 
 type CurrentReadResponseV1 struct {
 	Authorization *CurrentAuthorizationV1 `json:"authorization"`
@@ -31,7 +35,7 @@ type CurrentServer struct {
 	CheckpointGovernance   runtimeports.CheckpointRestoreDispatchEnforcementGovernancePortV1
 	Sandbox                sandboxports.ExactCurrentStore
 	WorkspaceReadCurrent   sandboxports.WorkspaceReadCurrentProjectionReaderV1
-	WorkspaceReadCurrentV2 *runtimeadapter.WorkspaceReadCurrentAdapterV2
+	WorkspaceReadCurrentV2 workspaceReadCurrentPhysicalReaderV2
 	Now                    func() time.Time
 }
 
